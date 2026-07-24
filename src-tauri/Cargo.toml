@@ -1,0 +1,34 @@
+[package]
+name = "nekossh"
+version = "0.1.0"
+description = "A security-first SSH workspace for NekoSSH"
+authors = ["NekoSSH contributors"]
+edition = "2024"
+rust-version = "1.96"
+license = "MIT"
+repository = "https://github.com/neko233/nekossh"
+build = "build.rs"
+
+[lib]
+name = "nekossh_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+argon2 = "0.5.3"
+base64 = "0.22.1"
+chacha20poly1305 = { version = "0.10.1", features = ["std"] }
+getrandom = "0.3.4"
+git2 = { version = "0.20.4", default-features = false, features = ["https", "ssh", "vendored-libgit2"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.10.9"
+tauri = { version = "2.11.5", features = [] }
+tauri-plugin-opener = "2.5.4"
+thiserror = "2.0.17"
+url = "2.5.8"
+ureq = { version = "3.3.0", default-features = false, features = ["rustls"] }
+uuid = { version = "1.24.0", features = ["v4", "serde"] }
+zeroize = { version = "1.8.2", features = ["derive"] }
