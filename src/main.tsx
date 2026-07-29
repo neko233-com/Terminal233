@@ -1,10 +1,14 @@
-import React from 'react'
+import React, { lazy, Suspense } from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App'
-import './styles.css'
+
+const RuntimeApp = import.meta.env.MODE === 'web'
+  ? lazy(() => import('./components/WebMacWorkspace').then((module) => ({ default: module.WebMacWorkspace })))
+  : lazy(() => import('./TauriIdeApp'))
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#0d1015' }} />}>
+      <RuntimeApp />
+    </Suspense>
   </React.StrictMode>,
 )

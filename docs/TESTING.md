@@ -1,51 +1,63 @@
 # NekoSSH 测试说明
 
-## 可复现的本地验证
+## 自动验证
 
 ```powershell
 npm ci
 npm run build
+npm run web:build
 npm test
 cargo test --manifest-path src-tauri/Cargo.toml
 npm audit
+node --check server/ssh2js-server.mjs
 ```
 
-本 checkout 在 2026-07-24 的本地验证结果为：
+本 checkout 于 2026-07-29 实测：
 
-| 命令 | 实测结果 |
-| --- | --- |
-| `npm test` | 4 个测试文件、21 个测试通过。 |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | `nekossh_lib` 38 个单元测试通过；`main` 与 doc-tests 当前均为 0。 |
+- 前端：5 个测试文件、22 项测试通过。
+- Node：9 项会话生命周期、真实本地 SSH fixture 与并发终端测试通过。
+- Rust：16 项测试通过。
+- Tauri 与 Web 两种生产构建均通过，且互不包含对方主界面 chunk。
 
-这些是当前代码与锁定依赖的可核验计数，不是永久承诺；增加或删除测试时，应同时更新本表并以命令输出为准。
+自动测试应覆盖：
 
-## 已覆盖的自动化边界
+- Tauri 只注册 `ide_*` IPC，不注册 Vault、同步、外部 SSH 或 opener 命令。
+- Rust `ssh2` 的 host-key prepare/trust/mismatch、PTY 边界与 SFTP 输入限制。
+- Web API 的 Origin、cookie owner、连接 TTL、terminal output 上限与两阶段删除。
+- MCP token、版本协商、一次性 grant、attachment 隔离、scope 与硬 TTL。
+- 页面刷新/退出清理、活跃连接续期、过期连接不复活、共享 SSH transport 的通道错误隔离。
+- Tauri 与 Web 两种 Vite mode 分别构建，不携带另一入口的主界面 chunk。
 
-| 层级 | 当前覆盖 |
-| --- | --- |
-| Web 前端预览 | 工作区切换、只读终端/桌面预览、预览不采集 Vault/云凭据、不建立 SSH、浏览器 URL 预校验与用户显式新标签打开。 |
-| 桌面前端桥接 | Vault/Profile 加载、受限 `profile_create`、外部 SSH 启动、WebDAV/Git 上传命令、Rust 内恢复命令和 Git HTTPS token 表单约束。 |
-| 加密 Vault | 新建/锁定/解锁、改密重新包装、格式篡改、KDF 下限/上限、AEAD 关联数据、导入密码验证、锁定要求、`.bak` 回滚与恢复。 |
-| SSH / opener | 无 shell 的 OpenSSH 参数、应用专属 known-hosts、`accept-new`/禁用全局 known-hosts、Windows Terminal argv、固定 Windows 程序路径约束、CSP/capability 与禁止自动 opener 链接。 |
-| 同步 | WebDAV 加密字节、创建条件、ETag 校验、下载大小限制；Git token 不泄露、HTTPS origin 绑定、非强制 push 拒绝、Git SSH/token 缺失拒绝，以及真实 libgit2 本地 `file://` round-trip。 |
+## 已完成的真实主机验证
 
-WebDAV 自动测试使用受控 transport double，不是实际 WebDAV 服务器；Git 的“真实”回环测试使用本地 `file://` bare remote，不测试互联网 HTTPS、令牌提供商或证书链。测试通过不等于这些外部服务已验收。
+2026-07-29 使用用户授权的隔离 SSH 主机完成 Node `ssh2js` 路径验证：
 
-## 发布前手工验收
+- 首次主机密钥确认与密码认证。
+- 持久 PTY 写入、轮询输出。
+- SFTP `/tmp` 列表。
+- 创建临时目录、上传测试文件、改名、下载并校验内容。
+- 两阶段删除测试文件与空目录，远端临时数据已清理。
+- MCP grant → attachment → `ssh_exec`。
 
-1. 在干净桌面环境创建 Vault；短于 12 字符的主密码必须失败，改密后旧密码必须无法解锁。
-2. 尝试导入错误密码、篡改 nonce/密文/KDF/格式的包；本地 Vault 不得被锁定、替换或损坏。
-3. 使用真实 HTTPS WebDAV：首次上传、带 ETag 的后续上传、409/412 冲突、缺失 ETag、重定向、无效证书、超时和大于 16 MiB 下载都应安全失败。
-4. 使用真实 GitHub/Gitea HTTPS 私有仓库与最小权限 token：确认 token 不出现在 remote URL、进程、日志或回执；模拟并发 push，确认不会 force-push 覆盖远端。
-5. 对 WebDAV 和 Git 分别执行安全恢复：下载后先以备份密码验证，导入后 Vault 保持锁定；再用导入前旧密码验证 `.bak` 回滚。
-6. Windows 上确认仅在 `%SystemRoot%\System32\OpenSSH\ssh.exe` 和 `%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe` 存在时启动；新标签中的第一次连接写入应用专属 `neko233-known_hosts`，变更主机密钥必须被拒绝。
-7. 确认浏览器、桌面和终端预览不显示“已连接”、不执行命令、不读取远端内容，也不向 Web 运行时暴露 Vault 凭据。
+验证过程没有把密码写入仓库、Vault 或日志。
 
-## 仍需补齐的测试
+## 外部浏览器 GUI 回归
 
-- 真实 WebDAV 服务和真实 HTTPS Git 服务的隔离集成测试（含 TLS、重定向、认证失败、冲突与网络重试）。
-- Tauri 桌面端到端测试：capability、CSP、外部 opener、Windows Terminal、应用数据目录权限和恢复 UI。
-- 真实 SSHD + PTY 集成测试；Vault 内 PEM 私钥的内嵌 transport 目前尚未实现。
-- 多设备同步的版本选择/合并 UX、可访问性、窄屏布局和视觉回归测试。
+2026-07-29 使用本机 Playwright 浏览器验证：
 
-在这些外部集成与发布测试接入 CI 前，NekoSSH 应保持为明确标记边界的 0.1 原型。
+- macOS 桌面、Dock 关闭/重开、窗口拖拽。
+- Finder 目录导航、右键菜单、删除确认、文件拖放上传。
+- Terminal 输入与输出渲染。
+- Agent 窗口与一次性授权生成。
+- `5173` 被其他项目占用时，启动脚本自动使用 `5174`；停止后本次监听全部清理。
+
+当次真实主机后来开始主动关闭 `ssh2` 握手；GUI 回归使用网络模拟响应，只验证界面交互，不计为新增远端功能验证。真实 SSH/SFTP/MCP 结果以上一节为准。
+
+## 手工验收
+
+1. `npm run web` 必须打开系统默认浏览器，而不是 Tauri WebView。
+2. Web macOS 必须显示桌面、Dock、Terminal、Finder、可拖拽窗口、文件拖放和中文右键菜单。
+3. `npm run tauri:dev` 必须显示传统 SSH IDE：连接列表、中文连接过程、左文件区、中终端、右会话状态。
+4. 两端首次连接都必须显示指纹；拒绝或关闭时不得继续认证。
+5. 断开后终端、传输、Agent attachment 与进程内密码必须失效。
+6. 使用错误 Origin、错误 MCP token、错误协议版本和过期 attachment 时必须被拒绝。

@@ -1,61 +1,43 @@
-//! NekoSSH desktop backend.
+//! NekoSSH native Tauri v2 SSH IDE backend.
 //!
-//! The desktop shell receives only the narrow IPC commands registered in `run`.  Sensitive vault
-//! values are encrypted at rest and are never returned to frontend code after profile creation.
+//! The desktop path is deliberately independent from the browser workspace. It keeps SSH
+//! connection material in memory and uses Rust `ssh2` directly, without an external SSH client.
 
-mod commands;
-pub mod crypto;
 pub mod domain;
+pub mod ephemeral;
 pub mod error;
-pub mod sync;
-pub mod vault;
+mod ide_commands;
+mod sftp_transfer;
+mod ssh;
+mod ssh_terminal;
 
 use tauri::Manager;
 
-pub use commands::VaultState;
-
 pub fn run() {
     tauri::Builder::default()
-        // Do not let the opener plugin inject its default `_blank`/modified-click handler into
-        // the webview.  Browser launches must pass through `browser_open_url`, which validates
-        // scheme, host, and embedded credentials in Rust first.
-        .plugin(
-            tauri_plugin_opener::Builder::new()
-                .open_js_links_on_click(false)
-                .build(),
-        )
         .setup(|app| {
-            let vault_path = app.path().app_data_dir()?.join(vault::VAULT_FILENAME);
-            app.manage(commands::VaultState::new(vault_path));
+            app.manage(ide_commands::IdeState::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::vault_status,
-            commands::vault_bootstrap,
-            commands::vault_unlock,
-            commands::vault_lock,
-            commands::vault_change_password,
-            commands::profile_create,
-            commands::profile_list,
-            commands::profile_get,
-            commands::ssh_session_plan,
-            commands::ssh_launch_external,
-            commands::profile_update,
-            commands::profile_delete,
-            commands::sync_configure,
-            commands::sync_configuration,
-            commands::sync_export_encrypted_bundle,
-            commands::sync_verify_encrypted_bundle,
-            commands::sync_import_encrypted_bundle,
-            commands::sync_restore_import_backup,
-            commands::sync_upload_plan,
-            commands::sync_webdav_upload,
-            commands::sync_webdav_download_encrypted_bundle,
-            commands::sync_git_upload,
-            commands::sync_git_download_encrypted_bundle,
-            commands::sync_git_restore_import,
-            commands::sync_webdav_restore_import,
-            commands::browser_open_url,
+            ide_commands::ide_connection_create,
+            ide_commands::ide_connection_list,
+            ide_commands::ide_connection_disconnect,
+            ide_commands::ide_ssh_prepare,
+            ide_commands::ide_ssh_trust_host_key,
+            ide_commands::ide_ssh_reject_host_key,
+            ide_commands::ide_ssh_exec,
+            ide_commands::ide_sftp_list,
+            ide_commands::ide_sftp_upload_start,
+            ide_commands::ide_sftp_download_start,
+            ide_commands::ide_sftp_transfer_cancel,
+            ide_commands::ide_sftp_mkdir,
+            ide_commands::ide_sftp_rename,
+            ide_commands::ide_sftp_delete,
+            ide_commands::ide_terminal_start,
+            ide_commands::ide_terminal_write,
+            ide_commands::ide_terminal_resize,
+            ide_commands::ide_terminal_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NekoSSH desktop application");
@@ -82,7 +64,7 @@ mod configuration_tests {
     }
 
     #[test]
-    fn capability_does_not_expose_the_opener_plugin_to_webview_code() {
+    fn capability_does_not_expose_external_process_or_opener_permissions() {
         let capability: serde_json::Value =
             serde_json::from_str(include_str!("../capabilities/default.json"))
                 .expect("valid capability JSON");
@@ -94,10 +76,10 @@ mod configuration_tests {
                 .as_str()
                 .is_some_and(|permission| permission.starts_with("opener:"))
         }));
-    }
-
-    #[test]
-    fn opener_plugin_does_not_install_automatic_webview_link_handlers() {
-        assert!(include_str!("lib.rs").contains("open_js_links_on_click(false)"));
+        assert!(permissions.iter().all(|permission| {
+            !permission
+                .as_str()
+                .is_some_and(|permission| permission.starts_with("shell:"))
+        }));
     }
 }

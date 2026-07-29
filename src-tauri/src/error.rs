@@ -63,6 +63,66 @@ pub enum VaultError {
     ExternalTerminalUnavailable,
     #[error("unable to launch the local OpenSSH client")]
     ExternalSshLaunchFailed,
+    #[error("unable to establish the SSH connection")]
+    SshConnectionFailed,
+    #[error("unable to complete the SSH handshake")]
+    SshHandshakeFailed,
+    #[error("the SSH server did not present a supported host key")]
+    SshHostKeyUnavailable,
+    #[error("the SSH host key is not trusted yet")]
+    SshHostKeyUntrusted,
+    #[error("the SSH host key does not match the trusted key")]
+    SshHostKeyMismatch,
+    #[error("the SSH host-key confirmation has expired")]
+    SshHostKeyConfirmationExpired,
+    #[error("the SSH authentication method is not supported by this desktop build")]
+    SshAuthenticationUnsupported,
+    #[error("SSH authentication failed")]
+    SshAuthenticationFailed,
+    #[error("the SSH command is invalid")]
+    SshCommandInvalid,
+    #[error("the SSH command could not complete")]
+    SshCommandFailed,
+    #[error("the remote directory path is invalid")]
+    SshDirectoryPathInvalid,
+    #[error("the remote directory could not be listed")]
+    SshDirectoryListFailed,
+    #[error("the SFTP transfer request is invalid")]
+    SshTransferInputInvalid,
+    #[error("too many SFTP transfer jobs are active")]
+    SshTransferJobLimit,
+    #[error("an SFTP transfer file exceeds the supported size")]
+    SshTransferFileTooLarge,
+    #[error("the combined SFTP transfer exceeds the supported size")]
+    SshTransferTotalTooLarge,
+    #[error("the SFTP transfer job was not found")]
+    SshTransferJobNotFound,
+    #[error("the SFTP transfer could not complete")]
+    SshTransferFailed,
+    #[error("the SSH terminal could not be started")]
+    SshTerminalStartFailed,
+    #[error("the SSH terminal size is invalid")]
+    SshTerminalResizeInvalid,
+    #[error("too many SSH terminal sessions are open")]
+    SshTerminalSessionLimit,
+    #[error("the SSH terminal session was not found")]
+    SshTerminalSessionNotFound,
+    #[error("the SSH terminal input is too large")]
+    SshTerminalInputTooLarge,
+    #[error("the SSH terminal input queue is busy")]
+    SshTerminalInputBackpressure,
+    #[error("one-click SSH key setup requires a password-authenticated profile")]
+    SshKeyBootstrapRequiresPassword,
+    #[error("the SSH profile changed while its key was being configured")]
+    SshKeyBootstrapProfileChanged,
+    #[error("SSH key setup is already running for this profile")]
+    SshKeyBootstrapInProgress,
+    #[error("the SSH key could not be configured on the remote host")]
+    SshKeyBootstrapFailed,
+    #[error("an isolated temporary SSH key file could not be prepared")]
+    SshTemporaryKeyFileFailed,
+    #[error("the temporary SSH key file could not be removed")]
+    SshTemporaryKeyCleanupFailed,
     #[error("the encrypted vault changed on disk; lock and reopen it before changing the password")]
     VaultChangedOnDisk,
     #[error("lock the vault before replacing it with an encrypted backup")]
@@ -111,6 +171,36 @@ impl VaultError {
             Self::ExternalSshUnavailable => "external_ssh_unavailable",
             Self::ExternalTerminalUnavailable => "external_terminal_unavailable",
             Self::ExternalSshLaunchFailed => "external_ssh_launch_failed",
+            Self::SshConnectionFailed => "ssh_connection_failed",
+            Self::SshHandshakeFailed => "ssh_handshake_failed",
+            Self::SshHostKeyUnavailable => "ssh_host_key_unavailable",
+            Self::SshHostKeyUntrusted => "ssh_host_key_untrusted",
+            Self::SshHostKeyMismatch => "ssh_host_key_mismatch",
+            Self::SshHostKeyConfirmationExpired => "ssh_host_key_confirmation_expired",
+            Self::SshAuthenticationUnsupported => "ssh_authentication_unsupported",
+            Self::SshAuthenticationFailed => "ssh_authentication_failed",
+            Self::SshCommandInvalid => "ssh_command_invalid",
+            Self::SshCommandFailed => "ssh_command_failed",
+            Self::SshDirectoryPathInvalid => "ssh_directory_path_invalid",
+            Self::SshDirectoryListFailed => "ssh_directory_list_failed",
+            Self::SshTransferInputInvalid => "ssh_transfer_input_invalid",
+            Self::SshTransferJobLimit => "ssh_transfer_job_limit",
+            Self::SshTransferFileTooLarge => "ssh_transfer_file_too_large",
+            Self::SshTransferTotalTooLarge => "ssh_transfer_total_too_large",
+            Self::SshTransferJobNotFound => "ssh_transfer_job_not_found",
+            Self::SshTransferFailed => "ssh_transfer_failed",
+            Self::SshTerminalStartFailed => "ssh_terminal_start_failed",
+            Self::SshTerminalResizeInvalid => "ssh_terminal_resize_invalid",
+            Self::SshTerminalSessionLimit => "ssh_terminal_session_limit",
+            Self::SshTerminalSessionNotFound => "ssh_terminal_session_not_found",
+            Self::SshTerminalInputTooLarge => "ssh_terminal_input_too_large",
+            Self::SshTerminalInputBackpressure => "ssh_terminal_input_backpressure",
+            Self::SshKeyBootstrapRequiresPassword => "ssh_key_bootstrap_requires_password",
+            Self::SshKeyBootstrapProfileChanged => "ssh_key_bootstrap_profile_changed",
+            Self::SshKeyBootstrapInProgress => "ssh_key_bootstrap_in_progress",
+            Self::SshKeyBootstrapFailed => "ssh_key_bootstrap_failed",
+            Self::SshTemporaryKeyFileFailed => "ssh_temporary_key_file_failed",
+            Self::SshTemporaryKeyCleanupFailed => "ssh_temporary_key_cleanup_failed",
             Self::VaultChangedOnDisk => "vault_changed_on_disk",
             Self::VaultMustBeLockedForImport => "vault_must_be_locked_for_import",
             Self::VaultImportBackupMissing => "vault_import_backup_missing",
