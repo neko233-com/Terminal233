@@ -79,6 +79,20 @@ test('browser session rotation cleans owner resources and stale release is harml
     assert.equal(invalid.status, 400)
     assert.equal((await (await list(firstCookie)).json()).length, 1)
 
+    const invalidPort = await fetch(`${baseUrl}/api/connections`, {
+      method: 'POST',
+      headers: { origin, cookie: firstCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        label: 'invalid-port',
+        host: 'host.test',
+        port: 0,
+        username: 'tester',
+        authentication: { kind: 'password', password: 'temporary-test-password' },
+      }),
+    })
+    assert.equal(invalidPort.status, 400)
+    assert.equal((await (await list(firstCookie)).json()).length, 1)
+
     assert.equal((await create(firstCookie, 'host-two.test')).status, 201)
     const replaced = await (await list(firstCookie)).json()
     assert.deepEqual(replaced.map((item) => item.host), ['host-two.test'])
@@ -212,8 +226,13 @@ test('rejected shell channel leaves the authenticated SSH transport and first te
     assert.equal(write.status, 204)
     await new Promise((resolve) => setTimeout(resolve, 30))
     const poll = await fetch(`${baseUrl}/api/terminals/${firstTerminal.terminalId}/poll?cursor=0`, { headers: { origin, cookie } })
-    const output = (await poll.json()).chunks.map((chunk) => chunk.data).join('')
-    assert.match(output, /echo:still-alive/)
+    const pollPayload = await poll.json()
+    assert.equal(pollPayload.truncated, false)
+    assert.ok(pollPayload.chunks.every((chunk) => chunk.bytes === Buffer.from(chunk.dataBase64, 'base64').length))
+    const output = pollPayload.chunks
+      .map((chunk) => Buffer.from(chunk.dataBase64, 'base64'))
+    const terminalOutput = Buffer.concat(output).toString('utf8')
+    assert.match(terminalOutput, /echo:still-alive/)
 
     assert.equal((await startTerminal()).status, 201)
     assert.equal(transportCount, 2)

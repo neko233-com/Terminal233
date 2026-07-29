@@ -26,8 +26,15 @@ export interface DirectoryListing {
 }
 
 export interface TerminalStarted { terminalId: string }
-export interface TerminalChunk { cursor: number; data: string }
-export interface TerminalPoll { cursor: number; chunks: TerminalChunk[]; closed: boolean; exitStatus: number | null; error: string | null }
+export interface TerminalChunk { cursor: number; dataBase64: string; bytes: number }
+export interface TerminalPoll {
+  cursor: number
+  chunks: TerminalChunk[]
+  truncated: boolean
+  closed: boolean
+  exitStatus: number | null
+  error: string | null
+}
 export interface DeleteConfirmation { confirmationId: string; expiresInSeconds: number }
 export interface AgentGrant { grant: string; expiresInSeconds: number }
 interface BrowserSessionStarted { ok: true; releaseId: string }
@@ -166,11 +173,25 @@ export function commitDelete(id: string, confirmationId: string): Promise<void> 
 }
 
 export async function uploadFiles(id: string, remoteDirectory: string, files: File[]): Promise<{ uploaded: number; bytes: number }> {
-  const payload = await Promise.all(files.map(async (file) => ({
-    name: file.name,
-    dataBase64: toBase64(await file.arrayBuffer()),
-    overwrite: false,
-  })))
+  if (files.length < 1 || files.length > 32) {
+    throw new WebApiError('invalid_upload', '每次只能上传 1 到 32 个文件。')
+  }
+  const oversized = files.find((file) => file.size > 16 * 1024 * 1024)
+  if (oversized) {
+    throw new WebApiError('file_too_large', `“${oversized.name}”超过 16 MB 的单文件上限。`)
+  }
+  const totalBytes = files.reduce((total, file) => total + file.size, 0)
+  if (totalBytes > 45 * 1024 * 1024) {
+    throw new WebApiError('upload_too_large', '单次上传总量不能超过 45 MB。')
+  }
+  const payload = []
+  for (const file of files) {
+    payload.push({
+      name: file.name,
+      dataBase64: toBase64(await file.arrayBuffer()),
+      overwrite: false,
+    })
+  }
   return request(`/api/connections/${id}/files/upload`, {
     method: 'POST',
     body: JSON.stringify({ remoteDirectory, files: payload }),
@@ -204,4 +225,11 @@ function toBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk))
   }
   return btoa(binary)
+}
+
+export function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return bytes
 }

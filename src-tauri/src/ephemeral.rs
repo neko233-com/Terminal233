@@ -13,9 +13,11 @@ use uuid::Uuid;
 
 use crate::{
     domain::{HostKeyVerification, KnownHostRecord, KnownHosts, SshProfile, SshProfileInput},
-    error::{Result, VaultError},
+    error::{NekoError, Result},
     ssh::SshProfileStore,
 };
+
+const MAX_EPHEMERAL_CONNECTIONS: usize = 64;
 
 pub const CONNECTION_IDLE_TTL: Duration = Duration::from_secs(30 * 60);
 const AGENT_GRANT_TTL: Duration = Duration::from_secs(5 * 60);
@@ -78,8 +80,10 @@ impl EphemeralConnectionStore {
     ) -> Result<EphemeralConnectionSummary> {
         let profile = SshProfile::from_input(input, now_unix_ms())?;
         let summary = summary_for(&profile, CONNECTION_IDLE_TTL);
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
+        if state.connections.len() >= MAX_EPHEMERAL_CONNECTIONS {
+            return Err(NekoError::ProfileLimit);
+        }
         state.connections.insert(
             profile.id,
             Connection {
@@ -95,13 +99,13 @@ impl EphemeralConnectionStore {
     }
 
     pub fn browser_connection(&self, owner: Uuid, id: Uuid) -> Result<EphemeralConnectionSummary> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
+        let now = Instant::now();
         let connection = state
             .connections
             .get_mut(&id)
-            .filter(|connection| connection.owner == owner)
-            .ok_or(VaultError::ProfileNotFound)?;
+            .filter(|connection| connection.owner == owner && connection.expires_at > now)
+            .ok_or(NekoError::ProfileNotFound)?;
         connection.touch();
         Ok(summary_for(
             &connection.profile,
@@ -110,27 +114,27 @@ impl EphemeralConnectionStore {
     }
 
     pub fn remove_browser_connection(&self, owner: Uuid, id: Uuid) -> Result<()> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
         let connection = state
             .connections
             .get(&id)
-            .ok_or(VaultError::ProfileNotFound)?;
+            .ok_or(NekoError::ProfileNotFound)?;
         if connection.owner != owner {
-            return Err(VaultError::ProfileNotFound);
+            return Err(NekoError::ProfileNotFound);
         }
         state.connections.remove(&id);
         Ok(())
     }
 
     pub fn create_agent_grant(&self, owner: Uuid, id: Uuid) -> Result<AgentConnectionGrant> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
+        let now = Instant::now();
+        state.expire_short_lived_access(now);
         let connection = state
             .connections
             .get_mut(&id)
-            .filter(|connection| connection.owner == owner)
-            .ok_or(VaultError::ProfileNotFound)?;
+            .filter(|connection| connection.owner == owner && connection.expires_at > now)
+            .ok_or(NekoError::ProfileNotFound)?;
         connection.touch();
         let grant = Uuid::new_v4();
         connection
@@ -145,19 +149,20 @@ impl EphemeralConnectionStore {
     /// Turns a browser-created one-time grant into a short-lived MCP attachment.  The agent
     /// receives only the connection UUID, never its password or private key.
     pub fn attach_agent(&self, grant: Uuid) -> Result<EphemeralConnectionSummary> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
         let now = Instant::now();
+        state.expire_short_lived_access(now);
         let connection = state
             .connections
             .values_mut()
             .find(|connection| {
-                connection
-                    .agent_grants
-                    .get(&grant)
-                    .is_some_and(|expires| *expires > now)
+                connection.expires_at > now
+                    && connection
+                        .agent_grants
+                        .get(&grant)
+                        .is_some_and(|expires| *expires > now)
             })
-            .ok_or(VaultError::ProfileNotFound)?;
+            .ok_or(NekoError::ProfileNotFound)?;
         connection.agent_grants.remove(&grant);
         connection.agent_attached_until = Some(now + CONNECTION_IDLE_TTL);
         connection.touch();
@@ -168,18 +173,19 @@ impl EphemeralConnectionStore {
     }
 
     pub fn agent_connection(&self, id: Uuid) -> Result<EphemeralConnectionSummary> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
         let now = Instant::now();
+        state.expire_short_lived_access(now);
         let connection = state
             .connections
             .get_mut(&id)
             .filter(|connection| {
-                connection
-                    .agent_attached_until
-                    .is_some_and(|expires| expires > now)
+                connection.expires_at > now
+                    && connection
+                        .agent_attached_until
+                        .is_some_and(|expires| expires > now)
             })
-            .ok_or(VaultError::ProfileNotFound)?;
+            .ok_or(NekoError::ProfileNotFound)?;
         connection.agent_attached_until = Some(now + CONNECTION_IDLE_TTL);
         connection.touch();
         Ok(summary_for(
@@ -189,54 +195,79 @@ impl EphemeralConnectionStore {
     }
 
     pub fn remove_agent_connection(&self, id: Uuid) -> Result<()> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
         let connection = state
             .connections
             .get(&id)
-            .ok_or(VaultError::ProfileNotFound)?;
+            .ok_or(NekoError::ProfileNotFound)?;
         if connection.agent_attached_until.is_none() {
-            return Err(VaultError::ProfileNotFound);
+            return Err(NekoError::ProfileNotFound);
         }
         state.connections.remove(&id);
         Ok(())
     }
 
     pub fn browser_list(&self, owner: Uuid) -> Result<Vec<EphemeralConnectionSummary>> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
         let now = Instant::now();
         let mut result: Vec<_> = state
             .connections
             .values_mut()
-            .filter(|connection| connection.owner == owner)
+            .filter(|connection| connection.owner == owner && connection.expires_at > now)
             .map(|connection| {
                 connection.touch();
                 summary_for(&connection.profile, remaining(connection.expires_at))
             })
             .collect();
-        // Silence the unused local in optimized builds while making the common timestamp explicit.
-        let _ = now;
-        result.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
+        result.sort_by_key(|item| item.label.to_lowercase());
         Ok(result)
     }
 
-    /// Removes idle profiles and returns their IDs so the owning terminal registry can close
-    /// shells before an in-memory credential disappears.
-    pub fn purge_expired(&self) -> Result<Vec<Uuid>> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        Ok(state.purge_expired())
+    /// Returns currently expired IDs without removing them. The native lifecycle coordinator
+    /// first closes the profile's admission gate, then atomically claims each still-expired item.
+    /// This prevents an activity touch or an explicit disconnect from racing the reaper.
+    pub fn expired_connection_ids(&self) -> Result<Vec<Uuid>> {
+        let state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
+        let now = Instant::now();
+        Ok(state
+            .connections
+            .iter()
+            .filter_map(|(id, connection)| (connection.expires_at <= now).then_some(*id))
+            .collect())
+    }
+
+    /// Removes one item only if it is still expired after its operation gate has been closed.
+    pub fn remove_if_expired(&self, id: Uuid) -> Result<bool> {
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
+        let expired = state
+            .connections
+            .get(&id)
+            .is_some_and(|connection| connection.expires_at <= Instant::now());
+        if expired {
+            state.connections.remove(&id);
+        }
+        Ok(expired)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn expire_for_test(&self, id: Uuid) {
+        if let Ok(mut state) = self.inner.lock()
+            && let Some(connection) = state.connections.get_mut(&id)
+        {
+            connection.expires_at = Instant::now() - Duration::from_secs(1);
+        }
     }
 }
 
 impl SshProfileStore for EphemeralConnectionStore {
     fn ssh_profile_snapshot(&self, profile_id: Uuid) -> Result<SshProfile> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
+        let now = Instant::now();
         let connection = state
             .connections
             .get_mut(&profile_id)
-            .ok_or(VaultError::ProfileNotFound)?;
+            .filter(|connection| connection.expires_at > now)
+            .ok_or(NekoError::ProfileNotFound)?;
         connection.touch();
         Ok(connection.profile.clone())
     }
@@ -249,12 +280,13 @@ impl SshProfileStore for EphemeralConnectionStore {
         key_algorithm: &str,
         public_key: &[u8],
     ) -> Result<HostKeyVerification> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
+        let now = Instant::now();
         let connection = state
             .connections
             .get_mut(&profile_id)
-            .ok_or(VaultError::ProfileNotFound)?;
+            .filter(|connection| connection.expires_at > now)
+            .ok_or(NekoError::ProfileNotFound)?;
         connection.touch();
         Ok(connection
             .known_hosts
@@ -269,12 +301,13 @@ impl SshProfileStore for EphemeralConnectionStore {
         key_algorithm: String,
         public_key: &[u8],
     ) -> Result<()> {
-        let mut state = self.inner.lock().map_err(|_| VaultError::LockPoisoned)?;
-        let _ = state.purge_expired();
+        let mut state = self.inner.lock().map_err(|_| NekoError::LockPoisoned)?;
+        let now = Instant::now();
         let connection = state
             .connections
             .get_mut(&profile_id)
-            .ok_or(VaultError::ProfileNotFound)?;
+            .filter(|connection| connection.expires_at > now)
+            .ok_or(NekoError::ProfileNotFound)?;
         let record =
             KnownHostRecord::from_presented(host, port, key_algorithm, public_key, now_unix_ms())?;
         connection.known_hosts.trust(record);
@@ -284,21 +317,13 @@ impl SshProfileStore for EphemeralConnectionStore {
 }
 
 impl StoreState {
-    fn purge_expired(&mut self) -> Vec<Uuid> {
-        let now = Instant::now();
-        let expired: Vec<_> = self
-            .connections
-            .iter()
-            .filter_map(|(id, connection)| (connection.expires_at <= now).then_some(*id))
-            .collect();
-        self.connections.retain(|_, connection| {
+    fn expire_short_lived_access(&mut self, now: Instant) {
+        for connection in self.connections.values_mut() {
             connection.agent_grants.retain(|_, expires| *expires > now);
             connection.agent_attached_until = connection
                 .agent_attached_until
                 .filter(|expires| *expires > now);
-            connection.expires_at > now
-        });
-        expired
+        }
     }
 }
 
@@ -365,5 +390,62 @@ mod tests {
         assert_eq!(attached.id, connection.id);
         assert!(store.attach_agent(grant.grant).is_err());
         assert!(store.agent_connection(connection.id).is_ok());
+    }
+
+    #[test]
+    fn ordinary_access_does_not_discard_expired_ids_before_resource_cleanup() {
+        let store = EphemeralConnectionStore::new();
+        let owner = Uuid::new_v4();
+        let expired = store.create(owner, input()).expect("expired connection");
+        let active = store.create(owner, input()).expect("active connection");
+        {
+            let mut state = store.inner.lock().expect("store");
+            state
+                .connections
+                .get_mut(&expired.id)
+                .expect("connection")
+                .expires_at = Instant::now() - Duration::from_secs(1);
+        }
+
+        assert!(store.browser_connection(owner, active.id).is_ok());
+        assert!(matches!(
+            store.browser_connection(owner, expired.id),
+            Err(NekoError::ProfileNotFound)
+        ));
+        assert!(
+            store
+                .inner
+                .lock()
+                .expect("store")
+                .connections
+                .contains_key(&expired.id),
+            "the lifecycle coordinator still needs the expired id"
+        );
+        assert_eq!(
+            store.expired_connection_ids().expect("expired ids"),
+            vec![expired.id]
+        );
+        assert!(store.remove_if_expired(expired.id).expect("claim"));
+        assert!(!store.remove_if_expired(expired.id).expect("second claim"));
+    }
+
+    #[test]
+    fn profile_activity_refreshes_the_idle_deadline() {
+        let store = EphemeralConnectionStore::new();
+        let owner = Uuid::new_v4();
+        let profile = store.create(owner, input()).expect("connection");
+        {
+            let mut state = store.inner.lock().expect("store");
+            state
+                .connections
+                .get_mut(&profile.id)
+                .expect("connection")
+                .expires_at = Instant::now() + Duration::from_secs(1);
+        }
+
+        let touched = store
+            .browser_connection(owner, profile.id)
+            .expect("activity touch");
+        assert!(touched.expires_in_seconds >= CONNECTION_IDLE_TTL.as_secs().saturating_sub(1));
     }
 }

@@ -1,9 +1,9 @@
 //! Minimal SSH domain model shared by the native Rust IDE services.
 //!
-//! There are deliberately no Vault, sync, external-process, OpenSSH, PuTTY, plink, or Windows
-//! Terminal plans in this module.
+//! There is deliberately no persistent credential store, sync layer, external-process OpenSSH,
+//! PuTTY, plink, or Windows Terminal plan in this module.
 
-use std::{fmt, path::Path, time::SystemTime};
+use std::{fmt, time::SystemTime};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zeroize::Zeroize;
 
-use crate::error::{Result, VaultError};
+use crate::error::{NekoError, Result};
 
 pub struct StoredSecret(String);
 
@@ -57,9 +57,6 @@ pub enum StoredAuthentication {
         private_key_pem: StoredSecret,
         passphrase: Option<StoredSecret>,
     },
-    PrivateKeyFile {
-        private_key_path: String,
-    },
 }
 
 impl StoredAuthentication {
@@ -85,10 +82,6 @@ impl StoredAuthentication {
                     passphrase: passphrase.map(StoredSecret::new),
                 })
             }
-            ProfileAuthenticationInput::PrivateKeyFile { private_key_path } => {
-                validate_private_key_path(&private_key_path)?;
-                Ok(Self::PrivateKeyFile { private_key_path })
-            }
         }
     }
 }
@@ -105,10 +98,6 @@ pub enum ProfileAuthenticationInput {
         private_key_pem: String,
         passphrase: Option<String>,
     },
-    PrivateKeyFile {
-        #[serde(rename = "privateKeyPath")]
-        private_key_path: String,
-    },
 }
 
 impl fmt::Debug for ProfileAuthenticationInput {
@@ -120,9 +109,6 @@ impl fmt::Debug for ProfileAuthenticationInput {
             }
             Self::PrivateKey { .. } => {
                 formatter.write_str("ProfileAuthenticationInput::PrivateKey([REDACTED])")
-            }
-            Self::PrivateKeyFile { .. } => {
-                formatter.write_str("ProfileAuthenticationInput::PrivateKeyFile([REDACTED])")
             }
         }
     }
@@ -338,7 +324,7 @@ fn validate_host(value: &str) -> Result<()> {
         || value.chars().any(char::is_whitespace)
         || value.starts_with('-')
     {
-        return Err(VaultError::InvalidProfile("host is invalid"));
+        return Err(NekoError::InvalidProfile("host is invalid"));
     }
     Ok(())
 }
@@ -346,14 +332,14 @@ fn validate_host(value: &str) -> Result<()> {
 fn validate_username(value: &str) -> Result<()> {
     validate_text(value, 128, "username is invalid")?;
     if value.chars().any(char::is_whitespace) || value.contains(['@', '/', '\\']) {
-        return Err(VaultError::InvalidProfile("username is invalid"));
+        return Err(NekoError::InvalidProfile("username is invalid"));
     }
     Ok(())
 }
 
 fn validate_port(port: u16) -> Result<()> {
     if port == 0 {
-        Err(VaultError::InvalidProfile("port is invalid"))
+        Err(NekoError::InvalidProfile("port is invalid"))
     } else {
         Ok(())
     }
@@ -361,25 +347,15 @@ fn validate_port(port: u16) -> Result<()> {
 
 fn validate_secret(value: &str, message: &'static str) -> Result<()> {
     if value.is_empty() || value.len() > 64 * 1024 || value.as_bytes().contains(&0) {
-        Err(VaultError::InvalidProfile(message))
+        Err(NekoError::InvalidProfile(message))
     } else {
         Ok(())
     }
 }
 
-fn validate_private_key_path(value: &str) -> Result<()> {
-    validate_text(value, 4096, "private key path is invalid")?;
-    if !Path::new(value).is_absolute() {
-        return Err(VaultError::InvalidProfile(
-            "private key path must be absolute",
-        ));
-    }
-    Ok(())
-}
-
 fn validate_tags(tags: &[String]) -> Result<()> {
     if tags.len() > 32 {
-        return Err(VaultError::InvalidProfile("at most 32 tags are allowed"));
+        return Err(NekoError::InvalidProfile("at most 32 tags are allowed"));
     }
     for tag in tags {
         validate_text(tag, 64, "tag is invalid")?;
@@ -389,9 +365,7 @@ fn validate_tags(tags: &[String]) -> Result<()> {
 
 fn validate_terminal(terminal: &TerminalPreferences) -> Result<()> {
     if !(20..=500).contains(&terminal.columns) || !(5..=300).contains(&terminal.rows) {
-        return Err(VaultError::InvalidProfile(
-            "terminal dimensions are invalid",
-        ));
+        return Err(NekoError::InvalidProfile("terminal dimensions are invalid"));
     }
     if let Some(command) = &terminal.command {
         validate_text(command, 32 * 1024, "terminal command is invalid")?;
@@ -405,7 +379,7 @@ fn validate_key_algorithm(value: &str) -> Result<()> {
 
 fn validate_public_key(value: &[u8]) -> Result<()> {
     if value.is_empty() || value.len() > 64 * 1024 {
-        Err(VaultError::InvalidProfile("presented host key is invalid"))
+        Err(NekoError::InvalidProfile("presented host key is invalid"))
     } else {
         Ok(())
     }
@@ -417,7 +391,7 @@ fn validate_text(value: &str, maximum_bytes: usize, message: &'static str) -> Re
         || value.as_bytes().contains(&0)
         || value.chars().any(char::is_control)
     {
-        Err(VaultError::InvalidProfile(message))
+        Err(NekoError::InvalidProfile(message))
     } else {
         Ok(())
     }

@@ -1,12 +1,12 @@
 [package]
 name = "nekossh"
-version = "0.1.0"
+version = "0.2.0"
 description = "A security-first SSH workspace for NekoSSH"
 authors = ["NekoSSH contributors"]
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.97"
 license = "MIT"
-repository = "https://github.com/neko233/nekossh"
+repository = "https://github.com/neko233-com/nekossh"
 build = "build.rs"
 
 [lib]
@@ -17,12 +17,12 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-base64 = "0.22.1"
-ssh2 = "0.9"
+base64 = "0.23.0"
+ssh2 = { version = "0.9.6", features = ["vendored-openssl"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 tauri = { version = "2.11.5", features = [] }
-thiserror = "2.0.17"
+thiserror = "2.0.19"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
-zeroize = { version = "1.8.2", features = ["derive"] }
+zeroize = { version = "1.9.0", features = ["derive"] }

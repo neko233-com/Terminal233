@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ide-ssh-prepare"
+description = "Enables the ide_ssh_prepare command without any pre-configured scope."
+commands.allow = ["ide_ssh_prepare"]
+
+[[permission]]
+identifier = "deny-ide-ssh-prepare"
+description = "Denies the ide_ssh_prepare command without any pre-configured scope."
+commands.deny = ["ide_ssh_prepare"]

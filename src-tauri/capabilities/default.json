@@ -1,7 +1,28 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-capability",
-  "description": "Least-privilege capability for the NekoSSH main window.",
+  "description": "Only the in-process SSH IDE commands required by the local main window.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "allow-ide-connection-create",
+    "allow-ide-connection-list",
+    "allow-ide-connection-disconnect",
+    "allow-ide-ssh-prepare",
+    "allow-ide-ssh-trust-host-key",
+    "allow-ide-ssh-reject-host-key",
+    "allow-ide-ssh-exec",
+    "allow-ide-sftp-list",
+    "allow-ide-sftp-upload-start",
+    "allow-ide-sftp-download-start",
+    "allow-ide-sftp-transfer-cancel",
+    "allow-ide-sftp-download-ack",
+    "allow-ide-sftp-mkdir",
+    "allow-ide-sftp-rename",
+    "allow-ide-sftp-delete",
+    "allow-ide-terminal-start",
+    "allow-ide-terminal-write",
+    "allow-ide-terminal-resize",
+    "allow-ide-terminal-ack-output",
+    "allow-ide-terminal-close"
+  ]
 }

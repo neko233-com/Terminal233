@@ -1,8 +1,8 @@
 //! Integrated, one-shot SSH operations.
 //!
 //! The webview passes only a saved profile id plus an explicit remote command or directory path.
-//! Vaulted credentials never become command-line arguments, frontend values, or persistent session
-//! state.  Each operation creates, verifies, authenticates, uses, and drops an in-process SSH
+//! Transient credentials never become command-line arguments or persistent session state. Each
+//! operation creates, verifies, authenticates, uses, and drops an in-process SSH
 //! connection on a blocking worker thread.
 
 use std::{
@@ -14,31 +14,28 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(windows)]
-use std::{
-    ffi::c_void,
-    fs::{self, OpenOptions},
-    io::Write,
-    os::windows::ffi::OsStrExt,
-    path::PathBuf,
-};
-
 use serde::Serialize;
-use ssh2::{ExtendedData, HostKeyType, Session};
+use ssh2::{ErrorCode, ExtendedData, HostKeyType, Session};
 use uuid::Uuid;
 
 use crate::{
     domain::{HostKeyVerification, SshProfile, StoredAuthentication, StoredSecret},
-    error::{Result, VaultError},
+    error::{NekoError, Result},
+    operation_admission::ProfileCloseSignal,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const SSH_OPERATION_TIMEOUT_MS: u32 = 20_000;
 const PENDING_HOST_KEY_TTL: Duration = Duration::from_secs(5 * 60);
+const MAX_PENDING_HOST_KEYS: usize = 64;
 const MAX_COMMAND_BYTES: usize = 32 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_REMOTE_PATH_BYTES: usize = 4 * 1024;
 const MAX_DIRECTORY_ENTRIES: usize = 10_000;
+const MAX_DIRECTORY_ENTRY_NAME_BYTES: usize = 4 * 1024;
+const MAX_DIRECTORY_METADATA_BYTES: usize = 4 * 1024 * 1024;
+// libssh2 uses LIBSSH2_ERROR_FILE when a raw SFTP directory handle reaches EOF.
+const LIBSSH2_ERROR_FILE: i32 = -16;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(
@@ -101,9 +98,8 @@ pub struct SshDirectoryListing {
 /// Owns only ephemeral host-key confirmations.  Authenticated SSH sessions deliberately are not
 /// retained: a one-shot command/file-listing API is simpler to lock, time out, and clean up than a
 /// renderer-controlled terminal session.
-/// Minimal source of a transient SSH profile and its host-key policy.  The desktop Vault and the
-/// standalone browser server both implement this boundary.  The browser implementation keeps
-/// every value in memory only; it never creates a Vault or writes a known-hosts file.
+/// Minimal source of a transient SSH profile and its host-key policy. The native IDE keeps every
+/// value in memory only and never writes credentials or a known-hosts file.
 pub(crate) trait SshProfileStore: Send + Sync {
     fn ssh_profile_snapshot(&self, profile_id: Uuid) -> Result<SshProfile>;
 
@@ -204,16 +200,16 @@ impl SshService {
             let mut pending_host_keys = self
                 .pending_host_keys
                 .lock()
-                .map_err(|_| VaultError::LockPoisoned)?;
+                .map_err(|_| NekoError::LockPoisoned)?;
             pending_host_keys.take(confirmation_id)?
         };
         if pending.profile_id != expected_profile_id {
-            return Err(VaultError::SshHostKeyConfirmationExpired);
+            return Err(NekoError::SshHostKeyConfirmationExpired);
         }
 
         let profile = self.profiles.ssh_profile_snapshot(pending.profile_id)?;
         if profile.host != pending.host || profile.port != pending.port {
-            return Err(VaultError::SshHostKeyConfirmationExpired);
+            return Err(NekoError::SshHostKeyConfirmationExpired);
         }
 
         self.profiles.trust_host_key(
@@ -236,7 +232,7 @@ impl SshService {
         let mut pending_host_keys = self
             .pending_host_keys
             .lock()
-            .map_err(|_| VaultError::LockPoisoned)?;
+            .map_err(|_| NekoError::LockPoisoned)?;
         pending_host_keys.remove(confirmation_id);
         Ok(())
     }
@@ -247,7 +243,7 @@ impl SshService {
         let mut pending_host_keys = self
             .pending_host_keys
             .lock()
-            .map_err(|_| VaultError::LockPoisoned)?;
+            .map_err(|_| NekoError::LockPoisoned)?;
         pending_host_keys
             .entries
             .retain(|_, candidate| candidate.profile_id != profile_id);
@@ -259,22 +255,29 @@ impl SshService {
         profile_id: Uuid,
         command: String,
         cwd: Option<String>,
+        close_signal: ProfileCloseSignal,
     ) -> Result<SshCommandResult> {
         let (command, working_directory) = command_for_working_directory(command, cwd)?;
         let session = self.open_authenticated_for_terminal(profile_id)?;
         let mut channel = session
             .channel_session()
-            .map_err(|_| VaultError::SshCommandFailed)?;
+            .map_err(|_| NekoError::SshCommandFailed)?;
         // Merge output before execution so a large stderr stream cannot block while stdout is
         // drained.  This is the most useful shape for the current terminal-style UI.
         channel
             .handle_extended_data(ExtendedData::Merge)
-            .map_err(|_| VaultError::SshCommandFailed)?;
+            .map_err(|_| NekoError::SshCommandFailed)?;
+        // Host resolution, handshake, host-key verification, authentication, and channel setup
+        // may all outlive the command's initial admission. Linearize immediately before `exec`:
+        // if disconnect closed the profile first, no remote command is issued.
+        if !close_signal.try_begin_remote_effect() {
+            return Err(NekoError::ProfileNotFound);
+        }
         channel
             .exec(&command)
-            .map_err(|_| VaultError::SshCommandFailed)?;
+            .map_err(|_| NekoError::SshCommandFailed)?;
 
-        let (output, truncated) = read_channel_output(&mut channel)?;
+        let (output, truncated) = read_channel_output(&mut channel, &close_signal)?;
         if truncated {
             let _ = channel.close();
         }
@@ -294,25 +297,41 @@ impl SshService {
         let session = self.open_authenticated_for_terminal(profile_id)?;
         let sftp = session
             .sftp()
-            .map_err(|_| VaultError::SshDirectoryListFailed)?;
+            .map_err(|_| NekoError::SshDirectoryListFailed)?;
         let mut directory = sftp
             .opendir(Path::new(&path))
-            .map_err(|_| VaultError::SshDirectoryListFailed)?;
+            .map_err(|_| NekoError::SshDirectoryListFailed)?;
         let mut entries = Vec::new();
+        let mut entries_seen = 0_usize;
+        let mut metadata_bytes = 0_usize;
         let mut truncated = false;
 
         loop {
-            if entries.len() >= MAX_DIRECTORY_ENTRIES {
+            if entries_seen >= MAX_DIRECTORY_ENTRIES {
                 truncated = true;
                 break;
             }
             match directory.readdir() {
                 Ok((entry_path, stat)) => {
+                    entries_seen += 1;
                     let name = entry_path.file_name().unwrap_or(entry_path.as_os_str());
+                    // Check the platform representation before lossy UTF-8 conversion so one
+                    // malicious server-controlled name cannot force an unexpectedly large String.
+                    if name.as_encoded_bytes().len() > MAX_DIRECTORY_ENTRY_NAME_BYTES {
+                        truncated = true;
+                        continue;
+                    }
                     let name = name.to_string_lossy().into_owned();
                     if name == "." || name == ".." {
                         continue;
                     }
+                    let Some(next_metadata_bytes) =
+                        reserve_directory_metadata_bytes(metadata_bytes, &name)
+                    else {
+                        truncated = true;
+                        break;
+                    };
+                    metadata_bytes = next_metadata_bytes;
                     entries.push(SshDirectoryEntry {
                         name,
                         is_directory: stat.is_dir(),
@@ -320,10 +339,9 @@ impl SshService {
                         modified_at_unix: stat.mtime,
                     });
                 }
-                // ssh2's low-level File::readdir deliberately uses this exact local error to
-                // signal a normal end-of-directory condition.
-                Err(error) if error.message() == "no more files" => break,
-                Err(_) => return Err(VaultError::SshDirectoryListFailed),
+                // ssh2's low-level File::readdir maps directory EOF to LIBSSH2_ERROR_FILE.
+                Err(error) if error.code() == ErrorCode::Session(LIBSSH2_ERROR_FILE) => break,
+                Err(_) => return Err(NekoError::SshDirectoryListFailed),
             }
         }
 
@@ -345,11 +363,11 @@ impl SshService {
         let mut pending_host_keys = self
             .pending_host_keys
             .lock()
-            .map_err(|_| VaultError::LockPoisoned)?;
-        Ok(pending_host_keys.insert(pending))
+            .map_err(|_| NekoError::LockPoisoned)?;
+        pending_host_keys.insert(pending)
     }
 
-    /// Opens a fresh transport only after the encrypted-vault known-hosts policy accepts the
+    /// Opens a fresh transport only after the process-local known-hosts policy accepts the
     /// presented key.  Kept crate-private so the PTY service can use the same verification and
     /// authentication path as one-shot command/SFTP operations without exposing credentials.
     pub(crate) fn open_authenticated_for_terminal(&self, profile_id: Uuid) -> Result<Session> {
@@ -358,7 +376,7 @@ impl SshService {
     }
 
     /// Uses a caller-owned profile snapshot so a security-sensitive operation can pin the exact
-    /// password-authenticated identity it is about to update.  The snapshot never crosses IPC and
+    /// authenticated identity it is about to use. The snapshot never crosses IPC and
     /// is dropped (and its stored secrets zeroized) once the operation completes.
     pub(crate) fn open_authenticated_snapshot(&self, profile: &SshProfile) -> Result<Session> {
         let session = connect_and_handshake(profile)?;
@@ -371,8 +389,8 @@ impl SshService {
             &presented.public_key,
         )? {
             HostKeyVerification::Trusted { .. } => {}
-            HostKeyVerification::Unknown { .. } => return Err(VaultError::SshHostKeyUntrusted),
-            HostKeyVerification::Mismatch { .. } => return Err(VaultError::SshHostKeyMismatch),
+            HostKeyVerification::Unknown { .. } => return Err(NekoError::SshHostKeyUntrusted),
+            HostKeyVerification::Mismatch { .. } => return Err(NekoError::SshHostKeyMismatch),
         }
         authenticate(&session, profile)?;
         Ok(session)
@@ -399,18 +417,23 @@ struct PendingHostKeys {
 }
 
 impl PendingHostKeys {
-    fn insert(&mut self, pending: PendingHostKey) -> Uuid {
+    fn insert(&mut self, pending: PendingHostKey) -> Result<Uuid> {
         self.purge_expired();
+        self.entries
+            .retain(|_, existing| existing.profile_id != pending.profile_id);
+        if self.entries.len() >= MAX_PENDING_HOST_KEYS {
+            return Err(NekoError::SshHostKeyConfirmationLimit);
+        }
         let confirmation_id = Uuid::new_v4();
         self.entries.insert(confirmation_id, pending);
-        confirmation_id
+        Ok(confirmation_id)
     }
 
     fn take(&mut self, confirmation_id: Uuid) -> Result<PendingHostKey> {
         self.purge_expired();
         self.entries
             .remove(&confirmation_id)
-            .ok_or(VaultError::SshHostKeyConfirmationExpired)
+            .ok_or(NekoError::SshHostKeyConfirmationExpired)
     }
 
     fn remove(&mut self, confirmation_id: Uuid) {
@@ -427,38 +450,39 @@ impl PendingHostKeys {
 fn connect_and_handshake(profile: &SshProfile) -> Result<Session> {
     let addresses = (profile.host.as_str(), profile.port)
         .to_socket_addrs()
-        .map_err(|_| VaultError::SshConnectionFailed)?;
+        .map_err(|_| NekoError::SshConnectionFailed)?;
     for address in addresses {
         match TcpStream::connect_timeout(&address, CONNECT_TIMEOUT) {
             Ok(stream) => {
                 stream
                     .set_read_timeout(Some(Duration::from_millis(SSH_OPERATION_TIMEOUT_MS.into())))
-                    .map_err(|_| VaultError::SshConnectionFailed)?;
+                    .map_err(|_| NekoError::SshConnectionFailed)?;
                 stream
                     .set_write_timeout(Some(Duration::from_millis(SSH_OPERATION_TIMEOUT_MS.into())))
-                    .map_err(|_| VaultError::SshConnectionFailed)?;
-                let mut session = Session::new().map_err(|_| VaultError::SshHandshakeFailed)?;
+                    .map_err(|_| NekoError::SshConnectionFailed)?;
+                let mut session = Session::new().map_err(|_| NekoError::SshHandshakeFailed)?;
                 session.set_timeout(SSH_OPERATION_TIMEOUT_MS);
                 session.set_tcp_stream(stream);
                 session
                     .handshake()
-                    .map_err(|_| VaultError::SshHandshakeFailed)?;
+                    .map_err(|_| NekoError::SshHandshakeFailed)?;
                 return Ok(session);
             }
             Err(_) => continue,
         }
     }
-    Err(VaultError::SshConnectionFailed)
+    Err(NekoError::SshConnectionFailed)
 }
 
 fn presented_host_key(session: &Session) -> Result<PresentedHostKey> {
-    let (public_key, key_type) = session
-        .host_key()
-        .ok_or(VaultError::SshHostKeyUnavailable)?;
+    let (public_key, key_type) = session.host_key().ok_or(NekoError::SshHostKeyUnavailable)?;
     if public_key.is_empty() {
-        return Err(VaultError::SshHostKeyUnavailable);
+        return Err(NekoError::SshHostKeyUnavailable);
     }
-    let key_algorithm = host_key_algorithm(key_type).ok_or(VaultError::SshHostKeyUnavailable)?;
+    // DSA (`ssh-dss`) is obsolete and must never enter the trust flow, even when the bundled
+    // libssh2 build can negotiate it.  Keep the remaining host-key types explicit so every key
+    // that can be trusted is still fingerprinted and verified by the profile store.
+    let key_algorithm = validated_host_key_algorithm(key_type)?;
     Ok(PresentedHostKey {
         key_algorithm: key_algorithm.to_owned(),
         public_key: public_key.to_vec(),
@@ -468,7 +492,9 @@ fn presented_host_key(session: &Session) -> Result<PresentedHostKey> {
 fn host_key_algorithm(key_type: HostKeyType) -> Option<&'static str> {
     match key_type {
         HostKeyType::Rsa => Some("ssh-rsa"),
-        HostKeyType::Dss => Some("ssh-dss"),
+        // `ssh-dss` is deliberately rejected in `presented_host_key` before a key can be
+        // displayed, persisted, or authenticated against.
+        HostKeyType::Dss => None,
         HostKeyType::Ecdsa256 => Some("ecdsa-sha2-nistp256"),
         HostKeyType::Ecdsa384 => Some("ecdsa-sha2-nistp384"),
         HostKeyType::Ecdsa521 => Some("ecdsa-sha2-nistp521"),
@@ -477,14 +503,21 @@ fn host_key_algorithm(key_type: HostKeyType) -> Option<&'static str> {
     }
 }
 
+fn validated_host_key_algorithm(key_type: HostKeyType) -> Result<&'static str> {
+    match key_type {
+        HostKeyType::Dss => Err(NekoError::SshHostKeyAlgorithmRejected),
+        key_type => host_key_algorithm(key_type).ok_or(NekoError::SshHostKeyUnavailable),
+    }
+}
+
 fn authenticate(session: &Session, profile: &SshProfile) -> Result<()> {
     match &profile.authentication {
         StoredAuthentication::Agent => session
             .userauth_agent(&profile.username)
-            .map_err(|_| VaultError::SshAuthenticationFailed)?,
+            .map_err(|_| NekoError::SshAuthenticationFailed)?,
         StoredAuthentication::Password { password } => password
             .with_exposed(|password| session.userauth_password(&profile.username, password))
-            .map_err(|_| VaultError::SshAuthenticationFailed)?,
+            .map_err(|_| NekoError::SshAuthenticationFailed)?,
         StoredAuthentication::PrivateKey {
             private_key_pem,
             passphrase,
@@ -494,18 +527,14 @@ fn authenticate(session: &Session, profile: &SshProfile) -> Result<()> {
             private_key_pem,
             passphrase.as_ref(),
         )?,
-        StoredAuthentication::PrivateKeyFile { private_key_path } => session
-            .userauth_pubkey_file(&profile.username, None, Path::new(private_key_path), None)
-            .map_err(|_| VaultError::SshAuthenticationFailed)?,
     };
     if session.authenticated() {
         Ok(())
     } else {
-        Err(VaultError::SshAuthenticationFailed)
+        Err(NekoError::SshAuthenticationFailed)
     }
 }
 
-#[cfg(unix)]
 fn authenticate_private_key_memory(
     session: &Session,
     username: &str,
@@ -519,190 +548,22 @@ fn authenticate_private_key_memory(
             }),
             None => session.userauth_pubkey_memory(username, None, private_key_pem, None),
         })
-        .map_err(|_| VaultError::SshAuthenticationFailed)
+        .map_err(|_| NekoError::SshAuthenticationFailed)
 }
 
-#[cfg(windows)]
-fn authenticate_private_key_memory(
-    session: &Session,
-    username: &str,
-    private_key_pem: &StoredSecret,
-    passphrase: Option<&StoredSecret>,
-) -> Result<()> {
-    private_key_pem.with_exposed(|private_key_pem| {
-        // Windows CNG's libssh2 backend accepts a key file but does not expose the in-memory PEM
-        // API.  The Vault remains the only persistent location: this ACL-restricted random temp
-        // file is created only after an authenticated transport exists and is deleted immediately
-        // after libssh2 has synchronously parsed it.
-        let temporary_key = TemporaryPrivateKeyFile::create(private_key_pem)?;
-        let authentication_result = match passphrase {
-            Some(passphrase) => passphrase.with_exposed(|passphrase| {
-                session.userauth_pubkey_file(username, None, temporary_key.path(), Some(passphrase))
-            }),
-            None => session.userauth_pubkey_file(username, None, temporary_key.path(), None),
-        };
-        let cleanup_result = temporary_key.remove();
-        if cleanup_result.is_err() {
-            return Err(VaultError::SshTemporaryKeyCleanupFailed);
-        }
-        authentication_result.map_err(|_| VaultError::SshAuthenticationFailed)
-    })
-}
-
-#[cfg(not(any(unix, windows)))]
-fn authenticate_private_key_memory(
-    _session: &Session,
-    _username: &str,
-    _private_key_pem: &StoredSecret,
-    _passphrase: Option<&StoredSecret>,
-) -> Result<()> {
-    // Keep an explicit rejection for an unsupported target rather than writing a private key to a
-    // long-lived local file.
-    Err(VaultError::SshAuthenticationUnsupported)
-}
-
-#[cfg(windows)]
-struct TemporaryPrivateKeyFile {
-    path: Option<PathBuf>,
-}
-
-#[cfg(windows)]
-impl TemporaryPrivateKeyFile {
-    fn create(private_key_pem: &str) -> Result<Self> {
-        let temporary_directory = std::env::temp_dir();
-        for _ in 0..8 {
-            let path = temporary_directory.join(format!("nekossh-key-{}.pem", Uuid::new_v4()));
-            let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(file) => file,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(_) => return Err(VaultError::SshTemporaryKeyFileFailed),
-            };
-
-            // Restrict the empty file before a private byte is written.  A protected DACL grants
-            // full control only to its owner and LocalSystem; administrators cannot inherit an
-            // ambient temp-directory ACL into this short-lived credential file.
-            if restrict_windows_temp_key_acl(&path).is_err() {
-                drop(file);
-                let _ = fs::remove_file(&path);
-                return Err(VaultError::SshTemporaryKeyFileFailed);
-            }
-            let write_result = file
-                .write_all(private_key_pem.as_bytes())
-                .and_then(|_| file.sync_all());
-            drop(file);
-            if write_result.is_err() {
-                let _ = fs::remove_file(&path);
-                return Err(VaultError::SshTemporaryKeyFileFailed);
-            }
-            return Ok(Self { path: Some(path) });
-        }
-        Err(VaultError::SshTemporaryKeyFileFailed)
-    }
-
-    fn path(&self) -> &Path {
-        self.path
-            .as_deref()
-            .expect("temporary private-key path is available before cleanup")
-    }
-
-    fn remove(mut self) -> std::io::Result<()> {
-        let Some(path) = self.path.take() else {
-            return Ok(());
-        };
-        match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                // Keep the path owned so Drop gets one immediate best-effort retry while this
-                // stack frame unwinds (for example, if an antivirus briefly held the file).
-                self.path = Some(path);
-                Err(error)
-            }
-        }
-    }
-}
-
-#[cfg(windows)]
-impl Drop for TemporaryPrivateKeyFile {
-    fn drop(&mut self) {
-        if let Some(path) = self.path.take() {
-            let _ = fs::remove_file(path);
-        }
-    }
-}
-
-/// Applies a protected Windows DACL to a freshly-created, still-empty temporary key file.  `OW`
-/// resolves to that file's owner, and `SY` preserves LocalSystem access needed by normal system
-/// services.  The descriptor is process-local and is released with `LocalFree` immediately.
-#[cfg(windows)]
-fn restrict_windows_temp_key_acl(path: &Path) -> std::io::Result<()> {
-    const SDDL_REVISION_1: u32 = 1;
-    const DACL_SECURITY_INFORMATION: u32 = 0x0000_0004;
-    const PROTECTED_DACL_SECURITY_INFORMATION: u32 = 0x8000_0000;
-    let descriptor_text: Vec<u16> = "D:P(A;;FA;;;OW)(A;;FA;;;SY)"
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-    let path: Vec<u16> = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let mut descriptor = std::ptr::null_mut::<c_void>();
-    if unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            descriptor_text.as_ptr(),
-            SDDL_REVISION_1,
-            &mut descriptor,
-            std::ptr::null_mut(),
-        )
-    } == 0
-    {
-        return Err(std::io::Error::last_os_error());
-    }
-    let applied = unsafe {
-        SetFileSecurityW(
-            path.as_ptr(),
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            descriptor,
-        )
-    };
-    unsafe {
-        let _ = LocalFree(descriptor);
-    }
-    if applied == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-#[link(name = "advapi32")]
-unsafe extern "system" {
-    fn ConvertStringSecurityDescriptorToSecurityDescriptorW(
-        string_security_descriptor: *const u16,
-        string_sd_revision: u32,
-        security_descriptor: *mut *mut c_void,
-        security_descriptor_size: *mut u32,
-    ) -> i32;
-    fn SetFileSecurityW(
-        file_name: *const u16,
-        security_information: u32,
-        security_descriptor: *const c_void,
-    ) -> i32;
-}
-
-#[cfg(windows)]
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn LocalFree(memory: *mut c_void) -> *mut c_void;
-}
-
-fn read_channel_output(channel: &mut ssh2::Channel) -> Result<(String, bool)> {
+fn read_channel_output(
+    channel: &mut ssh2::Channel,
+    close_signal: &ProfileCloseSignal,
+) -> Result<(String, bool)> {
     let mut bytes = Vec::new();
     let mut buffer = [0_u8; 8 * 1024];
     let mut truncated = false;
 
     loop {
+        if close_signal.is_closing() {
+            let _ = channel.close();
+            return Err(NekoError::ProfileNotFound);
+        }
         if bytes.len() >= MAX_COMMAND_OUTPUT_BYTES {
             truncated = true;
             break;
@@ -711,7 +572,7 @@ fn read_channel_output(channel: &mut ssh2::Channel) -> Result<(String, bool)> {
         let chunk_len = remaining.min(buffer.len());
         let read = channel
             .read(&mut buffer[..chunk_len])
-            .map_err(|_| VaultError::SshCommandFailed)?;
+            .map_err(|_| NekoError::SshCommandFailed)?;
         if read == 0 {
             break;
         }
@@ -726,9 +587,19 @@ fn validate_command(command: &str) -> Result<()> {
         || command.len() > MAX_COMMAND_BYTES
         || command.as_bytes().contains(&0)
     {
-        return Err(VaultError::SshCommandInvalid);
+        return Err(NekoError::SshCommandInvalid);
     }
     Ok(())
+}
+
+fn reserve_directory_metadata_bytes(current: usize, name: &str) -> Option<usize> {
+    if name.len() > MAX_DIRECTORY_ENTRY_NAME_BYTES {
+        return None;
+    }
+    current
+        .checked_add(std::mem::size_of::<SshDirectoryEntry>())?
+        .checked_add(name.len())
+        .filter(|next| *next <= MAX_DIRECTORY_METADATA_BYTES)
 }
 
 /// Shared by narrow SFTP operations.  This checks only transport-safe path syntax; remote
@@ -739,7 +610,7 @@ pub(crate) fn validate_remote_path(path: &str) -> Result<()> {
         || path.as_bytes().contains(&0)
         || path.chars().any(char::is_control)
     {
-        return Err(VaultError::SshDirectoryPathInvalid);
+        return Err(NekoError::SshDirectoryPathInvalid);
     }
     Ok(())
 }
@@ -752,7 +623,7 @@ fn command_for_working_directory(command: String, cwd: Option<String>) -> Result
     validate_remote_path(&cwd)?;
     let remote_command = format!("cd -- {} && {command}", shell_quote(&cwd));
     if remote_command.len() > MAX_COMMAND_BYTES {
-        return Err(VaultError::SshCommandInvalid);
+        return Err(NekoError::SshCommandInvalid);
     }
     Ok((remote_command, cwd))
 }
@@ -766,7 +637,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn maps_supported_host_key_algorithms() {
+    fn allows_modern_host_key_algorithms_and_excludes_dsa() {
         assert_eq!(
             host_key_algorithm(HostKeyType::Ed25519),
             Some("ssh-ed25519")
@@ -775,7 +646,13 @@ mod tests {
             host_key_algorithm(HostKeyType::Ecdsa256),
             Some("ecdsa-sha2-nistp256")
         );
+        assert_eq!(host_key_algorithm(HostKeyType::Rsa), Some("ssh-rsa"));
+        assert_eq!(host_key_algorithm(HostKeyType::Dss), None);
         assert_eq!(host_key_algorithm(HostKeyType::Unknown), None);
+        assert!(matches!(
+            validated_host_key_algorithm(HostKeyType::Dss),
+            Err(NekoError::SshHostKeyAlgorithmRejected)
+        ));
     }
 
     #[test]
@@ -813,7 +690,7 @@ mod tests {
 
         assert!(matches!(
             keys.take(confirmation_id),
-            Err(VaultError::SshHostKeyConfirmationExpired)
+            Err(NekoError::SshHostKeyConfirmationExpired)
         ));
     }
 
@@ -822,17 +699,42 @@ mod tests {
         assert!(validate_command("uname -a").is_ok());
         assert!(matches!(
             validate_command("\0"),
-            Err(VaultError::SshCommandInvalid)
+            Err(NekoError::SshCommandInvalid)
         ));
         assert!(validate_remote_path("/home/neko").is_ok());
         assert!(matches!(
             validate_remote_path("/home/\nnot-allowed"),
-            Err(VaultError::SshDirectoryPathInvalid)
+            Err(NekoError::SshDirectoryPathInvalid)
         ));
         let (remote_command, working_directory) =
             command_for_working_directory("pwd".to_owned(), Some("/tmp/a'b".to_owned()))
                 .expect("valid quoted working directory");
         assert_eq!(remote_command, "cd -- '/tmp/a'\"'\"'b' && pwd");
         assert_eq!(working_directory, "/tmp/a'b");
+    }
+
+    #[test]
+    fn directory_metadata_budget_bounds_names_and_aggregate_memory() {
+        let normal_cost =
+            reserve_directory_metadata_bytes(0, "report.csv").expect("normal entry fits");
+        assert!(normal_cost > "report.csv".len());
+        assert_eq!(
+            reserve_directory_metadata_bytes(
+                MAX_DIRECTORY_METADATA_BYTES - normal_cost,
+                "report.csv"
+            ),
+            Some(MAX_DIRECTORY_METADATA_BYTES)
+        );
+        assert!(
+            reserve_directory_metadata_bytes(
+                MAX_DIRECTORY_METADATA_BYTES - normal_cost + 1,
+                "report.csv"
+            )
+            .is_none()
+        );
+        assert!(
+            reserve_directory_metadata_bytes(0, &"x".repeat(MAX_DIRECTORY_ENTRY_NAME_BYTES + 1))
+                .is_none()
+        );
     }
 }

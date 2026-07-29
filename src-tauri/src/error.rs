@@ -1,82 +1,33 @@
-use std::io;
-
 use thiserror::Error;
 
-/// Errors deliberately avoid echoing passwords, tokens, profile credentials, or ciphertext.
+/// Native SSH errors never format credentials, key material, remote output, or library details
+/// across IPC. `public_message` is the only renderer-facing description.
 #[derive(Debug, Error)]
-pub enum VaultError {
-    #[error("a vault already exists at this location")]
-    AlreadyExists,
-    #[error("no vault has been created yet")]
-    Missing,
-    #[error("the vault is locked")]
+pub enum NekoError {
+    #[error("the SSH service is closing")]
     Locked,
-    #[error("the vault is already unlocked")]
-    AlreadyUnlocked,
-    #[error("unable to unlock vault; check the password or vault integrity")]
-    UnlockFailed,
-    #[error("unsupported vault format")]
-    UnsupportedFormat,
-    #[error("vault data is malformed")]
-    Malformed,
-    #[error("vault encryption operation failed")]
-    EncryptionFailed,
-    #[error("password must contain at least {0} characters")]
-    WeakPassword(usize),
     #[error("invalid SSH profile: {0}")]
     InvalidProfile(&'static str),
     #[error("profile was not found")]
     ProfileNotFound,
-    #[error("invalid sync configuration: {0}")]
-    InvalidSync(&'static str),
-    #[error("cloud sync has not been configured")]
-    SyncNotConfigured,
-    #[error("the configured sync provider is not WebDAV")]
-    SyncNotWebDav,
-    #[error("the configured sync provider is not Git")]
-    SyncNotGit,
-    #[error("the encrypted sync bundle exceeds the supported size")]
-    SyncBundleTooLarge,
-    #[error("the cloud backup changed remotely; download and review it before retrying")]
-    SyncConflict,
-    #[error("the WebDAV server did not return a safe version validator")]
-    SyncVersionUnavailable,
-    #[error("the cloud sync transport could not complete")]
-    SyncTransportFailed,
-    #[error("no trusted Git client is available for encrypted Git backup")]
-    GitClientUnavailable,
-    #[error("Git backup authentication requires an HTTPS vault token or an SSH-agent remote")]
-    GitAuthenticationUnsupported,
-    #[error("the configured Git branch does not contain an encrypted NekoSSH backup")]
-    SyncRemoteBundleMissing,
-    #[error(
-        "Git backup was not pushed because the remote changed or rejected it; no remote data was overwritten"
-    )]
-    SyncGitPushRejected,
-    #[error("invalid external browser URL: {0}")]
-    InvalidBrowserUrl(&'static str),
-    #[error("unable to open the external browser")]
-    BrowserOpenFailed,
-    #[error("this authentication method requires the integrated SSH terminal adapter")]
-    ExternalSshUnavailable,
-    #[error("no supported interactive terminal is available for external SSH")]
-    ExternalTerminalUnavailable,
-    #[error("unable to launch the local OpenSSH client")]
-    ExternalSshLaunchFailed,
+    #[error("too many ephemeral SSH profiles are active")]
+    ProfileLimit,
     #[error("unable to establish the SSH connection")]
     SshConnectionFailed,
     #[error("unable to complete the SSH handshake")]
     SshHandshakeFailed,
     #[error("the SSH server did not present a supported host key")]
     SshHostKeyUnavailable,
+    #[error("the SSH server presented a rejected host-key algorithm")]
+    SshHostKeyAlgorithmRejected,
     #[error("the SSH host key is not trusted yet")]
     SshHostKeyUntrusted,
     #[error("the SSH host key does not match the trusted key")]
     SshHostKeyMismatch,
     #[error("the SSH host-key confirmation has expired")]
     SshHostKeyConfirmationExpired,
-    #[error("the SSH authentication method is not supported by this desktop build")]
-    SshAuthenticationUnsupported,
+    #[error("too many SSH host-key confirmations are pending")]
+    SshHostKeyConfirmationLimit,
     #[error("SSH authentication failed")]
     SshAuthenticationFailed,
     #[error("the SSH command is invalid")]
@@ -111,73 +62,26 @@ pub enum VaultError {
     SshTerminalInputTooLarge,
     #[error("the SSH terminal input queue is busy")]
     SshTerminalInputBackpressure,
-    #[error("one-click SSH key setup requires a password-authenticated profile")]
-    SshKeyBootstrapRequiresPassword,
-    #[error("the SSH profile changed while its key was being configured")]
-    SshKeyBootstrapProfileChanged,
-    #[error("SSH key setup is already running for this profile")]
-    SshKeyBootstrapInProgress,
-    #[error("the SSH key could not be configured on the remote host")]
-    SshKeyBootstrapFailed,
-    #[error("an isolated temporary SSH key file could not be prepared")]
-    SshTemporaryKeyFileFailed,
-    #[error("the temporary SSH key file could not be removed")]
-    SshTemporaryKeyCleanupFailed,
-    #[error("the encrypted vault changed on disk; lock and reopen it before changing the password")]
-    VaultChangedOnDisk,
-    #[error("lock the vault before replacing it with an encrypted backup")]
-    VaultMustBeLockedForImport,
-    #[error("no verified pre-import vault backup is available")]
-    VaultImportBackupMissing,
-    #[error("an internal vault lock was poisoned")]
+    #[error("an internal state lock was poisoned")]
     LockPoisoned,
-    #[error("vault storage error")]
-    Storage(#[source] io::Error),
-    #[error("serialization error")]
-    Serialization(#[source] serde_json::Error),
-    #[error("secure random-number generation failed")]
-    Random,
 }
 
-impl VaultError {
-    /// A stable IPC-facing error code.  This never exposes implementation details.
+impl NekoError {
+    /// Stable IPC code with no implementation detail.
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::AlreadyExists => "vault_exists",
-            Self::Missing => "vault_missing",
-            Self::Locked => "vault_locked",
-            Self::AlreadyUnlocked => "vault_already_unlocked",
-            Self::UnlockFailed => "vault_unlock_failed",
-            Self::UnsupportedFormat => "vault_unsupported_format",
-            Self::Malformed => "vault_malformed",
-            Self::EncryptionFailed => "vault_encryption_failed",
-            Self::WeakPassword(_) => "weak_password",
+            Self::Locked => "ssh_service_closing",
             Self::InvalidProfile(_) => "invalid_profile",
             Self::ProfileNotFound => "profile_not_found",
-            Self::InvalidSync(_) => "invalid_sync_configuration",
-            Self::SyncNotConfigured => "sync_not_configured",
-            Self::SyncNotWebDav => "sync_not_webdav",
-            Self::SyncNotGit => "sync_not_git",
-            Self::SyncBundleTooLarge => "sync_bundle_too_large",
-            Self::SyncConflict => "sync_conflict",
-            Self::SyncVersionUnavailable => "sync_version_unavailable",
-            Self::SyncTransportFailed => "sync_transport_failed",
-            Self::GitClientUnavailable => "git_client_unavailable",
-            Self::GitAuthenticationUnsupported => "git_authentication_unsupported",
-            Self::SyncRemoteBundleMissing => "sync_remote_bundle_missing",
-            Self::SyncGitPushRejected => "sync_git_push_rejected",
-            Self::InvalidBrowserUrl(_) => "invalid_browser_url",
-            Self::BrowserOpenFailed => "browser_open_failed",
-            Self::ExternalSshUnavailable => "external_ssh_unavailable",
-            Self::ExternalTerminalUnavailable => "external_terminal_unavailable",
-            Self::ExternalSshLaunchFailed => "external_ssh_launch_failed",
+            Self::ProfileLimit => "profile_limit",
             Self::SshConnectionFailed => "ssh_connection_failed",
             Self::SshHandshakeFailed => "ssh_handshake_failed",
             Self::SshHostKeyUnavailable => "ssh_host_key_unavailable",
+            Self::SshHostKeyAlgorithmRejected => "ssh_host_key_algorithm_rejected",
             Self::SshHostKeyUntrusted => "ssh_host_key_untrusted",
             Self::SshHostKeyMismatch => "ssh_host_key_mismatch",
             Self::SshHostKeyConfirmationExpired => "ssh_host_key_confirmation_expired",
-            Self::SshAuthenticationUnsupported => "ssh_authentication_unsupported",
+            Self::SshHostKeyConfirmationLimit => "ssh_host_key_confirmation_limit",
             Self::SshAuthenticationFailed => "ssh_authentication_failed",
             Self::SshCommandInvalid => "ssh_command_invalid",
             Self::SshCommandFailed => "ssh_command_failed",
@@ -195,33 +99,65 @@ impl VaultError {
             Self::SshTerminalSessionNotFound => "ssh_terminal_session_not_found",
             Self::SshTerminalInputTooLarge => "ssh_terminal_input_too_large",
             Self::SshTerminalInputBackpressure => "ssh_terminal_input_backpressure",
-            Self::SshKeyBootstrapRequiresPassword => "ssh_key_bootstrap_requires_password",
-            Self::SshKeyBootstrapProfileChanged => "ssh_key_bootstrap_profile_changed",
-            Self::SshKeyBootstrapInProgress => "ssh_key_bootstrap_in_progress",
-            Self::SshKeyBootstrapFailed => "ssh_key_bootstrap_failed",
-            Self::SshTemporaryKeyFileFailed => "ssh_temporary_key_file_failed",
-            Self::SshTemporaryKeyCleanupFailed => "ssh_temporary_key_cleanup_failed",
-            Self::VaultChangedOnDisk => "vault_changed_on_disk",
-            Self::VaultMustBeLockedForImport => "vault_must_be_locked_for_import",
-            Self::VaultImportBackupMissing => "vault_import_backup_missing",
-            Self::LockPoisoned => "vault_lock_failed",
-            Self::Storage(_) => "vault_storage_failed",
-            Self::Serialization(_) => "vault_serialization_failed",
-            Self::Random => "secure_random_failed",
+            Self::LockPoisoned => "internal_lock_failed",
         }
     }
 
-    /// A clear but non-sensitive explanation suitable for UI display.
+    /// Stable, non-sensitive Chinese renderer message.
     pub fn public_message(&self) -> String {
         match self {
-            Self::Storage(_) => "Unable to read or write the encrypted vault.".to_owned(),
-            Self::Serialization(_) | Self::Malformed => {
-                "The encrypted vault is malformed or cannot be read.".to_owned()
-            }
-            Self::Random => "Secure random-number generation failed.".to_owned(),
-            _ => self.to_string(),
+            Self::Locked => "连接正在关闭，请稍后重试。",
+            Self::InvalidProfile(_) => "连接配置无效，请检查主机、端口和认证方式。",
+            Self::ProfileNotFound => "未找到该临时连接，可能已断开或过期。",
+            Self::ProfileLimit => "临时连接数量已达到上限，请先断开不再使用的连接。",
+            Self::SshConnectionFailed => "无法连接到 SSH 服务器，请检查主机、端口和网络。",
+            Self::SshHandshakeFailed => "SSH 握手失败，请检查服务器兼容性。",
+            Self::SshHostKeyUnavailable => "服务器未提供受支持的主机密钥。",
+            Self::SshHostKeyAlgorithmRejected => "服务器使用了已禁用的 DSA 主机密钥算法。",
+            Self::SshHostKeyUntrusted => "该服务器主机密钥尚未确认。",
+            Self::SshHostKeyMismatch => "服务器主机密钥与已确认的密钥不一致，连接已阻止。",
+            Self::SshHostKeyConfirmationExpired => "主机密钥确认已过期，请重新连接。",
+            Self::SshHostKeyConfirmationLimit => "待确认的主机密钥过多，请先关闭其他连接窗口。",
+            Self::SshAuthenticationFailed => "SSH 认证失败，请检查用户名和凭据。",
+            Self::SshCommandInvalid => "远程命令无效。",
+            Self::SshCommandFailed => "远程命令执行失败。",
+            Self::SshDirectoryPathInvalid => "远程目录路径无效。",
+            Self::SshDirectoryListFailed => "无法读取远程目录。",
+            Self::SshTransferInputInvalid => "SFTP 传输参数无效。",
+            Self::SshTransferJobLimit => "正在进行的 SFTP 传输过多，请稍后重试。",
+            Self::SshTransferFileTooLarge => "传输文件超过支持的大小。",
+            Self::SshTransferTotalTooLarge => "本次传输总大小超过限制。",
+            Self::SshTransferJobNotFound => "未找到该 SFTP 传输任务。",
+            Self::SshTransferFailed => "SFTP 传输失败，请检查连接和远端权限。",
+            Self::SshTerminalStartFailed => "无法启动 SSH 终端。",
+            Self::SshTerminalResizeInvalid => "终端尺寸无效。",
+            Self::SshTerminalSessionLimit => "打开的 SSH 终端过多，请先关闭其他终端。",
+            Self::SshTerminalSessionNotFound => "SSH 终端会话不存在或已关闭。",
+            Self::SshTerminalInputTooLarge => "终端输入超过允许的大小。",
+            Self::SshTerminalInputBackpressure => "终端暂时繁忙，请稍后继续输入。",
+            Self::LockPoisoned => "内部状态暂时不可用，请重试。",
         }
+        .to_owned()
     }
 }
 
-pub type Result<T> = std::result::Result<T, VaultError>;
+pub type Result<T> = std::result::Result<T, NekoError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_messages_hide_internal_validation_details() {
+        let error = NekoError::InvalidProfile("password=do-not-display");
+        assert_eq!(
+            error.public_message(),
+            "连接配置无效，请检查主机、端口和认证方式。"
+        );
+        assert!(!error.public_message().contains("do-not-display"));
+        assert_eq!(
+            NekoError::SshHostKeyAlgorithmRejected.public_message(),
+            "服务器使用了已禁用的 DSA 主机密钥算法。"
+        );
+    }
+}

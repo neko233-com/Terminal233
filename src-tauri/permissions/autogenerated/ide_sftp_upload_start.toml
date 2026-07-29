@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ide-sftp-upload-start"
+description = "Enables the ide_sftp_upload_start command without any pre-configured scope."
+commands.allow = ["ide_sftp_upload_start"]
+
+[[permission]]
+identifier = "deny-ide-sftp-upload-start"
+description = "Denies the ide_sftp_upload_start command without any pre-configured scope."
+commands.deny = ["ide_sftp_upload_start"]

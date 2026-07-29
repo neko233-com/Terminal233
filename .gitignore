@@ -70,6 +70,8 @@ ssh_host_*_key
 !ssh_host_*_key.pub
 
 # Test, browser and tooling artifacts
+.cache/
+.playwright-cli/
 output/
 playwright-report/
 test-results/

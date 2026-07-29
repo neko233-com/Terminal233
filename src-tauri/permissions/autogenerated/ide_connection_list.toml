@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ide-connection-list"
+description = "Enables the ide_connection_list command without any pre-configured scope."
+commands.allow = ["ide_connection_list"]
+
+[[permission]]
+identifier = "deny-ide-connection-list"
+description = "Denies the ide_connection_list command without any pre-configured scope."
+commands.deny = ["ide_connection_list"]

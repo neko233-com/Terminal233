@@ -1,15 +1,27 @@
 {
   "name": "nekossh",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "license": "MIT",
+  "homepage": "https://github.com/neko233-com/nekossh",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neko233-com/nekossh.git"
+  },
+  "packageManager": "npm@12.0.1",
+  "engines": {
+    "node": ">=24.18.0 <25",
+    "npm": ">=12.0.1 <13"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
     "web:dev": "vite --mode web",
-    "web:build": "tsc -b && vite build --mode web",
+    "web:build": "tsc -b && vite build --mode web && node scripts/validate-runtime-bundle.mjs web",
     "web:server": "node server/ssh2js-server.mjs",
     "web": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-web.ps1",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/validate-runtime-bundle.mjs tauri",
+    "typecheck": "tsc -b",
     "test": "npm run test:ui && npm run test:server",
     "test:ui": "vitest run",
     "test:server": "node --test server/*.node-test.mjs",
@@ -17,28 +29,38 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:icon": "tauri icon src-tauri/icons/nekossh-icon.svg --output src-tauri/icons",
+    "tauri:build": "tauri build --ci -- --locked",
+    "tauri:bundle": "tauri build --ci --bundles nsis,msi -- --locked",
+    "audit:rust": "cargo audit --file src-tauri/Cargo.lock",
+    "audit:deps": "npm audit --audit-level=low && npm run audit:rust",
+    "verify": "npm run build && npm run web:build && npm test && cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --locked --all-features"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "lucide-react": "^0.468.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "lucide-react": "^1.27.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.1.0",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
-    "jsdom": "^25.0.1",
-    "typescript": "^5.6.3",
+    "jsdom": "^30.0.1",
+    "typescript": "^7.0.2",
     "vite": "^8.1.5",
     "vitest": "^4.1.10"
+  },
+  "allowScripts": {
+    "cpu-features": false,
+    "fsevents": false,
+    "ssh2": false
   }
 }

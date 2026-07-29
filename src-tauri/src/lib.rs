@@ -7,6 +7,7 @@ pub mod domain;
 pub mod ephemeral;
 pub mod error;
 mod ide_commands;
+mod operation_admission;
 mod sftp_transfer;
 mod ssh;
 mod ssh_terminal;
@@ -31,12 +32,14 @@ pub fn run() {
             ide_commands::ide_sftp_upload_start,
             ide_commands::ide_sftp_download_start,
             ide_commands::ide_sftp_transfer_cancel,
+            ide_commands::ide_sftp_download_ack,
             ide_commands::ide_sftp_mkdir,
             ide_commands::ide_sftp_rename,
             ide_commands::ide_sftp_delete,
             ide_commands::ide_terminal_start,
             ide_commands::ide_terminal_write,
             ide_commands::ide_terminal_resize,
+            ide_commands::ide_terminal_ack_output,
             ide_commands::ide_terminal_close,
         ])
         .run(tauri::generate_context!())
@@ -61,6 +64,17 @@ mod configuration_tests {
         assert!(csp.contains("object-src 'none'"));
         assert!(csp.contains("frame-src 'none'"));
         assert!(!csp.contains("unsafe-eval"));
+        assert!(!csp.contains("127.0.0.1:1420"));
+        assert!(!csp.contains("ws://"));
+        let dev_csp = config["app"]["security"]["devCsp"]
+            .as_str()
+            .expect("development CSP must be configured separately");
+        assert!(dev_csp.contains("http://127.0.0.1:1420"));
+        assert!(dev_csp.contains("ws://127.0.0.1:1420"));
+        assert_eq!(
+            config["app"]["security"]["capabilities"],
+            serde_json::json!(["main-capability"])
+        );
     }
 
     #[test]
@@ -81,5 +95,16 @@ mod configuration_tests {
                 .as_str()
                 .is_some_and(|permission| permission.starts_with("shell:"))
         }));
+        assert_eq!(permissions.len(), 20);
+        assert!(permissions.iter().all(|permission| {
+            permission
+                .as_str()
+                .is_some_and(|permission| permission.starts_with("allow-ide-"))
+        }));
+        assert!(
+            !permissions
+                .iter()
+                .any(|permission| permission.as_str() == Some("core:default"))
+        );
     }
 }

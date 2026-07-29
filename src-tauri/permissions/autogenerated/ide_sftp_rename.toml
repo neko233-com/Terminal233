@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ide-sftp-rename"
+description = "Enables the ide_sftp_rename command without any pre-configured scope."
+commands.allow = ["ide_sftp_rename"]
+
+[[permission]]
+identifier = "deny-ide-sftp-rename"
+description = "Denies the ide_sftp_rename command without any pre-configured scope."
+commands.deny = ["ide_sftp_rename"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ide-terminal-start"
+description = "Enables the ide_terminal_start command without any pre-configured scope."
+commands.allow = ["ide_terminal_start"]
+
+[[permission]]
+identifier = "deny-ide-terminal-start"
+description = "Denies the ide_terminal_start command without any pre-configured scope."
+commands.deny = ["ide_terminal_start"]
