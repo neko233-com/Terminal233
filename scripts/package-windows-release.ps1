@@ -428,7 +428,7 @@ try {
     if ($actualCargo -notmatch "^cargo $([regex]::Escape($requiredRust)) ") {
         throw "Cargo $requiredRust is required; found '$actualCargo'."
     }
-    if ($actualRustVerbose -notmatch '(?m)^host: x86_64-pc-windows-msvc$') {
+    if ($actualRustVerbose -notmatch '(?m)^host: x86_64-pc-windows-msvc\r?$') {
         throw "The Windows x64 MSVC Rust host is required.`n$actualRustVerbose"
     }
 
