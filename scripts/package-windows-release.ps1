@@ -275,7 +275,7 @@ function Get-MsiProperty {
         $view = $database.OpenView(
             "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Property'"
         )
-        $view.Execute()
+        [void]$view.Execute()
         $record = $view.Fetch()
         if ($null -eq $record) {
             throw "MSI property is missing: $Property"
@@ -301,7 +301,7 @@ function Get-MsiUpgradeCode {
         $installer = New-Object -ComObject WindowsInstaller.Installer
         $database = $installer.OpenDatabase($Path, 0)
         $view = $database.OpenView('SELECT `UpgradeCode` FROM `Upgrade`')
-        $view.Execute()
+        [void]$view.Execute()
         $upgradeCodes = [Collections.Generic.List[string]]::new()
         while ($true) {
             $record = $view.Fetch()
@@ -697,7 +697,7 @@ try {
         Assert-NotReparsePoint -Paths @($artifact)
     }
     foreach ($executable in @($appExecutable, $nsisSource)) {
-        if ((Get-Item -LiteralPath $executable).VersionInfo.ProductVersion -ne $version) {
+        if ((Get-Item -LiteralPath $executable).VersionInfo.ProductVersion -cne $version) {
             throw "Executable ProductVersion does not match $version`: $executable"
         }
     }
@@ -714,15 +714,25 @@ try {
         throw "MSI ProductCode is not a canonical braced GUID: $msiSource"
     }
     $msiIdentity.productCode = $parsedProductCode.ToString('B').ToUpperInvariant()
-    if (
-        [string]$msiIdentity.productVersion -ne $version -or
-        [string]$msiIdentity.productName -ne 'NekoSSH' -or
-        [string]$msiIdentity.manufacturer -ne 'NekoSSH contributors' -or
-        [string]$msiIdentity.productLanguage -ne '2052' -or
+    $expectedMsiIdentity = [ordered]@{
+        productName = 'NekoSSH'
+        manufacturer = 'NekoSSH contributors'
+        productLanguage = '2052'
+        productVersion = $version
+        upgradeCode = '{44F1588E-BCFD-5973-A955-237DAF92726D}'
+    }
+    $invalidMsiIdentity = (
+        [string]$msiIdentity.productVersion -cne $expectedMsiIdentity.productVersion -or
+        [string]$msiIdentity.productName -cne $expectedMsiIdentity.productName -or
+        [string]$msiIdentity.manufacturer -cne $expectedMsiIdentity.manufacturer -or
+        [string]$msiIdentity.productLanguage -cne $expectedMsiIdentity.productLanguage -or
         [string]$msiIdentity.productCode -cnotmatch '^\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}$' -or
-        [string]$msiIdentity.upgradeCode -ne '{44F1588E-BCFD-5973-A955-237DAF92726D}'
-    ) {
-        throw "MSI identity does not match the pinned Windows product policy: $msiSource"
+        [string]$msiIdentity.upgradeCode -cne $expectedMsiIdentity.upgradeCode
+    )
+    if ($invalidMsiIdentity) {
+        $expectedJson = $expectedMsiIdentity | ConvertTo-Json -Compress
+        $actualJson = $msiIdentity | ConvertTo-Json -Compress
+        throw "MSI identity does not match the pinned Windows product policy. Expected=$expectedJson Actual=$actualJson Path=$msiSource"
     }
 
     if (Get-CheckedOutput -FilePath 'git' -ArgumentList @('status', '--porcelain', '--untracked-files=all')) {

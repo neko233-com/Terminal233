@@ -207,7 +207,7 @@ function Get-MsiProperty {
         $view = $database.OpenView(
             "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Property'"
         )
-        $view.Execute()
+        [void]$view.Execute()
         $record = $view.Fetch()
         if ($null -eq $record) {
             throw "MSI property is missing: $Property"
@@ -233,7 +233,7 @@ function Get-MsiUpgradeCode {
         $installer = New-Object -ComObject WindowsInstaller.Installer
         $database = $installer.OpenDatabase($Path, 0)
         $view = $database.OpenView('SELECT `UpgradeCode` FROM `Upgrade`')
-        $view.Execute()
+        [void]$view.Execute()
         $upgradeCodes = [Collections.Generic.List[string]]::new()
         while ($true) {
             $record = $view.Fetch()

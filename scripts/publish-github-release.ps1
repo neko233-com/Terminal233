@@ -182,7 +182,7 @@ function Get-MsiProperty {
         $view = $database.OpenView(
             "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Property'"
         )
-        $view.Execute()
+        [void]$view.Execute()
         $record = $view.Fetch()
         if ($null -eq $record) {
             throw "MSI property is missing: $Property"
@@ -208,7 +208,7 @@ function Get-MsiUpgradeCode {
         $installer = New-Object -ComObject WindowsInstaller.Installer
         $database = $installer.OpenDatabase($Path, 0)
         $view = $database.OpenView('SELECT `UpgradeCode` FROM `Upgrade`')
-        $view.Execute()
+        [void]$view.Execute()
         $upgradeCodes = [Collections.Generic.List[string]]::new()
         while ($true) {
             $record = $view.Fetch()
@@ -495,7 +495,7 @@ if (
 $localFiles[$manifestName] = $manifestPath
 $manifestRecordsByName[$manifestName] = $manifestLocalRecord
 $notesPath = $localFiles[$notesName]
-if ((Get-Item -LiteralPath $localFiles[$nsisName]).VersionInfo.ProductVersion -ne $version) {
+if ((Get-Item -LiteralPath $localFiles[$nsisName]).VersionInfo.ProductVersion -cne $version) {
     throw 'NSIS ProductVersion does not match the release manifest.'
 }
 $actualMsiIdentity = [ordered]@{
@@ -519,17 +519,17 @@ foreach ($field in @(
     'productVersion',
     'upgradeCode'
 )) {
-    if ([string]$actualMsiIdentity[$field] -ne [string]$manifest.windowsInstaller.$field) {
+    if ([string]$actualMsiIdentity[$field] -cne [string]$manifest.windowsInstaller.$field) {
         throw "MSI $field does not match the release manifest."
     }
 }
 if (
-    [string]$actualMsiIdentity.productVersion -ne $version -or
-    [string]$actualMsiIdentity.productName -ne 'NekoSSH' -or
-    [string]$actualMsiIdentity.manufacturer -ne 'NekoSSH contributors' -or
-    [string]$actualMsiIdentity.productLanguage -ne '2052' -or
+    [string]$actualMsiIdentity.productVersion -cne $version -or
+    [string]$actualMsiIdentity.productName -cne 'NekoSSH' -or
+    [string]$actualMsiIdentity.manufacturer -cne 'NekoSSH contributors' -or
+    [string]$actualMsiIdentity.productLanguage -cne '2052' -or
     [string]$actualMsiIdentity.productCode -cnotmatch '^\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}$' -or
-    [string]$actualMsiIdentity.upgradeCode -ne '{44F1588E-BCFD-5973-A955-237DAF92726D}'
+    [string]$actualMsiIdentity.upgradeCode -cne '{44F1588E-BCFD-5973-A955-237DAF92726D}'
 ) {
     throw 'MSI identity does not match the pinned Windows product policy.'
 }
