@@ -13,6 +13,13 @@ if ($moduleSource -match "(?m)-ArgumentList\s+@\('status'") {
 if (-not $moduleSource.Contains("`$EnvironmentVariables['GIT_NO_LAZY_FETCH'] = '1'")) {
     throw 'Source integrity must disable partial-clone lazy fetches.'
 }
+$safeDirectoryBindings = [regex]::Matches(
+    $moduleSource,
+    [regex]::Escape('"safe.directory=$RepositoryRoot"')
+)
+if ($safeDirectoryBindings.Count -ne 3) {
+    throw 'Every source-integrity Git process must bind safe.directory to the exact repository root.'
+}
 
 $gitExecutable = (Get-Command git.exe -CommandType Application -ErrorAction Stop |
     Select-Object -First 1).Source

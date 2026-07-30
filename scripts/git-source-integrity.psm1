@@ -86,6 +86,7 @@ function Invoke-NekoSshGitCommand {
         '-c', 'core.hooksPath=NUL',
         '-c', 'core.attributesFile=NUL',
         '-c', 'core.excludesFile=NUL',
+        '-c', "safe.directory=$RepositoryRoot",
         '-C', $RepositoryRoot
     ) + $ArgumentList
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -360,6 +361,7 @@ function Add-NekoSshGitBlobToDigest {
         '-c', 'core.hooksPath=NUL',
         '-c', 'core.attributesFile=NUL',
         '-c', 'core.excludesFile=NUL',
+        '-c', "safe.directory=$RepositoryRoot",
         '-C', $RepositoryRoot,
         'cat-file', 'blob', $ObjectId
     )
@@ -646,6 +648,7 @@ function Export-NekoSshGitBlob {
         '-c', 'core.hooksPath=NUL',
         '-c', 'core.attributesFile=NUL',
         '-c', 'core.excludesFile=NUL',
+        '-c', "safe.directory=$RepositoryRoot",
         '-C', $RepositoryRoot,
         'cat-file', 'blob', $ObjectId
     )

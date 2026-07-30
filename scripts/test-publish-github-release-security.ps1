@@ -6,6 +6,8 @@ $ErrorActionPreference = 'Stop'
 
 $publisherPath = Join-Path $PSScriptRoot 'publish-github-release.ps1'
 $source = [IO.File]::ReadAllText($publisherPath)
+$packagerPath = Join-Path $PSScriptRoot 'package-windows-release.ps1'
+$packagerSource = [IO.File]::ReadAllText($packagerPath)
 $tokens = $null
 $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile(
@@ -64,6 +66,14 @@ if (
     throw 'The incomplete production toolchain gate must remain before publisher function execution.'
 }
 
+$packagerSafeDirectoryBindings = [regex]::Matches(
+    $packagerSource,
+    [regex]::Escape('"safe.directory=$repositoryRoot"')
+)
+if ($packagerSafeDirectoryBindings.Count -ne 3) {
+    throw 'Every packager Git process must bind safe.directory to the exact repository root.'
+}
+
 $hardenedGit = Get-RequiredFunctionText -Name 'Invoke-HardenedPublishGit'
 Assert-ContainsAll `
     -Text $hardenedGit `
@@ -76,6 +86,7 @@ Assert-ContainsAll `
         'credential.helper=',
         'fetch.fsckObjects=true',
         'transfer.fsckObjects=true',
+        'safe.directory=$repositoryRoot',
         "'^(?i:GIT_)'",
         '$environment.Remove',
         'GIT_CONFIG_NOSYSTEM',
@@ -420,6 +431,7 @@ finally {
     Ast = 'passed'
     ProductionNoGo = 'retained'
     GitConfigInjection = 'rejected-static-and-process'
+    ScopedSafeDirectory = 'passed'
     UnsafeLocalGitConfig = 'rejected'
     LocalTagObject = 'reverified'
     GitHubTagObject = 'exact'

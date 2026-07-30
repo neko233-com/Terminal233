@@ -223,7 +223,8 @@ function Invoke-HardenedPublishGit {
         '-c', 'core.unsetenvvars=',
         '-c', 'credential.helper=',
         '-c', 'fetch.fsckObjects=true',
-        '-c', 'transfer.fsckObjects=true'
+        '-c', 'transfer.fsckObjects=true',
+        '-c', "safe.directory=$repositoryRoot"
     ) + $ArgumentList
     $startInfo.Arguments = (
         $hardenedArgumentList |
