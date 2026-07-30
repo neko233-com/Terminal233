@@ -190,6 +190,24 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-OriginFetchChecked {
+    $maximumAttempts = 4
+    for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
+        try {
+            Invoke-Checked -FilePath 'git' -ArgumentList @('fetch', '--prune', 'origin')
+            return
+        }
+        catch {
+            if ($attempt -eq $maximumAttempts) {
+                throw
+            }
+            $retryDelaySeconds = 1 -shl $attempt
+            Write-Warning "git fetch attempt $attempt of $maximumAttempts failed; retrying in $retryDelaySeconds seconds."
+            Start-Sleep -Seconds $retryDelaySeconds
+        }
+    }
+}
+
 function Get-CheckedOutput {
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -370,7 +388,7 @@ try {
         throw 'Manual releases require a clean working tree.'
     }
 
-    Invoke-Checked -FilePath 'git' -ArgumentList @('fetch', '--prune', 'origin')
+    Invoke-OriginFetchChecked
     $commit = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'HEAD')
     $originCommit = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'origin/main')
     if ($commit -ne $originCommit) {
@@ -742,7 +760,7 @@ try {
     if ($postBuildCommit -ne $commit) {
         throw "HEAD changed during the build ($commit -> $postBuildCommit)."
     }
-    Invoke-Checked -FilePath 'git' -ArgumentList @('fetch', '--prune', 'origin')
+    Invoke-OriginFetchChecked
     $postBuildOriginCommit = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'origin/main')
     if ($postBuildOriginCommit -ne $commit) {
         throw "origin/main changed during the build ($commit -> $postBuildOriginCommit)."
