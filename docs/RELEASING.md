@@ -51,7 +51,7 @@ Tauri 签名配置必须位于仓库外或忽略目录，只允许以下字段�
 正式构建：
 
 ```powershell
-npm run release:windows -- `
+npm run release:windows '--' `
   -TauriSigningConfig C:\secure\nekossh-signing.json `
   -ExpectedSignerThumbprint 0123456789ABCDEF0123456789ABCDEF01234567
 ```
@@ -59,7 +59,7 @@ npm run release:windows -- `
 仅做本机打包验证：
 
 ```powershell
-npm run release:windows -- -AllowUnsigned
+npm run release:windows '--' -AllowUnsigned
 ```
 
 脚本从全新的 Cargo target 构建，执行双入口生产构建、测试、Clippy、依赖审计和第三方许可生成，然后核验 MSI ProductCode/UpgradeCode、签名身份与全部哈希。正式签名集合只包含真正分发的 Tauri 主程序、NSIS、MSI 和 Web 启动器；构建用 `cdylib` 不是安装资产。
@@ -147,7 +147,7 @@ $shortCommit = (git rev-parse --short=12 HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to read HEAD.' }
 $releaseDir = (Resolve-Path "output/release/v$($package.version)-$shortCommit").Path
 
-npm run release:publish -- `
+npm run release:publish '--' `
   -ReleaseDirectory $releaseDir `
   -WindowsSmokeReceiptPath (Join-Path $releaseDir 'WINDOWS_SMOKE_RECEIPT.psd1')
 ```

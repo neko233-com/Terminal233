@@ -11,7 +11,7 @@ npm run verify
 npm run audit:deps
 
 # 不可发布的本机打包验证
-npm run release:windows -- -AllowUnsigned
+npm run release:windows '--' -AllowUnsigned
 ```
 
 仓库禁用 GitHub Actions。手工发布环境固定使用 Node.js 24.18.1、npm 12.0.2 与 Rust 1.97.1（`.nvmrc`、`packageManager`、`rust-toolchain.toml`）。

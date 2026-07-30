@@ -58,12 +58,12 @@ npm run audit:deps
 
 ```powershell
 # 有本地 Authenticode 配置的正式发行
-npm run release:windows -- `
+npm run release:windows '--' `
   -TauriSigningConfig C:\secure\nekossh-signing.json `
   -ExpectedSignerThumbprint <证书指纹>
 
 # 没有签名条件时，仅生成不可发布的本机验证产物
-npm run release:windows -- -AllowUnsigned
+npm run release:windows '--' -AllowUnsigned
 ```
 
 脚本会执行锁定依赖安装、Web/Tauri 双构建、测试、依赖审计，并生成以下两套 Windows 入口：
@@ -77,7 +77,7 @@ NSIS 面向当前用户，MSI 面向管理员部署；两者是独立安装通�
 
 正式分发必须使用版本控制签名策略允许的可信 Authenticode 证书，为真正分发的 Tauri 主程序、NSIS、MSI 与 Web 启动器签名并加 RFC 3161 时间戳；内置 `node.exe` 还必须匹配固定官方 SHA-256 及 OpenJS 有效时间戳签名。仓库不存放签名私钥。任何无签名输出都标记为 `publishable=false`，发布器会无条件拒绝。
 
-稳定版发布前还必须由受控签名机预发一次性挑战，在一次性干净 Windows x64 VM 中执行 NSIS/MSI 安装、同格式升级或重装、降级阻止、卸载、ARP/残留检查、已安装 PE 签名与两套运行时自检。VM 生成未签回执，受控签名机复验后再签名 `WINDOWS_SMOKE_RECEIPT.psd1`。`npm run release:publish -- -ReleaseDirectory <输出目录>` 会验证 manifest、annotated tag、Actions 禁用状态、不可变 Release 策略、草稿与公开资产、重新下载哈希及 GitHub attestations。发行文件属于 GitHub Release assets，不进入 GitHub Packages Registry。完整流程见 [手工发布说明](docs/RELEASING.md)。
+稳定版发布前还必须由受控签名机预发一次性挑战，在一次性干净 Windows x64 VM 中执行 NSIS/MSI 安装、同格式升级或重装、降级阻止、卸载、ARP/残留检查、已安装 PE 签名与两套运行时自检。VM 生成未签回执，受控签名机复验后再签名 `WINDOWS_SMOKE_RECEIPT.psd1`。`npm run release:publish '--' -ReleaseDirectory <输出目录>` 会验证 manifest、annotated tag、Actions 禁用状态、不可变 Release 策略、草稿与公开资产、重新下载哈希及 GitHub attestations。发行文件属于 GitHub Release assets，不进入 GitHub Packages Registry。完整流程见 [手工发布说明](docs/RELEASING.md)。
 
 ## 安全限制
 
