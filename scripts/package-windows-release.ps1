@@ -355,6 +355,13 @@ $temporaryNoticesPath = $null
 $temporaryTauriTargetRoot = $null
 Push-Location $repositoryRoot
 try {
+    if ($null -ne $resolvedNpmCli) {
+        if (-not (Test-Path -LiteralPath $resolvedNpmCli -PathType Leaf)) {
+            throw "The pinned npm CLI is not a regular file: $resolvedNpmCli"
+        }
+        Assert-NotReparsePoint -Paths @($resolvedNpmCli)
+    }
+
     $branch = Get-CheckedOutput -FilePath 'git' -ArgumentList @('branch', '--show-current')
     if ($branch -ne 'main') {
         throw "Manual releases must be built from main, not '$branch'."
@@ -547,9 +554,8 @@ try {
     }
     $timestampUrlForSigning = $null
     if ($null -ne $resolvedNpmCli) {
-        $portableNpmCommand = "node `"$($resolvedNpmCli.Replace('\', '/'))`" run build"
         $configOverride.build = [ordered]@{
-            beforeBuildCommand = $portableNpmCommand
+            beforeBuildCommand = 'node scripts/run-release-frontend-build.mjs'
         }
     }
     if ($null -ne $resolvedSigningConfig) {
@@ -647,8 +653,14 @@ try {
     }
     $tauriArguments += @('--', '--locked')
     $previousCargoTargetDirectory = $env:CARGO_TARGET_DIR
+    $previousReleaseNpmCli = $env:NEKOSSH_RELEASE_NPM_CLI
     try {
         $env:CARGO_TARGET_DIR = $tauriTargetRoot
+        if ($null -ne $resolvedNpmCli) {
+            $env:NEKOSSH_RELEASE_NPM_CLI = $resolvedNpmCli
+        } else {
+            Remove-Item Env:NEKOSSH_RELEASE_NPM_CLI -ErrorAction SilentlyContinue
+        }
         Invoke-Checked -FilePath 'node' -ArgumentList $tauriArguments
     }
     finally {
@@ -656,6 +668,11 @@ try {
             Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
         } else {
             $env:CARGO_TARGET_DIR = $previousCargoTargetDirectory
+        }
+        if ($null -eq $previousReleaseNpmCli) {
+            Remove-Item Env:NEKOSSH_RELEASE_NPM_CLI -ErrorAction SilentlyContinue
+        } else {
+            $env:NEKOSSH_RELEASE_NPM_CLI = $previousReleaseNpmCli
         }
         if ($null -ne $temporaryBuildConfig -and (Test-Path -LiteralPath $temporaryBuildConfig)) {
             Assert-NotReparsePoint -Paths @($temporaryBuildConfig)
