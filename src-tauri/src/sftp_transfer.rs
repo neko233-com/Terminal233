@@ -34,8 +34,6 @@ use crate::{
 };
 
 pub const SSH_SFTP_TRANSFER_PROGRESS_EVENT: &str = "ssh-sftp-transfer-progress";
-pub const SSH_SFTP_TRANSFER_FILE_EVENT: &str = "ssh-sftp-transfer-file";
-pub const SSH_SFTP_TRANSFER_COMPLETE_EVENT: &str = "ssh-sftp-transfer-complete";
 
 const MAX_ACTIVE_JOBS: usize = 4;
 const MAX_WORKERS_PER_JOB: usize = 4;
@@ -145,16 +143,19 @@ pub enum SshSftpDownloadEvent {
     Completed(SshSftpTransferCompleted),
 }
 
+/// Upload progress is scoped to the IPC channel created by the caller before invoking start.
+/// Fast files can therefore report completion before the command promise resolves without racing
+/// a global event listener.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SshSftpTransferFileEvent {
-    pub job_id: Uuid,
-    pub file_id: Uuid,
-    pub name: String,
-    pub direction: SshSftpTransferDirection,
-    pub status: SshSftpTransferStatus,
-    /// Stable public error code only.  Remote server/library errors are intentionally omitted.
-    pub code: Option<&'static str>,
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum SshSftpUploadEvent {
+    Started(SshSftpTransferStarted),
+    Progress(SshSftpTransferProgress),
+    Completed(SshSftpTransferCompleted),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -348,7 +349,7 @@ struct DownloadTask {
 
 enum TransferOutcome {
     Completed,
-    Failed(&'static str),
+    Failed,
     Cancelled,
 }
 
@@ -367,6 +368,7 @@ impl SftpTransferService {
         profile_id: Uuid,
         remote_directory: String,
         files: Vec<SshSftpUploadInput>,
+        events: IpcChannel<SshSftpUploadEvent>,
         operation_permit: OperationPermit,
     ) -> Result<SshSftpTransferStarted> {
         validate_remote_path(&remote_directory)?;
@@ -442,6 +444,21 @@ impl SftpTransferService {
             return Err(NekoError::ProfileNotFound);
         }
 
+        let started = SshSftpTransferStarted {
+            job_id,
+            direction: SshSftpTransferDirection::Upload,
+            total_files: items.len(),
+            total_bytes: Some(total_bytes),
+            items,
+        };
+        if events
+            .send(SshSftpUploadEvent::Started(started.clone()))
+            .is_err()
+        {
+            self.remove_job(job_id);
+            return Err(NekoError::SshTransferFailed);
+        }
+
         let tracker = Arc::new(JobTracker::new(Some(total_bytes)));
         if let Err(error) = self.spawn_job(
             app,
@@ -451,19 +468,14 @@ impl SftpTransferService {
             tasks,
             control,
             tracker,
+            Some(events),
             None,
         ) {
             self.remove_job(job_id);
             return Err(error);
         }
 
-        Ok(SshSftpTransferStarted {
-            job_id,
-            direction: SshSftpTransferDirection::Upload,
-            total_files: items.len(),
-            total_bytes: Some(total_bytes),
-            items,
-        })
+        Ok(started)
     }
 
     pub fn start_download(
@@ -543,6 +555,7 @@ impl SftpTransferService {
             tasks,
             control,
             tracker,
+            None,
             Some(events),
         ) {
             self.remove_job(job_id);
@@ -724,6 +737,7 @@ impl SftpTransferService {
         tasks: Vec<TransferTask>,
         control: Arc<JobControl>,
         tracker: Arc<JobTracker>,
+        upload_events: Option<IpcChannel<SshSftpUploadEvent>>,
         download_events: Option<IpcChannel<SshSftpDownloadEvent>>,
     ) -> Result<()> {
         // Downloads use one worker: the sole outstanding 64 KiB chunk is therefore a strict
@@ -736,6 +750,7 @@ impl SftpTransferService {
         let queue = Arc::new(Mutex::new(VecDeque::from(tasks)));
         let ssh = Arc::clone(&self.ssh);
         let registry = Arc::clone(&self.registry);
+        let upload_events = upload_events.map(Arc::new);
         let download_events = download_events.map(Arc::new);
         thread::Builder::new()
             .name(format!("nekossh-sftp-job-{job_id}"))
@@ -749,6 +764,7 @@ impl SftpTransferService {
                         let worker_queue = Arc::clone(&queue);
                         let worker_control = Arc::clone(&control);
                         let worker_tracker = Arc::clone(&tracker);
+                        let worker_upload_events = upload_events.as_ref().map(Arc::clone);
                         let worker_download_events = download_events.as_ref().map(Arc::clone);
                         scope.spawn(move || {
                             transfer_worker(
@@ -756,22 +772,21 @@ impl SftpTransferService {
                                 worker_ssh,
                                 profile_id,
                                 job_id,
-                                direction,
                                 worker_queue,
                                 worker_control,
                                 worker_tracker,
+                                worker_upload_events,
                                 worker_download_events,
                             );
                         });
                     }
                 });
                 finish_job(
-                    &app,
                     job_id,
                     direction,
-                    &control,
                     &tracker,
                     &registry,
+                    upload_events.as_deref(),
                     download_events.as_deref(),
                 );
             })
@@ -824,10 +839,10 @@ fn transfer_worker(
     ssh: Arc<SshService>,
     profile_id: Uuid,
     job_id: Uuid,
-    direction: SshSftpTransferDirection,
     queue: Arc<Mutex<VecDeque<TransferTask>>>,
     control: Arc<JobControl>,
     tracker: Arc<JobTracker>,
+    upload_events: Option<Arc<IpcChannel<SshSftpUploadEvent>>>,
     download_events: Option<Arc<IpcChannel<SshSftpDownloadEvent>>>,
 ) {
     loop {
@@ -842,17 +857,19 @@ fn transfer_worker(
             return;
         };
 
-        let (file_id, name) = match &task {
-            TransferTask::Upload(task) => (task.file_id, task.name.clone()),
-            TransferTask::Download(task) => (task.file_id, task.name.clone()),
-        };
         let outcome = if control.is_cancelled() {
             TransferOutcome::Cancelled
         } else {
             match task {
-                TransferTask::Upload(task) => {
-                    upload_one(&app, &ssh, profile_id, job_id, &task, &control, &tracker)
-                }
+                TransferTask::Upload(task) => upload_one(
+                    &ssh,
+                    profile_id,
+                    job_id,
+                    &task,
+                    &control,
+                    &tracker,
+                    upload_events.as_deref(),
+                ),
                 TransferTask::Download(task) => download_one(
                     &app,
                     &ssh,
@@ -865,18 +882,18 @@ fn transfer_worker(
                 ),
             }
         };
-        report_file_outcome(&app, job_id, file_id, name, direction, outcome, &tracker);
+        report_file_outcome(outcome, &tracker);
     }
 }
 
 fn upload_one(
-    app: &AppHandle,
     ssh: &SshService,
     profile_id: Uuid,
     job_id: Uuid,
     task: &UploadTask,
     control: &JobControl,
     tracker: &JobTracker,
+    events: Option<&IpcChannel<SshSftpUploadEvent>>,
 ) -> TransferOutcome {
     let result = (|| -> Result<bool> {
         let session = ssh.open_authenticated_for_terminal(profile_id)?;
@@ -908,10 +925,9 @@ fn upload_one(
                 }
                 offset += written;
                 let job_bytes = tracker.add_known_bytes(written as u64);
-                emit(
-                    app,
-                    SSH_SFTP_TRANSFER_PROGRESS_EVENT,
-                    SshSftpTransferProgress {
+                let events = events.ok_or(NekoError::SshTransferFailed)?;
+                if events
+                    .send(SshSftpUploadEvent::Progress(SshSftpTransferProgress {
                         job_id,
                         file_id: task.file_id,
                         name: task.name.clone(),
@@ -920,8 +936,12 @@ fn upload_one(
                         file_total_bytes: Some(task.bytes.len() as u64),
                         job_bytes_transferred: job_bytes,
                         job_total_bytes: tracker.total_bytes,
-                    },
-                );
+                    }))
+                    .is_err()
+                {
+                    control.cancelled.store(true, Ordering::Release);
+                    return Ok(false);
+                }
             }
             if !control.remote_effect_allowed() {
                 return Ok(false);
@@ -1072,7 +1092,7 @@ fn outcome_from_result(result: Result<bool>, control: &JobControl) -> TransferOu
             if control.is_cancelled() && matches!(error, NekoError::Locked) {
                 TransferOutcome::Cancelled
             } else {
-                TransferOutcome::Failed(error.code())
+                TransferOutcome::Failed
             }
         }
     }
@@ -1089,62 +1109,32 @@ fn is_job_fatal(error: &NekoError) -> bool {
     )
 }
 
-fn report_file_outcome(
-    app: &AppHandle,
-    job_id: Uuid,
-    file_id: Uuid,
-    name: String,
-    direction: SshSftpTransferDirection,
-    outcome: TransferOutcome,
-    tracker: &JobTracker,
-) {
-    let (status, code) = match outcome {
+fn report_file_outcome(outcome: TransferOutcome, tracker: &JobTracker) {
+    match outcome {
         TransferOutcome::Completed => {
             tracker.completed_files.fetch_add(1, Ordering::AcqRel);
-            (SshSftpTransferStatus::Completed, None)
         }
-        TransferOutcome::Failed(code) => {
+        TransferOutcome::Failed => {
             tracker.failed_files.fetch_add(1, Ordering::AcqRel);
-            (SshSftpTransferStatus::CompletedWithErrors, Some(code))
         }
         TransferOutcome::Cancelled => {
             tracker.cancelled_files.fetch_add(1, Ordering::AcqRel);
-            (SshSftpTransferStatus::Cancelled, None)
         }
-    };
-    emit(
-        app,
-        SSH_SFTP_TRANSFER_FILE_EVENT,
-        SshSftpTransferFileEvent {
-            job_id,
-            file_id,
-            name,
-            direction,
-            status,
-            code,
-        },
-    );
+    }
 }
 
 fn finish_job(
-    app: &AppHandle,
     job_id: Uuid,
     direction: SshSftpTransferDirection,
-    control: &JobControl,
     tracker: &JobTracker,
     registry: &Arc<Mutex<TransferRegistry>>,
+    upload_events: Option<&IpcChannel<SshSftpUploadEvent>>,
     download_events: Option<&IpcChannel<SshSftpDownloadEvent>>,
 ) {
     let completed_files = tracker.completed_files.load(Ordering::Acquire);
     let failed_files = tracker.failed_files.load(Ordering::Acquire);
     let cancelled_files = tracker.cancelled_files.load(Ordering::Acquire);
-    let status = if failed_files > 0 {
-        SshSftpTransferStatus::CompletedWithErrors
-    } else if control.is_cancelled() || cancelled_files > 0 {
-        SshSftpTransferStatus::Cancelled
-    } else {
-        SshSftpTransferStatus::Completed
-    };
+    let status = transfer_status(failed_files, cancelled_files);
     if let Ok(mut active) = registry.lock() {
         active.jobs.remove(&job_id);
         active.profiles.remove(&job_id);
@@ -1159,11 +1149,21 @@ fn finish_job(
         bytes_transferred: tracker.bytes_transferred.load(Ordering::Acquire),
         total_bytes: tracker.total_bytes,
     };
-    // Existing global progress/completion remains for upload UI. Downloads also receive the
-    // completion through their exclusive channel, ordered after all acknowledged chunks.
-    emit(app, SSH_SFTP_TRANSFER_COMPLETE_EVENT, completed.clone());
+    if let Some(events) = upload_events {
+        let _ = events.send(SshSftpUploadEvent::Completed(completed.clone()));
+    }
     if let Some(events) = download_events {
         let _ = events.send(SshSftpDownloadEvent::Completed(completed));
+    }
+}
+
+fn transfer_status(failed_files: usize, cancelled_files: usize) -> SshSftpTransferStatus {
+    if failed_files > 0 {
+        SshSftpTransferStatus::CompletedWithErrors
+    } else if cancelled_files > 0 {
+        SshSftpTransferStatus::Cancelled
+    } else {
+        SshSftpTransferStatus::Completed
     }
 }
 
@@ -1366,6 +1366,36 @@ mod tests {
         assert_eq!(value["dataBase64"], "YWJj");
         assert_eq!(value["sequence"], 7);
         assert!(value.get("data_base64").is_none());
+
+        let upload = serde_json::to_value(SshSftpUploadEvent::Progress(SshSftpTransferProgress {
+            job_id: Uuid::nil(),
+            file_id: Uuid::nil(),
+            name: "report.csv".to_owned(),
+            direction: SshSftpTransferDirection::Upload,
+            file_bytes_transferred: 3,
+            file_total_bytes: Some(8),
+            job_bytes_transferred: 3,
+            job_total_bytes: Some(8),
+        }))
+        .expect("upload event serializes");
+        assert_eq!(upload["kind"], "progress");
+        assert_eq!(upload["jobId"], Uuid::nil().to_string());
+        assert_eq!(upload["direction"], "upload");
+        assert_eq!(upload["jobBytesTransferred"], 3);
+    }
+
+    #[test]
+    fn transfer_status_is_derived_from_final_file_counts() {
+        assert_eq!(
+            transfer_status(0, 0),
+            SshSftpTransferStatus::Completed,
+            "a cancellation requested after the final remote effect must not rewrite success"
+        );
+        assert_eq!(transfer_status(0, 1), SshSftpTransferStatus::Cancelled);
+        assert_eq!(
+            transfer_status(1, 1),
+            SshSftpTransferStatus::CompletedWithErrors
+        );
     }
 
     #[test]

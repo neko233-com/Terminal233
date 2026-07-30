@@ -13,7 +13,8 @@ NekoSSH 提供两个完全独立的 SSH 入口：
 
 - Web macOS 必须在系统浏览器中运行，不嵌入 Tauri WebView。
 - Tauri 只提供传统 SSH IDE，不包含 macOS 伪桌面、长期凭据存储、云同步或密码锁。
-- SSH 密码、内嵌私钥、临时主机信任只保存在当前进程内；断开或退出后清理。
+- SSH 密码、内嵌私钥、私钥口令与临时主机信任只保存在当前进程内；断开或退出后清理。
+- Web `ssh2` 与 Tauri libssh2 都强制现代 SSH 算法白名单，拒绝 SHA-1、`ssh-rsa`、CBC、MD5 和白名单外协商，不提供旧算法降级。
 - 首次连接必须确认服务器 SHA-256 指纹；变化的主机密钥会阻止连接。
 - 文件上传默认不覆盖。删除只允许单文件、链接或空目录，并要求显式确认。
 
@@ -85,7 +86,7 @@ NSIS 面向当前用户，MSI 面向管理员部署；两者是独立安装通�
 - localhost 服务固定绑定 `127.0.0.1`，校验浏览器 Origin，并使用 HttpOnly、SameSite=Strict 的临时会话 cookie。
 - MCP 使用独立 Bearer token、一次性 grant、短时 attachment ID 与 scope；Agent 不直接接收 SSH 密码。
 - Tauri PTY 通过 IPC Channel 传递原始二进制字节，并以逐块 ACK、超时和有界队列施加背压；不会把终端流提前转成普通文本。
-- Tauri SFTP 单文件上限 16 MiB、单任务 64 MiB、每任务最多 32 个文件；下载同样通过逐块 ACK 限制内存占用。
+- Tauri SFTP 单文件上限 16 MiB、单任务 64 MiB、每任务最多 32 个文件；上传和下载使用各任务专属 IPC Channel，下载再通过逐块 ACK 限制内存占用。
 - 高价值主机首次连接时，仍应通过可信渠道比对指纹。
 
 ## 设计参考

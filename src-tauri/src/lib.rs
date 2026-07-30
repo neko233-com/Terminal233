@@ -103,6 +103,12 @@ mod configuration_tests {
             config["app"]["windows"][0]["incognito"].as_bool(),
             Some(true)
         );
+        // Tauri's native file-drop handler intercepts HTML5 drag events on Windows. The IDE
+        // deliberately uses WebView drag/drop for connection ordering and SFTP uploads.
+        assert_eq!(
+            config["app"]["windows"][0]["dragDropEnabled"].as_bool(),
+            Some(false)
+        );
         assert_eq!(
             config["bundle"]["windows"]["allowDowngrades"].as_bool(),
             Some(false)

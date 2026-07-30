@@ -172,6 +172,8 @@ fn verify_payload(root: &Path) -> Result<Vec<String>, String> {
         "runtime/node.exe",
         "app/dist/index.html",
         "app/server/ssh2js-server.mjs",
+        "app/server/ssh-algorithms.mjs",
+        "app/server/content-disposition.mjs",
         "app/server/static-web.mjs",
         "app/node_modules/ssh2/package.json",
     ] {

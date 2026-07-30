@@ -78,6 +78,10 @@ export type IdeDownloadEvent =
   | ({ kind: 'started' } & IdeTransferStarted)
   | { kind: 'chunk'; jobId: string; fileId: string; name: string; sequence: number; offset: number; dataBase64: string }
   | ({ kind: 'completed' } & IdeTransferComplete)
+export type IdeUploadEvent =
+  | ({ kind: 'started' } & IdeTransferStarted)
+  | ({ kind: 'progress' } & IdeTransferProgress)
+  | ({ kind: 'completed' } & IdeTransferComplete)
 export interface IdeTransferComplete {
   jobId: string
   direction: 'upload' | 'download'
@@ -145,12 +149,18 @@ export function deleteIdeRemote(connectionId: string, path: string): Promise<voi
   return invoke('ide_sftp_delete', { connectionId, path })
 }
 
-export async function uploadIdeFiles(connectionId: string, remoteDirectory: string, files: File[]): Promise<IdeTransferStarted> {
+export async function uploadIdeFiles(
+  connectionId: string,
+  remoteDirectory: string,
+  files: File[],
+  onEvent: (event: IdeUploadEvent) => void,
+): Promise<IdeTransferStarted> {
   if (files.length < 1 || files.length > 32) throw new Error('每次只能上传 1 到 32 个文件。')
   const oversized = files.find((file) => file.size > 16 * 1024 * 1024)
   if (oversized) throw new Error(`“${oversized.name}”超过 16 MB 的单文件上限。`)
   const totalBytes = files.reduce((total, file) => total + file.size, 0)
   if (totalBytes > 64 * 1024 * 1024) throw new Error('单次上传总量不能超过 64 MB。')
+  const events = new Channel<IdeUploadEvent>(onEvent)
   const inputs = []
   for (const file of files) {
     inputs.push({
@@ -159,7 +169,7 @@ export async function uploadIdeFiles(connectionId: string, remoteDirectory: stri
       overwrite: false,
     })
   }
-  return invoke('ide_sftp_upload_start', { connectionId, remoteDirectory, files: inputs })
+  return invoke('ide_sftp_upload_start', { connectionId, remoteDirectory, files: inputs, events })
 }
 
 export function downloadIdeFiles(
@@ -310,10 +320,6 @@ async function sendTerminalInputChunk(
 
 export async function onIdeTransferProgress(handler: (event: IdeTransferProgress) => void): Promise<UnlistenFn> {
   return listen<IdeTransferProgress>('ssh-sftp-transfer-progress', (event) => handler(event.payload))
-}
-
-export async function onIdeTransferComplete(handler: (event: IdeTransferComplete) => void): Promise<UnlistenFn> {
-  return listen<IdeTransferComplete>('ssh-sftp-transfer-complete', (event) => handler(event.payload))
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

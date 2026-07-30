@@ -15,7 +15,7 @@ use std::{
 };
 
 use serde::Serialize;
-use ssh2::{ErrorCode, ExtendedData, HostKeyType, Session};
+use ssh2::{ErrorCode, ExtendedData, HostKeyType, MethodType, Session};
 use uuid::Uuid;
 
 use crate::{
@@ -36,6 +36,38 @@ const MAX_DIRECTORY_ENTRY_NAME_BYTES: usize = 4 * 1024;
 const MAX_DIRECTORY_METADATA_BYTES: usize = 4 * 1024 * 1024;
 // libssh2 uses LIBSSH2_ERROR_FILE when a raw SFTP directory handle reaches EOF.
 const LIBSSH2_ERROR_FILE: i32 = -16;
+const MODERN_KEX_ALGORITHMS: &[&str] = &[
+    "curve25519-sha256",
+    "curve25519-sha256@libssh.org",
+    "ecdh-sha2-nistp521",
+    "ecdh-sha2-nistp384",
+    "ecdh-sha2-nistp256",
+    "diffie-hellman-group18-sha512",
+    "diffie-hellman-group16-sha512",
+    "diffie-hellman-group14-sha256",
+];
+const MODERN_HOST_KEY_ALGORITHMS: &[&str] = &[
+    "ssh-ed25519",
+    "ecdsa-sha2-nistp521",
+    "ecdsa-sha2-nistp384",
+    "ecdsa-sha2-nistp256",
+    "rsa-sha2-512",
+    "rsa-sha2-256",
+];
+const MODERN_CIPHER_ALGORITHMS: &[&str] = &[
+    "chacha20-poly1305@openssh.com",
+    "aes256-gcm@openssh.com",
+    "aes128-gcm@openssh.com",
+    "aes256-ctr",
+    "aes192-ctr",
+    "aes128-ctr",
+];
+const MODERN_MAC_ALGORITHMS: &[&str] = &[
+    "hmac-sha2-512-etm@openssh.com",
+    "hmac-sha2-256-etm@openssh.com",
+    "hmac-sha2-512",
+    "hmac-sha2-256",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(
@@ -138,8 +170,10 @@ impl SshService {
         }
     }
 
-    /// Handshakes only.  Authentication happens only after the caller has approved an unknown
-    /// fingerprint and a later operation re-verifies it.
+    /// Opens a fresh transport and verifies its host key. A previously trusted key is followed by
+    /// an immediate credential probe on that same verified transport, so the renderer cannot
+    /// report a connected workspace before authentication has actually succeeded. Unknown keys
+    /// remain unauthenticated until the caller explicitly approves the displayed fingerprint.
     pub fn prepare(&self, profile_id: Uuid) -> Result<SshHostKeyStatus> {
         let profile = self.profiles.ssh_profile_snapshot(profile_id)?;
         let session = connect_and_handshake(&profile)?;
@@ -152,12 +186,15 @@ impl SshService {
             &presented.key_algorithm,
             &presented.public_key,
         )? {
-            HostKeyVerification::Trusted { fingerprint } => Ok(SshHostKeyStatus::Trusted {
-                host: profile.host,
-                port: profile.port,
-                key_algorithm: presented.key_algorithm,
-                fingerprint,
-            }),
+            HostKeyVerification::Trusted { fingerprint } => {
+                authenticate(&session, &profile)?;
+                Ok(SshHostKeyStatus::Trusted {
+                    host: profile.host,
+                    port: profile.port,
+                    key_algorithm: presented.key_algorithm,
+                    fingerprint,
+                })
+            }
             HostKeyVerification::Unknown { fingerprint } => {
                 let confirmation_id = self.insert_pending_host_key(PendingHostKey {
                     profile_id,
@@ -189,8 +226,9 @@ impl SshService {
     }
 
     /// Trusts exactly a raw key observed by `prepare`; no host/key material comes from the
-    /// webview.  A fresh command/listing connection will handshake and verify this new trust
-    /// record again before it authenticates.
+    /// webview. Before reporting success, a fresh connection handshakes, re-verifies the stored
+    /// key and authenticates the profile. This closes the key-change window between confirmation
+    /// and entering the workspace, and keeps credential failures in the connection progress UI.
     pub fn trust_host_key(
         &self,
         expected_profile_id: Uuid,
@@ -219,6 +257,8 @@ impl SshService {
             pending.key_algorithm.clone(),
             &pending.public_key,
         )?;
+        let authenticated = self.open_authenticated_snapshot(&profile)?;
+        drop(authenticated);
 
         Ok(SshHostKeyStatus::Trusted {
             host: pending.host,
@@ -461,17 +501,65 @@ fn connect_and_handshake(profile: &SshProfile) -> Result<Session> {
                     .set_write_timeout(Some(Duration::from_millis(SSH_OPERATION_TIMEOUT_MS.into())))
                     .map_err(|_| NekoError::SshConnectionFailed)?;
                 let mut session = Session::new().map_err(|_| NekoError::SshHandshakeFailed)?;
+                configure_modern_algorithm_policy(&session)?;
                 session.set_timeout(SSH_OPERATION_TIMEOUT_MS);
                 session.set_tcp_stream(stream);
                 session
                     .handshake()
                     .map_err(|_| NekoError::SshHandshakeFailed)?;
+                validate_negotiated_algorithm_policy(&session)?;
                 return Ok(session);
             }
             Err(_) => continue,
         }
     }
     Err(NekoError::SshConnectionFailed)
+}
+
+fn configure_modern_algorithm_policy(session: &Session) -> Result<()> {
+    for (method_type, policy) in algorithm_policies() {
+        let supported = session
+            .supported_algs(method_type)
+            .map_err(|_| NekoError::SshHandshakeFailed)?;
+        let preferences = supported_policy_preferences(policy, &supported)
+            .ok_or(NekoError::SshHandshakeFailed)?;
+        session
+            .method_pref(method_type, &preferences)
+            .map_err(|_| NekoError::SshHandshakeFailed)?;
+    }
+    Ok(())
+}
+
+fn validate_negotiated_algorithm_policy(session: &Session) -> Result<()> {
+    for (method_type, policy) in algorithm_policies() {
+        let negotiated = session
+            .methods(method_type)
+            .ok_or(NekoError::SshHandshakeFailed)?;
+        if !policy.contains(&negotiated) {
+            return Err(NekoError::SshHandshakeFailed);
+        }
+    }
+    Ok(())
+}
+
+fn algorithm_policies() -> [(MethodType, &'static [&'static str]); 6] {
+    [
+        (MethodType::Kex, MODERN_KEX_ALGORITHMS),
+        (MethodType::HostKey, MODERN_HOST_KEY_ALGORITHMS),
+        (MethodType::CryptCs, MODERN_CIPHER_ALGORITHMS),
+        (MethodType::CryptSc, MODERN_CIPHER_ALGORITHMS),
+        (MethodType::MacCs, MODERN_MAC_ALGORITHMS),
+        (MethodType::MacSc, MODERN_MAC_ALGORITHMS),
+    ]
+}
+
+fn supported_policy_preferences(policy: &[&str], supported: &[&str]) -> Option<String> {
+    let preferences = policy
+        .iter()
+        .copied()
+        .filter(|candidate| supported.contains(candidate))
+        .collect::<Vec<_>>();
+    (!preferences.is_empty()).then(|| preferences.join(","))
 }
 
 fn presented_host_key(session: &Session) -> Result<PresentedHostKey> {
@@ -482,31 +570,33 @@ fn presented_host_key(session: &Session) -> Result<PresentedHostKey> {
     // DSA (`ssh-dss`) is obsolete and must never enter the trust flow, even when the bundled
     // libssh2 build can negotiate it.  Keep the remaining host-key types explicit so every key
     // that can be trusted is still fingerprinted and verified by the profile store.
-    let key_algorithm = validated_host_key_algorithm(key_type)?;
+    let negotiated = session
+        .methods(MethodType::HostKey)
+        .ok_or(NekoError::SshHostKeyUnavailable)?;
+    let key_algorithm = validated_host_key_algorithm(key_type, negotiated)?;
     Ok(PresentedHostKey {
         key_algorithm: key_algorithm.to_owned(),
         public_key: public_key.to_vec(),
     })
 }
 
-fn host_key_algorithm(key_type: HostKeyType) -> Option<&'static str> {
-    match key_type {
-        HostKeyType::Rsa => Some("ssh-rsa"),
-        // `ssh-dss` is deliberately rejected in `presented_host_key` before a key can be
-        // displayed, persisted, or authenticated against.
-        HostKeyType::Dss => None,
-        HostKeyType::Ecdsa256 => Some("ecdsa-sha2-nistp256"),
-        HostKeyType::Ecdsa384 => Some("ecdsa-sha2-nistp384"),
-        HostKeyType::Ecdsa521 => Some("ecdsa-sha2-nistp521"),
-        HostKeyType::Ed25519 => Some("ssh-ed25519"),
-        HostKeyType::Unknown => None,
+fn validated_host_key_algorithm(key_type: HostKeyType, negotiated_algorithm: &str) -> Result<&str> {
+    if !MODERN_HOST_KEY_ALGORITHMS.contains(&negotiated_algorithm) {
+        return Err(NekoError::SshHostKeyAlgorithmRejected);
     }
-}
-
-fn validated_host_key_algorithm(key_type: HostKeyType) -> Result<&'static str> {
-    match key_type {
-        HostKeyType::Dss => Err(NekoError::SshHostKeyAlgorithmRejected),
-        key_type => host_key_algorithm(key_type).ok_or(NekoError::SshHostKeyUnavailable),
+    let matches_key_type = match key_type {
+        HostKeyType::Rsa => matches!(negotiated_algorithm, "rsa-sha2-512" | "rsa-sha2-256"),
+        HostKeyType::Ecdsa256 => negotiated_algorithm == "ecdsa-sha2-nistp256",
+        HostKeyType::Ecdsa384 => negotiated_algorithm == "ecdsa-sha2-nistp384",
+        HostKeyType::Ecdsa521 => negotiated_algorithm == "ecdsa-sha2-nistp521",
+        HostKeyType::Ed25519 => negotiated_algorithm == "ssh-ed25519",
+        HostKeyType::Dss => return Err(NekoError::SshHostKeyAlgorithmRejected),
+        HostKeyType::Unknown => return Err(NekoError::SshHostKeyUnavailable),
+    };
+    if matches_key_type {
+        Ok(negotiated_algorithm)
+    } else {
+        Err(NekoError::SshHostKeyUnavailable)
     }
 }
 
@@ -637,22 +727,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn allows_modern_host_key_algorithms_and_excludes_dsa() {
-        assert_eq!(
-            host_key_algorithm(HostKeyType::Ed25519),
-            Some("ssh-ed25519")
-        );
-        assert_eq!(
-            host_key_algorithm(HostKeyType::Ecdsa256),
-            Some("ecdsa-sha2-nistp256")
-        );
-        assert_eq!(host_key_algorithm(HostKeyType::Rsa), Some("ssh-rsa"));
-        assert_eq!(host_key_algorithm(HostKeyType::Dss), None);
-        assert_eq!(host_key_algorithm(HostKeyType::Unknown), None);
+    fn modern_algorithm_policy_excludes_sha1_ssh_rsa_cbc_and_md5() {
+        for policy in [
+            MODERN_KEX_ALGORITHMS,
+            MODERN_HOST_KEY_ALGORITHMS,
+            MODERN_CIPHER_ALGORITHMS,
+            MODERN_MAC_ALGORITHMS,
+        ] {
+            assert!(!policy.is_empty());
+            for algorithm in policy {
+                let normalized = algorithm.to_ascii_lowercase();
+                assert!(!normalized.contains("sha1"), "{algorithm}");
+                assert!(!normalized.contains("md5"), "{algorithm}");
+                assert!(!normalized.contains("cbc"), "{algorithm}");
+                assert_ne!(*algorithm, "ssh-rsa");
+            }
+        }
+        assert!(MODERN_KEX_ALGORITHMS.contains(&"curve25519-sha256"));
+        assert!(MODERN_HOST_KEY_ALGORITHMS.contains(&"rsa-sha2-512"));
+        assert!(MODERN_CIPHER_ALGORITHMS.contains(&"aes256-gcm@openssh.com"));
+        assert!(MODERN_MAC_ALGORITHMS.contains(&"hmac-sha2-512-etm@openssh.com"));
         assert!(matches!(
-            validated_host_key_algorithm(HostKeyType::Dss),
+            validated_host_key_algorithm(HostKeyType::Rsa, "ssh-rsa"),
             Err(NekoError::SshHostKeyAlgorithmRejected)
         ));
+        assert_eq!(
+            validated_host_key_algorithm(HostKeyType::Rsa, "rsa-sha2-512")
+                .expect("modern RSA signature"),
+            "rsa-sha2-512"
+        );
+        assert!(matches!(
+            validated_host_key_algorithm(HostKeyType::Dss, "ssh-ed25519"),
+            Err(NekoError::SshHostKeyAlgorithmRejected)
+        ));
+    }
+
+    #[test]
+    fn bundled_libssh2_has_at_least_one_supported_algorithm_per_modern_policy() {
+        let session = Session::new().expect("libssh2 session");
+        configure_modern_algorithm_policy(&session).expect("modern policy is supported");
+        assert_eq!(
+            supported_policy_preferences(
+                &["preferred", "fallback"],
+                &["unrelated", "fallback", "preferred"]
+            )
+            .as_deref(),
+            Some("preferred,fallback")
+        );
+        assert!(supported_policy_preferences(&["modern"], &["legacy"]).is_none());
     }
 
     #[test]

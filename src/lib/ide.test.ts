@@ -28,6 +28,7 @@ import {
   ideError,
   splitTerminalInput,
   startIdeTerminal,
+  uploadIdeFiles,
 } from './ide'
 
 describe('Tauri IDE terminal bridge', () => {
@@ -81,6 +82,51 @@ describe('Tauri IDE terminal bridge', () => {
       kind: 'output',
       sequence: 1,
     }))
+  })
+
+  it('installs an upload-owned channel before invoke and preserves fast completion', async () => {
+    const received: unknown[] = []
+    const file = {
+      name: 'fast.txt',
+      size: 2,
+      arrayBuffer: () => Promise.resolve(new Uint8Array([0x68, 0x69]).buffer),
+    } as File
+    const started = {
+      jobId: 'upload-1',
+      direction: 'upload',
+      totalFiles: 1,
+      totalBytes: 2,
+      items: [{ fileId: 'file-1', name: file.name, size: 2 }],
+    }
+    tauri.invoke.mockImplementation((command: string, arguments_: Record<string, unknown>) => {
+      expect(command).toBe('ide_sftp_upload_start')
+      expect(arguments_.events).toBe(tauri.channels[0])
+      expect(arguments_.files).toEqual([{
+        name: 'fast.txt',
+        dataBase64: 'aGk=',
+        overwrite: false,
+      }])
+      tauri.channels[0].onmessage({ kind: 'started', ...started })
+      tauri.channels[0].onmessage({
+        kind: 'completed',
+        jobId: started.jobId,
+        direction: 'upload',
+        status: 'completed',
+        completedFiles: 1,
+        failedFiles: 0,
+        cancelledFiles: 0,
+        bytesTransferred: 2,
+        totalBytes: 2,
+      })
+      return Promise.resolve(started)
+    })
+
+    await expect(uploadIdeFiles('connection-1', '/', [file], (event) => received.push(event)))
+      .resolves.toEqual(started)
+    expect(received).toEqual([
+      expect.objectContaining({ kind: 'started', jobId: 'upload-1' }),
+      expect.objectContaining({ kind: 'completed', jobId: 'upload-1' }),
+    ])
   })
 
   it('serializes input and retries bounded Rust queue backpressure without reordering', async () => {

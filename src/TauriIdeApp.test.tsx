@@ -16,7 +16,6 @@ const ide = vi.hoisted(() => ({
   downloadIdeFiles: vi.fn(),
   listIdeConnections: vi.fn(),
   listIdeDirectory: vi.fn(),
-  onIdeTransferComplete: vi.fn(),
   onIdeTransferProgress: vi.fn(),
   prepareIdeConnection: vi.fn(),
   rejectIdeHostKey: vi.fn(),
@@ -25,6 +24,10 @@ const ide = vi.hoisted(() => ({
   startIdeTerminal: vi.fn(),
   trustIdeHostKey: vi.fn(),
   uploadIdeFiles: vi.fn(),
+}))
+
+const xterm = vi.hoisted(() => ({
+  instances: [] as Array<{ options: Record<string, unknown> }>,
 }))
 
 vi.mock('./lib/ide', () => ({
@@ -55,6 +58,12 @@ vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 110
     rows = 34
+    options: Record<string, unknown>
+
+    constructor(options: Record<string, unknown>) {
+      this.options = { ...options }
+      xterm.instances.push(this)
+    }
 
     loadAddon() {}
 
@@ -128,6 +137,17 @@ beforeEach(() => {
     return 1
   })
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  vi.stubGlobal('matchMedia', vi.fn(() => ({
+    matches: false,
+    media: '(prefers-reduced-motion: reduce)',
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })))
+  xterm.instances.length = 0
 
   ide.listIdeConnections.mockResolvedValue([])
   ide.disconnectIdeConnection.mockResolvedValue(undefined)
@@ -140,7 +160,6 @@ beforeEach(() => {
     truncated: false,
   })
   ide.onIdeTransferProgress.mockResolvedValue(vi.fn())
-  ide.onIdeTransferComplete.mockResolvedValue(vi.fn())
   ide.startIdeTerminal.mockResolvedValue({ sessionId: 'terminal-1' })
   ide.acknowledgeIdeTerminalOutput.mockResolvedValue(undefined)
   ide.resizeIdeTerminal.mockResolvedValue(undefined)
@@ -223,6 +242,292 @@ describe('Tauri SSH IDE', () => {
     await waitFor(() => expect(ide.rejectIdeHostKey).toHaveBeenCalledWith('confirmation-late'))
     expect(screen.queryByRole('region', { name: '交互式 SSH 终端' })).not.toBeInTheDocument()
     expect(screen.getByRole('row', { name: /测试服务器/ })).toBeVisible()
+  })
+
+  it('keeps credential-probe failures in the Chinese connection progress dialog', async () => {
+    const user = userEvent.setup()
+    ide.listIdeConnections.mockResolvedValue([connection])
+    ide.prepareIdeConnection.mockRejectedValue({
+      code: 'ssh_authentication_failed',
+      message: 'SSH 认证失败，请检查用户名和凭据。',
+    })
+
+    render(<TauriIdeApp />)
+    const row = await screen.findByRole('row', { name: /测试服务器/ })
+    await user.click(within(row).getByRole('button', { name: '连接' }))
+
+    const progress = await screen.findByRole('dialog', { name: 'SSH 连接' })
+    expect(within(progress).getByRole('alert')).toHaveTextContent(
+      'SSH 认证失败，请检查用户名和凭据。',
+    )
+    expect(within(progress).getByRole('button', { name: '重试' })).toBeVisible()
+    expect(screen.queryByRole('region', { name: '交互式 SSH 终端' })).not.toBeInTheDocument()
+  })
+
+  it('reorders connections through the HTML5 drag-and-drop path', async () => {
+    const secondConnection = {
+      ...connection,
+      id: 'connection-2',
+      label: '备用服务器',
+      host: 'backup.example.test',
+    }
+    ide.listIdeConnections.mockResolvedValue([connection, secondConnection])
+
+    render(<TauriIdeApp />)
+    const firstRow = await screen.findByRole('row', { name: /测试服务器/ })
+    const secondRow = screen.getByRole('row', { name: /备用服务器/ })
+
+    fireEvent.dragStart(firstRow)
+    fireEvent.dragOver(secondRow)
+    fireEvent.drop(secondRow)
+    fireEvent.dragEnd(firstRow)
+
+    await waitFor(() => {
+      const rows = screen.getAllByRole('row')
+      expect(rows.indexOf(secondRow)).toBeLessThan(rows.indexOf(firstRow))
+    })
+  })
+
+  it('moves by the adjacent visible connection while a group is filtered', async () => {
+    const user = userEvent.setup()
+    const hiddenConnection = {
+      ...connection,
+      id: 'connection-hidden',
+      label: '隐藏服务器',
+      host: 'hidden.example.test',
+      tags: ['其他分组'],
+    }
+    const visibleConnection = {
+      ...connection,
+      id: 'connection-visible-2',
+      label: '可见服务器二',
+      host: 'visible-2.example.test',
+    }
+    ide.listIdeConnections.mockResolvedValue([connection, hiddenConnection, visibleConnection])
+
+    render(<TauriIdeApp />)
+    await screen.findByRole('row', { name: /测试服务器/ })
+    await user.click(screen.getByRole('button', { name: /个人服务器/ }))
+    const firstVisible = screen.getByRole('row', { name: /测试服务器/ })
+    const secondVisible = screen.getByRole('row', { name: /可见服务器二/ })
+
+    fireEvent.keyDown(firstVisible, { key: 'ArrowDown', shiftKey: true })
+
+    await waitFor(() => {
+      const rows = screen.getAllByRole('row')
+      expect(rows.indexOf(secondVisible)).toBeLessThan(rows.indexOf(firstVisible))
+    })
+    expect(screen.queryByRole('row', { name: /隐藏服务器/ })).not.toBeInTheDocument()
+  })
+
+  it('starts an SFTP upload when files are dropped onto the remote file pane', async () => {
+    const user = userEvent.setup()
+    const file = new File(['hello'], 'report.txt', { type: 'text/plain' })
+    ide.listIdeConnections.mockResolvedValue([connection])
+    ide.uploadIdeFiles.mockImplementation((
+      _connectionId: string,
+      _remoteDirectory: string,
+      _files: File[],
+      onEvent: (event: unknown) => void,
+    ) => {
+      const started = {
+        jobId: 'upload-1',
+        direction: 'upload',
+        totalFiles: 1,
+        totalBytes: file.size,
+        items: [{ fileId: 'file-1', name: file.name, size: file.size }],
+      }
+      onEvent({ kind: 'started', ...started })
+      return Promise.resolve(started)
+    })
+
+    render(<TauriIdeApp />)
+    await openWorkspace(user)
+    const filePane = screen.getByText('拖入文件即可上传').closest('aside')
+    if (!filePane) throw new Error('remote file pane not found')
+
+    fireEvent.dragOver(filePane, { dataTransfer: { files: [file] } })
+    fireEvent.drop(filePane, { dataTransfer: { files: [file] } })
+
+    await waitFor(() => expect(ide.uploadIdeFiles).toHaveBeenCalledWith(
+      connection.id,
+      '/',
+      [file],
+      expect.any(Function),
+    ))
+  })
+
+  it('handles upload completion delivered before the start command promise resolves', async () => {
+    const user = userEvent.setup()
+    const file = new File(['done'], 'fast.txt', { type: 'text/plain' })
+    ide.listIdeConnections.mockResolvedValue([connection])
+    ide.uploadIdeFiles.mockImplementation((
+      _connectionId: string,
+      _remoteDirectory: string,
+      _files: File[],
+      onEvent: (event: unknown) => void,
+    ) => {
+      const started = {
+        jobId: 'upload-fast',
+        direction: 'upload',
+        totalFiles: 1,
+        totalBytes: file.size,
+        items: [{ fileId: 'file-fast', name: file.name, size: file.size }],
+      }
+      onEvent({ kind: 'started', ...started })
+      onEvent({
+        kind: 'completed',
+        jobId: started.jobId,
+        direction: 'upload',
+        status: 'completed',
+        completedFiles: 1,
+        failedFiles: 0,
+        cancelledFiles: 0,
+        bytesTransferred: file.size,
+        totalBytes: file.size,
+      })
+      return Promise.resolve(started)
+    })
+
+    render(<TauriIdeApp />)
+    await openWorkspace(user)
+    const filePane = screen.getByText('拖入文件即可上传').closest('aside')
+    if (!filePane) throw new Error('remote file pane not found')
+
+    fireEvent.drop(filePane, { dataTransfer: { files: [file] } })
+
+    expect(await screen.findByText('上传完成：1 个文件。')).toBeVisible()
+    await waitFor(() => expect(ide.listIdeDirectory).toHaveBeenCalledTimes(2))
+  })
+
+  it('rejects an upload completion whose status contradicts its counters', async () => {
+    const user = userEvent.setup()
+    const file = new File(['bad'], 'bad-result.txt', { type: 'text/plain' })
+    ide.listIdeConnections.mockResolvedValue([connection])
+    ide.uploadIdeFiles.mockImplementation((
+      _connectionId: string,
+      _remoteDirectory: string,
+      _files: File[],
+      onEvent: (event: unknown) => void,
+    ) => {
+      const started = {
+        jobId: 'upload-bad-result',
+        direction: 'upload',
+        totalFiles: 1,
+        totalBytes: file.size,
+        items: [{ fileId: 'file-bad-result', name: file.name, size: file.size }],
+      }
+      onEvent({ kind: 'started', ...started })
+      onEvent({
+        kind: 'completed',
+        jobId: started.jobId,
+        direction: 'upload',
+        status: 'completed_with_errors',
+        completedFiles: 1,
+        failedFiles: 0,
+        cancelledFiles: 0,
+        bytesTransferred: file.size,
+        totalBytes: file.size,
+      })
+      return new Promise(() => undefined)
+    })
+
+    render(<TauriIdeApp />)
+    await openWorkspace(user)
+    const filePane = screen.getByText('拖入文件即可上传').closest('aside')
+    if (!filePane) throw new Error('remote file pane not found')
+    fireEvent.drop(filePane, { dataTransfer: { files: [file] } })
+
+    expect(await screen.findByText('上传结果校验失败，已取消传输。')).toBeVisible()
+    await waitFor(() => expect(ide.cancelIdeTransfer).toHaveBeenCalledWith('upload-bad-result'))
+  })
+
+  it('rejects upload channel data received after a completed event', async () => {
+    const user = userEvent.setup()
+    const file = new File(['done'], 'late-event.txt', { type: 'text/plain' })
+    ide.listIdeConnections.mockResolvedValue([connection])
+    ide.uploadIdeFiles.mockImplementation((
+      _connectionId: string,
+      _remoteDirectory: string,
+      _files: File[],
+      onEvent: (event: unknown) => void,
+    ) => {
+      const started = {
+        jobId: 'upload-late-event',
+        direction: 'upload',
+        totalFiles: 1,
+        totalBytes: file.size,
+        items: [{ fileId: 'file-late-event', name: file.name, size: file.size }],
+      }
+      onEvent({ kind: 'started', ...started })
+      onEvent({
+        kind: 'completed',
+        jobId: started.jobId,
+        direction: 'upload',
+        status: 'completed',
+        completedFiles: 1,
+        failedFiles: 0,
+        cancelledFiles: 0,
+        bytesTransferred: file.size,
+        totalBytes: file.size,
+      })
+      onEvent({
+        kind: 'progress',
+        jobId: started.jobId,
+        fileId: 'file-late-event',
+        name: file.name,
+        direction: 'upload',
+        fileBytesTransferred: file.size,
+        fileTotalBytes: file.size,
+        jobBytesTransferred: file.size,
+        jobTotalBytes: file.size,
+      })
+      return new Promise(() => undefined)
+    })
+
+    render(<TauriIdeApp />)
+    await openWorkspace(user)
+    const filePane = screen.getByText('拖入文件即可上传').closest('aside')
+    if (!filePane) throw new Error('remote file pane not found')
+    fireEvent.drop(filePane, { dataTransfer: { files: [file] } })
+
+    expect(await screen.findByText('上传任务在完成后仍收到数据，已丢弃异常结果。')).toBeVisible()
+    await waitFor(() => expect(ide.cancelIdeTransfer).toHaveBeenCalledWith('upload-late-event'))
+  })
+
+  it('disables xterm cursor blinking for reduced motion and announces terminal state changes', async () => {
+    const user = userEvent.setup()
+    const changeListener: { current: (() => void) | null } = { current: null }
+    const mediaQuery = {
+      matches: true,
+      media: '(prefers-reduced-motion: reduce)',
+      onchange: null,
+      addEventListener: vi.fn((_type: string, listener: () => void) => {
+        changeListener.current = listener
+      }),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }
+    vi.stubGlobal('matchMedia', vi.fn(() => mediaQuery))
+    ide.listIdeConnections.mockResolvedValue([connection])
+
+    render(<TauriIdeApp />)
+    await openWorkspace(user)
+
+    await waitFor(() =>
+      expect(xterm.instances[xterm.instances.length - 1]?.options.cursorBlink).toBe(false),
+    )
+    const terminalState = await screen.findByText('已连接')
+    expect(terminalState).toHaveAttribute('role', 'status')
+    expect(terminalState).toHaveAttribute('aria-live', 'polite')
+
+    act(() => {
+      mediaQuery.matches = false
+      changeListener.current?.()
+    })
+    expect(xterm.instances[xterm.instances.length - 1]?.options.cursorBlink).toBe(true)
   })
 
   it('passes private-key authentication exactly once and clears key material immediately', async () => {

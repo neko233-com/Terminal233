@@ -113,7 +113,7 @@ impl NekoError {
             Self::SshConnectionFailed => "无法连接到 SSH 服务器，请检查主机、端口和网络。",
             Self::SshHandshakeFailed => "SSH 握手失败，请检查服务器兼容性。",
             Self::SshHostKeyUnavailable => "服务器未提供受支持的主机密钥。",
-            Self::SshHostKeyAlgorithmRejected => "服务器使用了已禁用的 DSA 主机密钥算法。",
+            Self::SshHostKeyAlgorithmRejected => "服务器使用了已禁用的旧主机密钥算法。",
             Self::SshHostKeyUntrusted => "该服务器主机密钥尚未确认。",
             Self::SshHostKeyMismatch => "服务器主机密钥与已确认的密钥不一致，连接已阻止。",
             Self::SshHostKeyConfirmationExpired => "主机密钥确认已过期，请重新连接。",
@@ -157,7 +157,7 @@ mod tests {
         assert!(!error.public_message().contains("do-not-display"));
         assert_eq!(
             NekoError::SshHostKeyAlgorithmRejected.public_message(),
-            "服务器使用了已禁用的 DSA 主机密钥算法。"
+            "服务器使用了已禁用的旧主机密钥算法。"
         );
     }
 }

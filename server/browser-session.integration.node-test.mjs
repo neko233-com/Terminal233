@@ -133,6 +133,16 @@ test('rejected shell channel leaves the authenticated SSH transport and first te
   const origin = `http://127.0.0.1:${frontendPort}`
   const baseUrl = `http://127.0.0.1:${backendPort}`
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const { privateKey: clientPrivateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const clientKeyPassphrase = 'fixture-key-passphrase'
+  const clientPrivateKeyPem = clientPrivateKey.export({
+    type: 'pkcs1',
+    format: 'pem',
+    cipher: 'aes-256-cbc',
+    passphrase: clientKeyPassphrase,
+  })
+  const clientParsedKey = ssh2.utils.parseKey(clientPrivateKeyPem, clientKeyPassphrase)
+  assert.ok(!(clientParsedKey instanceof Error))
   let transportCount = 0
   let shellCount = 0
   let resolveExecStarted
@@ -143,10 +153,28 @@ test('rejected shell channel leaves the authenticated SSH transport and first te
     transportCount += 1
     client.on('error', () => {})
     client.on('authentication', (context) => {
-      if (context.method === 'password'
+      if (
+        context.method === 'password'
         && context.username === 'tester'
-        && Buffer.from(context.password).equals(Buffer.from('fixture-password'))) context.accept()
-      else context.reject()
+        && Buffer.from(context.password).equals(Buffer.from('fixture-password'))
+      ) {
+        context.accept()
+        return
+      }
+      if (
+        context.method !== 'publickey'
+        || context.username !== 'tester'
+        || context.key.algo !== clientParsedKey.type
+        || !Buffer.from(context.key.data).equals(clientParsedKey.getPublicSSH())
+        || (
+          context.signature
+          && !clientParsedKey.verify(context.blob, context.signature, context.hashAlgo)
+        )
+      ) {
+        context.reject()
+        return
+      }
+      context.accept()
     })
     client.on('ready', () => {
       client.on('session', (accept) => {
@@ -194,7 +222,11 @@ test('rejected shell channel leaves the authenticated SSH transport and first te
         host: '127.0.0.1',
         port: sshPort,
         username: 'tester',
-        authentication: { kind: 'password', password: 'fixture-password' },
+        authentication: {
+          kind: 'private_key',
+          privateKeyPem: clientPrivateKeyPem,
+          passphrase: clientKeyPassphrase,
+        },
       }),
     })
     const connection = await connectionResponse.json()
@@ -264,6 +296,51 @@ test('rejected shell channel leaves the authenticated SSH transport and first te
     assert.equal(cancelled.result.isError, true)
     assert.equal((await startTerminal()).status, 201)
     assert.equal(transportCount, 2)
+
+    const createPasswordConnection = async (password) => {
+      const response = await fetch(`${baseUrl}/api/connections`, {
+        method: 'POST',
+        headers: { origin, cookie, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          label: 'password-fixture',
+          host: '127.0.0.1',
+          port: sshPort,
+          username: 'tester',
+          authentication: { kind: 'password', password },
+        }),
+      })
+      assert.equal(response.status, 201)
+      return response.json()
+    }
+    const prepareAndTrust = async (connectionId) => {
+      const prepared = await (await fetch(
+        `${baseUrl}/api/connections/${connectionId}/prepare`,
+        { method: 'POST', headers: { origin, cookie } },
+      )).json()
+      assert.equal(prepared.status, 'confirmation_required')
+      return fetch(`${baseUrl}/api/connections/${connectionId}/trust`, {
+        method: 'POST',
+        headers: { origin, cookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmationId: prepared.confirmationId }),
+      })
+    }
+
+    const wrongPassword = await createPasswordConnection('wrong-password')
+    const rejectedPassword = await prepareAndTrust(wrongPassword.id)
+    assert.equal(rejectedPassword.status, 401)
+    assert.equal((await rejectedPassword.json()).code, 'ssh_authentication_failed')
+
+    const passwordConnection = await createPasswordConnection('fixture-password')
+    assert.equal((await prepareAndTrust(passwordConnection.id)).status, 200)
+    const passwordTerminal = await fetch(
+      `${baseUrl}/api/connections/${passwordConnection.id}/terminal`,
+      {
+        method: 'POST',
+        headers: { origin, cookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ columns: 100, rows: 30 }),
+      },
+    )
+    assert.equal(passwordTerminal.status, 201)
   } finally {
     child.kill()
     if (child.exitCode === null) await once(child, 'exit')

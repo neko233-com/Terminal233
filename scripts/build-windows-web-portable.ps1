@@ -345,6 +345,8 @@ try {
     Copy-CompleteTree -SourceRoot (Join-Path $repositoryRoot 'dist') -RelativeDestination 'app/dist'
     foreach ($serverFile in @(
         'ssh2js-server.mjs',
+        'ssh-algorithms.mjs',
+        'content-disposition.mjs',
         'static-web.mjs',
         'session-lifecycle.mjs',
         'operation-admission.mjs',

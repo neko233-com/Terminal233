@@ -44,7 +44,6 @@ import {
   ideError,
   listIdeConnections,
   listIdeDirectory,
-  onIdeTransferComplete,
   onIdeTransferProgress,
   prepareIdeConnection,
   rejectIdeHostKey,
@@ -61,6 +60,7 @@ import {
   type IdeTransferComplete,
   type IdeTransferProgress,
   type IdeDownloadEvent,
+  type IdeUploadEvent,
 } from './lib/ide'
 
 type ActiveConnection = {
@@ -448,11 +448,11 @@ export default function TauriIdeApp() {
     }
   }
 
-  function reorder(targetId: string) {
-    if (!draggedId || draggedId === targetId) return
+  function reorderConnection(connectionId: string, targetId: string) {
+    if (connectionId === targetId) return
     setConnections((current) => {
       const next = [...current]
-      const from = next.findIndex((item) => item.id === draggedId)
+      const from = next.findIndex((item) => item.id === connectionId)
       const to = next.findIndex((item) => item.id === targetId)
       if (from < 0 || to < 0) return current
       const [moved] = next.splice(from, 1)
@@ -461,15 +461,16 @@ export default function TauriIdeApp() {
     })
   }
 
+  function reorder(targetId: string) {
+    if (!draggedId) return
+    reorderConnection(draggedId, targetId)
+  }
+
   function moveConnection(connectionId: string, direction: -1 | 1) {
-    setConnections((current) => {
-      const next = [...current]
-      const from = next.findIndex((item) => item.id === connectionId)
-      const to = from + direction
-      if (from < 0 || to < 0 || to >= next.length) return current
-      ;[next[from], next[to]] = [next[to], next[from]]
-      return next
-    })
+    const from = filtered.findIndex((item) => item.id === connectionId)
+    const target = filtered[from + direction]
+    if (from < 0 || !target) return
+    reorderConnection(connectionId, target.id)
   }
 
   if (active) {
@@ -562,9 +563,10 @@ function ConnectionProgress({ progress, onClose, onRetry, onTrust }: { progress:
     { label: '初始化配置', active: true, done: true },
     { label: '连接到服务器', active: progress.phase !== 'error', done: progress.phase !== 'preparing' && progress.phase !== 'error' },
     { label: '验证主机密钥', active: progress.phase !== 'error', done: progress.phase === 'opening' },
+    { label: '验证 SSH 凭据', active: progress.phase === 'preparing' || progress.phase === 'opening', done: false },
     { label: '打开终端与文件区', active: progress.phase === 'opening', done: false },
   ]
-  return <div className="ide-overlay"><section aria-busy={progress.phase === 'preparing' || progress.phase === 'opening'} aria-labelledby="ide-progress-title" aria-modal="true" className="ide-dialog ide-progress-dialog" ref={dialogRef} role="dialog" tabIndex={-1}><div className="ide-dialog-header"><div><h2 id="ide-progress-title">SSH 连接</h2><p>{progress.connection.username}@{progress.connection.host}:{progress.connection.port}</p></div><button aria-label="关闭" onClick={onClose} type="button"><X size={17} /></button></div><div className="ide-progress-body"><ol>{steps.map((step) => <li className={`${step.active ? 'active' : ''} ${step.done ? 'done' : ''}`} key={step.label}><i /><span>{step.label}</span></li>)}</ol><div className="ide-connect-log"><code>Client: Rust ssh2 / libssh2</code><code>Transport: in-process TCP</code>{progress.phase === 'preparing' ? <code role="status">正在握手并读取服务器主机密钥…</code> : null}{progress.phase === 'awaiting_trust' && progress.hostKey?.status === 'confirmation_required' ? <div className="ide-fingerprint"><span>首次连接，请核对服务器指纹</span><strong>{progress.hostKey.keyAlgorithm}</strong><code>{progress.hostKey.fingerprint}</code></div> : null}{progress.hostKey?.status === 'mismatch' ? <div className="ide-fingerprint mismatch"><span>当前服务器指纹</span><strong>{progress.hostKey.keyAlgorithm}</strong><code>{progress.hostKey.fingerprint}</code><span>已信任的指纹</span>{progress.hostKey.expectedFingerprints.map((fingerprint) => <code key={fingerprint}>{fingerprint}</code>)}</div> : null}{progress.error ? <p className="ide-error" role="alert">{progress.error}</p> : null}</div></div><div className="ide-dialog-actions">{progress.phase === 'error' ? <button className="ide-secondary" onClick={onRetry} type="button">重试</button> : null}{progress.phase === 'awaiting_trust' ? <button className="ide-primary" onClick={onTrust} type="button">信任并连接</button> : null}<button className="ide-secondary" onClick={onClose} type="button">关闭</button></div></section></div>
+  return <div className="ide-overlay"><section aria-busy={progress.phase === 'preparing' || progress.phase === 'opening'} aria-labelledby="ide-progress-title" aria-modal="true" className="ide-dialog ide-progress-dialog" ref={dialogRef} role="dialog" tabIndex={-1}><div className="ide-dialog-header"><div><h2 id="ide-progress-title">SSH 连接</h2><p>{progress.connection.username}@{progress.connection.host}:{progress.connection.port}</p></div><button aria-label="关闭" onClick={onClose} type="button"><X size={17} /></button></div><div className="ide-progress-body"><ol>{steps.map((step) => <li className={`${step.active ? 'active' : ''} ${step.done ? 'done' : ''}`} key={step.label}><i /><span>{step.label}</span></li>)}</ol><div className="ide-connect-log"><code>Client: Rust ssh2 / libssh2</code><code>Transport: in-process TCP</code>{progress.phase === 'preparing' ? <code role="status">正在握手、核对主机密钥并验证 SSH 凭据…</code> : null}{progress.phase === 'opening' ? <code role="status">正在重新握手、复核主机密钥并验证 SSH 凭据…</code> : null}{progress.phase === 'awaiting_trust' && progress.hostKey?.status === 'confirmation_required' ? <div className="ide-fingerprint"><span>首次连接，请核对服务器指纹</span><strong>{progress.hostKey.keyAlgorithm}</strong><code>{progress.hostKey.fingerprint}</code></div> : null}{progress.hostKey?.status === 'mismatch' ? <div className="ide-fingerprint mismatch"><span>当前服务器指纹</span><strong>{progress.hostKey.keyAlgorithm}</strong><code>{progress.hostKey.fingerprint}</code><span>已信任的指纹</span>{progress.hostKey.expectedFingerprints.map((fingerprint) => <code key={fingerprint}>{fingerprint}</code>)}</div> : null}{progress.error ? <p className="ide-error" role="alert">{progress.error}</p> : null}</div></div><div className="ide-dialog-actions">{progress.phase === 'error' ? <button className="ide-secondary" onClick={onRetry} type="button">重试</button> : null}{progress.phase === 'awaiting_trust' ? <button className="ide-primary" onClick={onTrust} type="button">信任并连接</button> : null}<button className="ide-secondary" onClick={onClose} type="button">关闭</button></div></section></div>
 }
 
 function IdeWorkspace({ active, onBack, onDisconnect }: { active: ActiveConnection; onBack: () => void; onDisconnect: () => void }) {
@@ -586,8 +588,6 @@ function IdeWorkspace({ active, onBack, onDisconnect }: { active: ActiveConnecti
   const downloadJobs = useRef(new Set<string>())
   const finishedDownloadJobs = useRef(new Set<string>())
   const uploadJobs = useRef(new Set<string>())
-  const pendingUploadProgress = useRef(new Map<string, IdeTransferProgress>())
-  const pendingUploadComplete = useRef(new Map<string, IdeTransferComplete>())
   const workspaceActive = useRef(true)
   const cwdRef = useRef(cwd)
   const directoryGeneration = useRef(0)
@@ -643,18 +643,14 @@ function IdeWorkspace({ active, onBack, onDisconnect }: { active: ActiveConnecti
     let stopped = false
     workspaceActive.current = true
     let progressCleanup: (() => void) | undefined
-    let completeCleanup: (() => void) | undefined
     void onIdeTransferProgress((event) => {
       if (stopped) return
-      if (downloadJobs.current.has(event.jobId) || uploadJobs.current.has(event.jobId)) {
+      if (downloadJobs.current.has(event.jobId)) {
         setTransfers((current) => {
           const next = new Map(current)
           next.set(event.jobId, event)
           return next
         })
-      } else if (event.direction === 'upload') {
-        pendingUploadProgress.current.set(event.jobId, event)
-        trimMap(pendingUploadProgress.current, 16)
       }
     }).then((unlisten) => {
       if (stopped) unlisten()
@@ -662,41 +658,22 @@ function IdeWorkspace({ active, onBack, onDisconnect }: { active: ActiveConnecti
     }).catch((error) => {
       if (!stopped) setNotice({ tone: 'error', message: `无法监听传输进度：${ideError(error)}` })
     })
-    void onIdeTransferComplete((event) => {
-      if (stopped || event.direction !== 'upload') return
-      if (!uploadJobs.current.has(event.jobId)) {
-        pendingUploadComplete.current.set(event.jobId, event)
-        trimMap(pendingUploadComplete.current, 16)
-        return
-      }
-      finishUpload(event)
-    }).then((unlisten) => {
-      if (stopped) unlisten()
-      else completeCleanup = unlisten
-    }).catch((error) => {
-      if (!stopped) setNotice({ tone: 'error', message: `无法监听传输结果：${ideError(error)}` })
-    })
     return () => {
       stopped = true
       workspaceActive.current = false
       directoryGeneration.current += 1
       progressCleanup?.()
-      completeCleanup?.()
       for (const jobId of downloadJobs.current) void cancelIdeTransfer(jobId).catch(() => undefined)
       for (const jobId of uploadJobs.current) void cancelIdeTransfer(jobId).catch(() => undefined)
       downloadJobs.current.clear()
       uploadJobs.current.clear()
       finishedDownloadJobs.current.clear()
       downloadParts.current.clear()
-      pendingUploadProgress.current.clear()
-      pendingUploadComplete.current.clear()
     }
   }, [active.connection.id])
 
   function finishUpload(event: IdeTransferComplete) {
     uploadJobs.current.delete(event.jobId)
-    pendingUploadProgress.current.delete(event.jobId)
-    pendingUploadComplete.current.delete(event.jobId)
     setTransfers((current) => {
       const next = new Map(current)
       next.delete(event.jobId)
@@ -708,29 +685,170 @@ function IdeWorkspace({ active, onBack, onDisconnect }: { active: ActiveConnecti
     } else if (event.status === 'cancelled') {
       setNotice({ tone: 'info', message: '上传已取消。' })
     } else {
-      setNotice({ tone: 'error', message: '上传未全部完成，请检查远端权限与可用空间。' })
+      setNotice({
+        tone: 'error',
+        message: `上传结束：成功 ${event.completedFiles}，失败 ${event.failedFiles}，取消 ${event.cancelledFiles}。请检查远端权限与可用空间。`,
+      })
     }
   }
 
   async function upload(files: File[]) {
     if (!files.length) return
     setNotice(null)
+    const expectedBytes = files.reduce((total, file) => total + file.size, 0)
+    let channelJobId: string | null = null
+    let channelStarted: Extract<IdeUploadEvent, { kind: 'started' }> | null = null
+    let completedBeforeResponse = false
+    let channelInvalid = false
+    let highestProgressBytes = 0
+    const clearUploadTracking = (...jobIds: Array<string | null>) => {
+      const trackedJobIds = new Set(jobIds.filter((jobId): jobId is string => Boolean(jobId)))
+      trackedJobIds.forEach((jobId) => uploadJobs.current.delete(jobId))
+      setTransfers((current) => {
+        const next = new Map(current)
+        trackedJobIds.forEach((jobId) => next.delete(jobId))
+        return next
+      })
+    }
+    const failUploadChannel = (eventJobId: string, message: string) => {
+      channelInvalid = true
+      if (eventJobId) void cancelIdeTransfer(eventJobId).catch(() => undefined)
+      if (channelJobId && channelJobId !== eventJobId) {
+        void cancelIdeTransfer(channelJobId).catch(() => undefined)
+      }
+      clearUploadTracking(eventJobId, channelJobId)
+      if (workspaceActive.current) setNotice({ tone: 'error', message })
+    }
+    const receiveUploadEvent = (event: IdeUploadEvent) => {
+      if (channelInvalid) return
+      if (completedBeforeResponse) {
+        failUploadChannel(event.jobId, '上传任务在完成后仍收到数据，已丢弃异常结果。')
+        return
+      }
+      if (channelJobId && channelJobId !== event.jobId) {
+        failUploadChannel(event.jobId, '上传数据通道混入了其他任务，已取消传输。')
+        return
+      }
+      channelJobId = event.jobId
+      if (!workspaceActive.current) {
+        if (event.kind !== 'completed') void cancelIdeTransfer(event.jobId).catch(() => undefined)
+        return
+      }
+      if (event.kind === 'started') {
+        const valid = !channelStarted
+          && event.jobId.length > 0
+          && event.direction === 'upload'
+          && event.totalFiles === files.length
+          && event.totalBytes === expectedBytes
+          && event.items.length === files.length
+          && new Set(event.items.map((item) => item.fileId)).size === files.length
+          && event.items.every((item, index) => (
+            item.fileId.length > 0
+            && item.name === files[index]?.name
+            && item.size === files[index]?.size
+          ))
+        if (!valid) {
+          failUploadChannel(event.jobId, '上传任务元数据校验失败，已取消传输。')
+          return
+        }
+        channelStarted = event
+        uploadJobs.current.add(event.jobId)
+        setNotice({ tone: 'info', message: `已开始上传 ${event.totalFiles} 个文件。` })
+        return
+      }
+      if (event.kind === 'progress') {
+        const item = channelStarted?.items.find((candidate) => candidate.fileId === event.fileId)
+        if (
+          event.direction !== 'upload'
+          || !channelStarted
+          || !item
+          || item.name !== event.name
+          || item.size !== event.fileTotalBytes
+          || !isNonNegativeSafeInteger(event.fileBytesTransferred)
+          || !isNonNegativeSafeInteger(event.jobBytesTransferred)
+          || event.fileBytesTransferred > (event.fileTotalBytes ?? 0)
+          || event.jobTotalBytes !== expectedBytes
+          || event.jobBytesTransferred > expectedBytes
+        ) {
+          failUploadChannel(event.jobId, '上传进度校验失败，已取消传输。')
+          return
+        }
+        // Worker progress can arrive out of order across files. Never let the aggregate progress
+        // indicator move backwards, while still accepting every individually valid worker event.
+        if (event.jobBytesTransferred < highestProgressBytes) return
+        highestProgressBytes = event.jobBytesTransferred
+        setTransfers((current) => new Map(current).set(event.jobId, event))
+        return
+      }
+      const accountedFiles = event.completedFiles + event.failedFiles + event.cancelledFiles
+      const countsAreValid = isNonNegativeSafeInteger(event.completedFiles)
+        && isNonNegativeSafeInteger(event.failedFiles)
+        && isNonNegativeSafeInteger(event.cancelledFiles)
+      const statusIsConsistent = (
+        event.status === 'completed'
+        && event.completedFiles === files.length
+        && event.failedFiles === 0
+        && event.cancelledFiles === 0
+        && event.bytesTransferred === expectedBytes
+      ) || (
+        event.status === 'completed_with_errors'
+        && event.failedFiles > 0
+      ) || (
+        event.status === 'cancelled'
+        && event.failedFiles === 0
+        && event.cancelledFiles > 0
+      )
+      const validCompletion = event.direction === 'upload'
+        && Boolean(channelStarted)
+        && countsAreValid
+        && isNonNegativeSafeInteger(event.bytesTransferred)
+        && event.totalBytes === expectedBytes
+        && event.bytesTransferred <= expectedBytes
+        && accountedFiles === files.length
+        && statusIsConsistent
+      if (!validCompletion) {
+        failUploadChannel(event.jobId, '上传结果校验失败，已取消传输。')
+        return
+      }
+      completedBeforeResponse = true
+      finishUpload(event)
+    }
     try {
-      const started = await uploadIdeFiles(active.connection.id, cwdRef.current, files)
+      const started = await uploadIdeFiles(
+        active.connection.id,
+        cwdRef.current,
+        files,
+        receiveUploadEvent,
+      )
       if (!workspaceActive.current) {
         await cancelIdeTransfer(started.jobId).catch(() => undefined)
         return
       }
-      uploadJobs.current.add(started.jobId)
-      const pendingProgress = pendingUploadProgress.current.get(started.jobId)
-      if (pendingProgress) {
-        setTransfers((current) => new Map(current).set(started.jobId, pendingProgress))
+      // Upload channel callbacks may run before the invoke promise resolves. TypeScript cannot
+      // infer that mutation across the callback boundary, so snapshot the observed start here.
+      const observedStarted = channelStarted as Extract<IdeUploadEvent, { kind: 'started' }> | null
+      const matchesChannel = !channelInvalid
+        && channelJobId === started.jobId
+        && observedStarted?.direction === started.direction
+        && observedStarted?.totalFiles === started.totalFiles
+        && observedStarted?.totalBytes === started.totalBytes
+        && observedStarted?.items.length === started.items.length
+        && observedStarted?.items.every((item, index) => {
+          const responseItem = started.items[index]
+          return item.fileId === responseItem?.fileId
+            && item.name === responseItem.name
+            && item.size === responseItem.size
+        })
+      if (!matchesChannel) {
+        failUploadChannel(started.jobId, '上传启动响应与数据通道不匹配，已取消传输。')
+        return
       }
-      const completed = pendingUploadComplete.current.get(started.jobId)
-      if (completed) finishUpload(completed)
-      else setNotice({ tone: 'info', message: `已开始上传 ${started.totalFiles} 个文件。` })
+      if (!completedBeforeResponse) uploadJobs.current.add(started.jobId)
     } catch (error) {
-      setNotice({ tone: 'error', message: ideError(error) })
+      clearUploadTracking(channelJobId)
+      if (workspaceActive.current && !channelInvalid) {
+        setNotice({ tone: 'error', message: ideError(error) })
+      }
     }
   }
 
@@ -984,7 +1102,7 @@ function IdeWorkspace({ active, onBack, onDisconnect }: { active: ActiveConnecti
         <div className="ide-file-list">{loadingFiles ? <div className="ide-pane-empty" role="status">正在通过 SFTP 读取…</div> : fileError ? <div className="ide-pane-empty error" role="alert">{fileError}<button onClick={() => void load(cwdRef.current)} type="button">重试</button></div> : entries.length ? entries.map((entry) => { const target = targetForEntry(entry); return <button aria-label={`${entry.name}，${entry.isDirectory ? '文件夹，回车打开' : `文件，${formatBytes(entry.size)}，回车下载`}`} className="ide-file-row" key={entry.name} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); openFileContextMenu(target, event.clientX, event.clientY, event.currentTarget) }} onDoubleClick={() => activateFileTarget(target)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateFileTarget(target) } else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openFileContextMenu(target, rect.left + 28, rect.top + 22, event.currentTarget) } }} type="button">{entry.isDirectory ? <Folder className="folder" size={16} /> : <File size={16} />}<span>{entry.name}</span><small>{entry.isDirectory ? '文件夹' : formatBytes(entry.size)}</small></button> }) : <div className="ide-pane-empty">此目录为空</div>}</div>
         <div className="ide-file-status"><span>{entries.length} 项{listingTruncated ? '（已截断）' : ''}</span><span>拖入文件即可上传</span></div>
       </aside>
-      <section className="ide-terminal-pane"><div className="ide-pane-tabs"><span className="active"><TerminalSquare size={14} />终端</span><div className="ide-terminal-actions"><span className={`ide-terminal-state ${terminalState}`}>{terminalState === 'connected' ? '已连接' : terminalState === 'connecting' ? '连接中' : terminalState === 'error' ? '错误' : '已关闭'}</span>{terminalState === 'closed' || terminalState === 'error' ? <button onClick={() => { setTerminalState('connecting'); setTerminalGeneration((current) => current + 1) }} type="button">重新打开</button> : null}</div></div><XtermPane connectionId={active.connection.id} key={terminalGeneration} onState={setTerminalState} /></section>
+      <section className="ide-terminal-pane"><div className="ide-pane-tabs"><span className="active"><TerminalSquare size={14} />终端</span><div className="ide-terminal-actions"><span aria-atomic="true" aria-live="polite" className={`ide-terminal-state ${terminalState}`} role="status">{terminalState === 'connected' ? '已连接' : terminalState === 'connecting' ? '连接中' : terminalState === 'error' ? '错误' : '已关闭'}</span>{terminalState === 'closed' || terminalState === 'error' ? <button onClick={() => { setTerminalState('connecting'); setTerminalGeneration((current) => current + 1) }} type="button">重新打开</button> : null}</div></div><XtermPane connectionId={active.connection.id} key={terminalGeneration} onState={setTerminalState} /></section>
       <aside className="ide-monitor-pane"><div className="ide-pane-tabs"><span className="active"><Activity size={14} />会话</span></div><div className="ide-monitor-card"><div className="ide-monitor-title"><Server size={16} /><strong>连接</strong></div><dl><div><dt>主机</dt><dd>{active.connection.host}:{active.connection.port}</dd></div><div><dt>用户</dt><dd>{active.connection.username}</dd></div><div><dt>状态</dt><dd className="ok">● 已验证</dd></div></dl></div><div className="ide-monitor-card"><div className="ide-monitor-title"><HardDrive size={16} /><strong>工作区</strong></div><dl><div><dt>目录</dt><dd title={cwd}>{cwd}</dd></div><div><dt>终端</dt><dd>{terminalState}</dd></div><div><dt>时长</dt><dd>{formatDuration(elapsed)}</dd></div></dl></div><div className="ide-monitor-card"><div className="ide-monitor-title"><Activity size={16} /><strong>传输</strong></div>{transfers.size ? [...transfers.values()].map((transfer) => <div className="ide-transfer" key={transfer.jobId}><span>{transfer.direction === 'upload' ? '上传' : '下载'} · {transfer.name}</span><progress aria-label={`${transfer.name} 传输进度`} max={transfer.jobTotalBytes ?? 1} value={transfer.jobBytesTransferred} /><small>{formatBytes(transfer.jobBytesTransferred)} / {formatBytes(transfer.jobTotalBytes)}</small><button onClick={() => void cancelTransferJob(transfer.jobId)} type="button">取消</button></div>) : <p className="ide-monitor-empty">当前没有传输任务</p>}</div><div className="ide-native-note">SSH 与 SFTP 均由 Rust `ssh2` 进程内执行，不调用 Windows SSH、PuTTY 或 plink。</div></aside>
     </section>
     {fileMenu ? <FileContextMenu menu={fileMenu} onDownload={() => { setFileMenu(null); void download(fileMenu) }} onRename={() => { setDialog({ kind: 'rename', entry: fileMenu.entry, path: fileMenu.path, directory: fileMenu.directory }); setDialogValue(fileMenu.entry.name); setFileMenu(null) }} onDelete={() => { setDialog({ kind: 'delete', entry: fileMenu.entry, path: fileMenu.path, directory: fileMenu.directory }); setFileMenu(null) }} /> : null}
@@ -1006,8 +1124,11 @@ function XtermPane({ connectionId, onState }: { connectionId: string; onState: (
     let inputQueue: IdeTerminalInputQueue | null = null
     let pendingResize: { columns: number; rows: number } | null = null
     let resizing = false
+    const reducedMotion = typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-reduced-motion: reduce)')
+      : null
     const terminal = new XTerm({
-      cursorBlink: true,
+      cursorBlink: !reducedMotion?.matches,
       convertEol: false,
       fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
       fontSize: 13,
@@ -1019,6 +1140,10 @@ function XtermPane({ connectionId, onState }: { connectionId: string; onState: (
     terminal.loadAddon(fit)
     terminal.open(host.current)
     fit.fit()
+    const syncReducedMotion = () => {
+      terminal.options.cursorBlink = !reducedMotion?.matches
+    }
+    reducedMotion?.addEventListener('change', syncReducedMotion)
 
     const knownSessionId = () => sessionId ?? provisionalSessionId
     const closeKnownSession = () => {
@@ -1138,6 +1263,7 @@ function XtermPane({ connectionId, onState }: { connectionId: string; onState: (
     return () => {
       disposed = true
       inputQueue?.close()
+      reducedMotion?.removeEventListener('change', syncReducedMotion)
       resizeObserver.disconnect()
       dataDisposable.dispose()
       closeKnownSession()
@@ -1172,12 +1298,8 @@ function isSafeLocalFileName(name: string) {
   return isSafeRemoteName(name) && !name.includes(':')
 }
 
-function trimMap<Key, Value>(map: Map<Key, Value>, maximum: number) {
-  while (map.size > maximum) {
-    const oldest = map.keys().next()
-    if (oldest.done) break
-    map.delete(oldest.value)
-  }
+function isNonNegativeSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0
 }
 
 function parentPath(path: string) {

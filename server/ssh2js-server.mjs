@@ -14,6 +14,8 @@ import {
 import { OperationAdmission, OperationAdmissionError } from './operation-admission.mjs'
 import { TerminalAdmission, TerminalAdmissionError } from './terminal-admission.mjs'
 import { createStaticWebHandler } from './static-web.mjs'
+import { connectModernSshClient } from './ssh-algorithms.mjs'
+import { attachmentContentDisposition } from './content-disposition.mjs'
 
 const { Client } = ssh2
 const HOST = '127.0.0.1'
@@ -263,12 +265,14 @@ async function route(request, response) {
     }
     if (request.method === 'GET' && suffix === 'files/download') {
       const remotePath = validateRemotePath(url.searchParams.get('path') ?? '')
+      const downloadName = validateFileName(path.basename(remotePath))
+      const contentDisposition = attachmentContentDisposition(downloadName)
       const data = await withRequestCancellation(request, response, (signal) => (
         downloadFile(connection, remotePath, signal)
       ))
       return sendBoundedBody(response, 200, data, {
         'content-type': 'application/octet-stream',
-        'content-disposition': `attachment; filename="${safeFileName(path.basename(remotePath))}"`,
+        'content-disposition': contentDisposition,
       })
     }
     if (request.method === 'POST' && suffix === 'files/delete-prepare') {
@@ -342,9 +346,34 @@ function createConnection(owner, input) {
   const host = requireString(input.host, '主机不能为空。', 253)
   const port = requireInteger(input.port, 1, 65535, 'SSH 端口必须是 1 到 65535 的整数。')
   const username = requireString(input.username, '用户名不能为空。', 128)
-  if (input.authentication?.kind !== 'password') throw apiError(400, 'unsupported_authentication', 'Web macOS 当前使用密码认证。')
-  const password = requireString(input.authentication.password, '密码不能为空。', 16 * 1024)
   if (!/^[A-Za-z0-9._:-]+$/.test(host) || host.includes('..')) throw apiError(400, 'invalid_host', '主机格式无效。')
+  const authenticationKind = input.authentication?.kind
+  let password = Buffer.alloc(0)
+  let privateKey = Buffer.alloc(0)
+  let passphrase = Buffer.alloc(0)
+  if (authenticationKind === 'password') {
+    password = Buffer.from(
+      requireString(input.authentication.password, '密码不能为空。', 16 * 1024),
+      'utf8',
+    )
+  } else if (authenticationKind === 'private_key') {
+    privateKey = Buffer.from(
+      requireString(input.authentication.privateKeyPem, '私钥不能为空。', 64 * 1024),
+      'utf8',
+    )
+    const rawPassphrase = input.authentication.passphrase
+    if (
+      rawPassphrase !== null
+      && rawPassphrase !== undefined
+      && (typeof rawPassphrase !== 'string' || Buffer.byteLength(rawPassphrase) > 16 * 1024)
+    ) {
+      privateKey.fill(0)
+      throw apiError(400, 'invalid_input', '私钥口令无效。')
+    }
+    if (rawPassphrase) passphrase = Buffer.from(rawPassphrase, 'utf8')
+  } else {
+    throw apiError(400, 'unsupported_authentication', 'Web macOS 支持密码或内存私钥认证。')
+  }
   return {
     id: randomUUID(),
     owner,
@@ -352,7 +381,10 @@ function createConnection(owner, input) {
     host,
     port,
     username,
-    password: Buffer.from(password, 'utf8'),
+    authenticationKind,
+    password,
+    privateKey,
+    passphrase,
     trustedFingerprint: null,
     trustedAlgorithm: null,
     client: null,
@@ -520,34 +552,38 @@ function holdHostKeyOnce(connection, generation) {
     }
     client.once('error', (error) => finish(error))
     client.once('close', () => finish())
-    client.connect({
-      host: connection.host,
-      port: connection.port,
-      username: connection.username,
-      readyTimeout: 10_000,
-      keepaliveInterval: 0,
-      authHandler() { return false },
-      hostVerifier(publicKey) {
-        if (settled) return false
-        if (!isConnectionLive(connection, generation)) {
+    try {
+      connectModernSshClient(client, {
+        host: connection.host,
+        port: connection.port,
+        username: connection.username,
+        readyTimeout: 10_000,
+        keepaliveInterval: 0,
+        authHandler() { return false },
+        hostVerifier(publicKey) {
+          if (settled) return false
+          if (!isConnectionLive(connection, generation)) {
+            settled = true
+            client.end()
+            reject(apiError(410, 'connection_closed', 'SSH 连接已关闭。'))
+            return false
+          }
           settled = true
-          client.end()
-          reject(apiError(410, 'connection_closed', 'SSH 连接已关闭。'))
+          const key = Buffer.from(publicKey)
+          resolve({
+            publicKey: key,
+            fingerprint: fingerprint(key),
+            keyAlgorithm: keyAlgorithm(key),
+          })
+          setImmediate(() => {
+            try { client.end() } catch {}
+          })
           return false
-        }
-        settled = true
-        const key = Buffer.from(publicKey)
-        resolve({
-          publicKey: key,
-          fingerprint: fingerprint(key),
-          keyAlgorithm: keyAlgorithm(key),
-        })
-        setImmediate(() => {
-          try { client.end() } catch {}
-        })
-        return false
-      },
-    })
+        },
+      })
+    } catch (error) {
+      finish(error)
+    }
   })
 }
 
@@ -607,7 +643,7 @@ function openClientOnce(connection, generation) {
     const client = new Client()
     trackConnectionClient(connection, client)
     let settled = false
-    let passwordAttempted = false
+    let authenticationAttempted = false
     const timer = setTimeout(() => finish(apiError(504, 'ssh_timeout', 'SSH 连接超时。')), 20_000)
     const finish = (error) => {
       if (settled) return
@@ -618,28 +654,41 @@ function openClientOnce(connection, generation) {
         reject(apiError(410, 'connection_closed', 'SSH 连接已关闭。'))
       } else if (error) {
         client.end()
-        reject(classifySshError(error, passwordAttempted))
+        reject(classifySshError(error, authenticationAttempted))
       } else resolve(client)
     }
     client.once('ready', () => finish())
     client.once('error', finish)
-    client.connect({
-      host: connection.host,
-      port: connection.port,
-      username: connection.username,
-      authHandler(methodsLeft) {
-        if (passwordAttempted || !isConnectionLive(connection, generation)) return false
-        if (methodsLeft !== null && !methodsLeft.includes('password')) return false
-        passwordAttempted = true
-        return { type: 'password', username: connection.username, password: connection.password }
-      },
-      readyTimeout: 10_000,
-      keepaliveInterval: 10_000,
-      keepaliveCountMax: 3,
-      hostVerifier(publicKey) {
-        return safeEqual(connection.trustedFingerprint, fingerprint(Buffer.from(publicKey)))
-      },
-    })
+    try {
+      connectModernSshClient(client, {
+        host: connection.host,
+        port: connection.port,
+        username: connection.username,
+        authHandler(methodsLeft) {
+          if (authenticationAttempted || !isConnectionLive(connection, generation)) return false
+          const method = connection.authenticationKind === 'private_key' ? 'publickey' : 'password'
+          if (methodsLeft !== null && !methodsLeft.includes(method)) return false
+          authenticationAttempted = true
+          if (method === 'publickey') {
+            return {
+              type: 'publickey',
+              username: connection.username,
+              key: connection.privateKey,
+              passphrase: connection.passphrase.length ? connection.passphrase : undefined,
+            }
+          }
+          return { type: 'password', username: connection.username, password: connection.password }
+        },
+        readyTimeout: 10_000,
+        keepaliveInterval: 10_000,
+        keepaliveCountMax: 3,
+        hostVerifier(publicKey) {
+          return safeEqual(connection.trustedFingerprint, fingerprint(Buffer.from(publicKey)))
+        },
+      })
+    } catch (error) {
+      finish(error)
+    }
   })
 }
 
@@ -841,12 +890,12 @@ function writeTerminalWithBackpressure(terminal, data) {
   })
 }
 
-function classifySshError(error, passwordAttempted) {
+function classifySshError(error, authenticationAttempted) {
   if (error?.status && error?.code && error?.publicMessage) return error
   const code = String(error?.code ?? '').toUpperCase()
   const level = String(error?.level ?? '').toLowerCase()
-  if (level.includes('authentication') || (passwordAttempted && level === 'client-authentication')) {
-    return apiError(401, 'ssh_authentication_failed', 'SSH 认证失败，请检查用户名、密码和服务器认证策略。')
+  if (level.includes('authentication') || (authenticationAttempted && level === 'client-authentication')) {
+    return apiError(401, 'ssh_authentication_failed', 'SSH 认证失败，请检查用户名、认证材料和服务器认证策略。')
   }
   if (code === 'ETIMEDOUT' || level.includes('timeout')) {
     return apiError(504, 'ssh_timeout', 'SSH 连接超时，请检查地址、端口和网络。')
@@ -1349,7 +1398,11 @@ function zeroConnection(connection) {
   connection.authenticating = null
   connection.pendingConfirmationId = null
   connection.password?.fill(0)
+  connection.privateKey?.fill(0)
+  connection.passphrase?.fill(0)
   connection.password = Buffer.alloc(0)
+  connection.privateKey = Buffer.alloc(0)
+  connection.passphrase = Buffer.alloc(0)
   connection.trustedFingerprint = null
 }
 
@@ -1917,10 +1970,6 @@ function validToken(value) {
 
 function shellQuote(value) {
   return `'${value.replaceAll("'", "'\"'\"'")}'`
-}
-
-function safeFileName(value) {
-  return validateFileName(value).replaceAll('"', '_')
 }
 
 function apiError(status, code, publicMessage) {

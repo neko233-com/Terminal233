@@ -39,12 +39,16 @@ export interface DeleteConfirmation { confirmationId: string; expiresInSeconds: 
 export interface AgentGrant { grant: string; expiresInSeconds: number }
 interface BrowserSessionStarted { ok: true; releaseId: string }
 
-export interface PasswordConnectionInput {
+export type WebAuthentication =
+  | { kind: 'password'; password: string }
+  | { kind: 'private_key'; privateKeyPem: string; passphrase: string | null }
+
+export interface WebConnectionInput {
   label: string
   host: string
   port: number
   username: string
-  authentication: { kind: 'password'; password: string }
+  authentication: WebAuthentication
   tags: string[]
   terminal: { columns: number; rows: number; command: null }
 }
@@ -60,8 +64,41 @@ export class WebApiError extends Error {
 
 let browserSessionPromise: Promise<void> | null = null
 let browserReleaseId: string | null = null
+const browserSessionInvalidationListeners = new Set<() => void>()
+
+function invalidateBrowserSession(expectedSession: Promise<void> | null): void {
+  if (browserSessionPromise !== expectedSession) return
+  const hadSession = browserSessionPromise !== null || browserReleaseId !== null
+  browserSessionPromise = null
+  browserReleaseId = null
+  if (!hadSession) return
+  for (const listener of browserSessionInvalidationListeners) {
+    try {
+      listener()
+    } catch {
+      // One UI subscriber must not prevent the request from returning the original API error.
+    }
+  }
+}
+
+function isBrowserSessionError(code: string): boolean {
+  return code === 'browser_session_required' || code === 'unauthorized'
+}
+
+async function apiErrorFromResponse(
+  response: Response,
+  fallbackCode: string,
+  fallbackMessage: string,
+  expectedSession: Promise<void> | null,
+): Promise<WebApiError> {
+  const payload = await response.json().catch(() => null) as { code?: string; message?: string } | null
+  const code = payload?.code ?? fallbackCode
+  if (isBrowserSessionError(code)) invalidateBrowserSession(expectedSession)
+  return new WebApiError(code, payload?.message ?? fallbackMessage)
+}
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const expectedSession = browserSessionPromise
   const response = await fetch(path, {
     credentials: 'include',
     ...init,
@@ -72,8 +109,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   })
   if (response.status === 204) return undefined as T
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { code?: string; message?: string } | null
-    throw new WebApiError(payload?.code ?? 'network_error', payload?.message ?? '本地 SSH 服务暂时不可用。')
+    throw await apiErrorFromResponse(
+      response,
+      'network_error',
+      '本地 SSH 服务暂时不可用。',
+      expectedSession,
+    )
   }
   return response.json() as Promise<T>
 }
@@ -90,6 +131,11 @@ export async function initializeBrowserSession(): Promise<void> {
       })
   }
   await browserSessionPromise
+}
+
+export function onBrowserSessionInvalidated(listener: () => void): () => void {
+  browserSessionInvalidationListeners.add(listener)
+  return () => browserSessionInvalidationListeners.delete(listener)
 }
 
 export function releaseBrowserSession(): void {
@@ -112,7 +158,7 @@ export function listConnections(): Promise<ConnectionSummary[]> {
   return request('/api/connections')
 }
 
-export function createConnection(input: PasswordConnectionInput): Promise<ConnectionSummary> {
+export function createConnection(input: WebConnectionInput): Promise<ConnectionSummary> {
   return request('/api/connections', { method: 'POST', body: JSON.stringify(input) })
 }
 
@@ -199,22 +245,58 @@ export async function uploadFiles(id: string, remoteDirectory: string, files: Fi
 }
 
 export async function downloadRemote(id: string, path: string): Promise<void> {
+  const expectedSession = browserSessionPromise
   const response = await fetch(`/api/connections/${id}/files/download?path=${encodeURIComponent(path)}`, { credentials: 'include' })
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { code?: string; message?: string } | null
-    throw new WebApiError(payload?.code ?? 'download_failed', payload?.message ?? '下载远端文件失败。')
+    throw await apiErrorFromResponse(
+      response,
+      'download_failed',
+      '下载远端文件失败。',
+      expectedSession,
+    )
   }
   const blob = await response.blob()
   const disposition = response.headers.get('content-disposition') ?? ''
-  const matched = disposition.match(/filename="([^"]+)"/)
   const pathParts = path.split('/').filter(Boolean)
-  const name = matched?.[1] ?? pathParts[pathParts.length - 1] ?? 'download'
+  const name = downloadFileName(disposition, pathParts[pathParts.length - 1] ?? 'download')
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
   link.download = name
-  link.click()
-  URL.revokeObjectURL(url)
+  link.hidden = true
+  document.body.append(link)
+  try {
+    link.click()
+  } finally {
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+}
+
+function downloadFileName(disposition: string, fallback: string): string {
+  const candidates: string[] = []
+  const extended = disposition.match(/(?:^|;)\s*filename\*\s*=\s*UTF-8''([^;]*)/i)?.[1]?.trim()
+  if (extended) {
+    try {
+      candidates.push(decodeURIComponent(extended.replace(/^"(.*)"$/, '$1')))
+    } catch {
+      // Ignore malformed extended values and fall back to the quoted or remote-path basename.
+    }
+  }
+  const quoted = disposition.match(/(?:^|;)\s*filename\s*=\s*"([^"]*)"/i)?.[1]
+  if (quoted) candidates.push(quoted)
+  candidates.push(fallback)
+  return candidates.find(isSafeDownloadFileName) ?? 'download'
+}
+
+function isSafeDownloadFileName(value: string): boolean {
+  return value.length > 0
+    && value.length <= 255
+    && value !== '.'
+    && value !== '..'
+    && !value.includes('/')
+    && !value.includes('\\')
+    && !/[\0-\x1f\x7f]/.test(value)
 }
 
 function toBase64(buffer: ArrayBuffer): string {

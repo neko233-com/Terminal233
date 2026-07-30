@@ -103,12 +103,521 @@ function Assert-PathHasNoReparsePoints {
     }
 }
 
+function Get-CurrentUserSid {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        if ($null -eq $identity.User) {
+            throw 'The current Windows identity does not have a security identifier.'
+        }
+        return [Security.Principal.SecurityIdentifier]::new($identity.User.Value)
+    }
+    finally {
+        $identity.Dispose()
+    }
+}
+
+function Get-SigningAclSids {
+    return @(
+        (Get-CurrentUserSid)
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    )
+}
+
+function Assert-DirectoryNotWritableByUntrustedPrincipal {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]
+        [Security.Principal.SecurityIdentifier[]]$AllowedSids
+    )
+
+    $item = Get-Item -LiteralPath $Path -Force
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Private signing parent must be a regular directory: $Path"
+    }
+    $acl = $item.GetAccessControl(
+        [Security.AccessControl.AccessControlSections]::Access -bor
+        [Security.AccessControl.AccessControlSections]::Owner
+    )
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier])
+    $allowedSidValues = @($AllowedSids | ForEach-Object { $_.Value })
+    if ($allowedSidValues -cnotcontains $owner.Value) {
+        throw "Private signing parent has an untrusted owner '$($owner.Value)': $Path"
+    }
+
+    $dangerousRights = (
+        [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    )
+    foreach ($rule in $acl.GetAccessRules(
+        $true,
+        $true,
+        [Security.Principal.SecurityIdentifier]
+    )) {
+        if (
+            $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0
+        ) {
+            continue
+        }
+        if (
+            $allowedSidValues -cnotcontains $rule.IdentityReference.Value -and
+            ($rule.FileSystemRights -band $dangerousRights) -ne 0
+        ) {
+            throw (
+                "Private signing parent grants write/delete control to untrusted SID " +
+                "'$($rule.IdentityReference.Value)': $Path"
+            )
+        }
+    }
+}
+
+function Assert-AncestorsDoNotGrantUntrustedDeleteChild {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]
+        [Security.Principal.SecurityIdentifier[]]$AllowedSids
+    )
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $volumeRoot = [IO.Path]::GetPathRoot($fullPath)
+    $relative = $fullPath.Substring($volumeRoot.Length).TrimStart(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+    $segments = @(
+        $relative.Split(
+            @([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar),
+            [StringSplitOptions]::RemoveEmptyEntries
+        )
+    )
+    $allowedSidValues = @($AllowedSids | ForEach-Object { $_.Value })
+    $current = $volumeRoot
+    for ($index = 0; $index -lt $segments.Count; $index += 1) {
+        $parent = Get-Item -LiteralPath $current -Force
+        $acl = $parent.GetAccessControl(
+            [Security.AccessControl.AccessControlSections]::Access
+        )
+        foreach ($rule in $acl.GetAccessRules(
+            $true,
+            $true,
+            [Security.Principal.SecurityIdentifier]
+        )) {
+            if (
+                $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+                ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0
+            ) {
+                continue
+            }
+            if (
+                $allowedSidValues -cnotcontains $rule.IdentityReference.Value -and
+                ($rule.FileSystemRights -band (
+                    [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles
+                )) -ne 0
+            ) {
+                throw (
+                    "Ancestor '$current' lets untrusted SID " +
+                    "'$($rule.IdentityReference.Value)' delete signing descendants."
+                )
+            }
+        }
+        $current = Join-Path $current $segments[$index]
+    }
+}
+
+function Assert-PrivateSigningDirectory {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]
+        [Security.Principal.SecurityIdentifier[]]$AllowedSids
+    )
+
+    Assert-RegularFileSystemDirectory -Path $Path
+    $volumeRoot = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Path))
+    Assert-PathHasNoReparsePoints -Path $Path -TrustedRoot $volumeRoot
+    $item = Get-Item -LiteralPath $Path -Force
+    $acl = $item.GetAccessControl(
+        [Security.AccessControl.AccessControlSections]::Access -bor
+        [Security.AccessControl.AccessControlSections]::Owner
+    )
+    if (-not $acl.AreAccessRulesProtected) {
+        throw "Private signing directory must disable inherited access rules: $Path"
+    }
+    $currentSid = Get-CurrentUserSid
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier])
+    if ($owner.Value -cne $currentSid.Value) {
+        throw "Private signing directory owner is not the current signer identity: $Path"
+    }
+
+    $allowedSidValues = @($AllowedSids | ForEach-Object { $_.Value })
+    $fullControlSids = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal
+    )
+    foreach ($rule in $acl.GetAccessRules(
+        $true,
+        $true,
+        [Security.Principal.SecurityIdentifier]
+    )) {
+        if (
+            $rule.IsInherited -or
+            $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            $allowedSidValues -cnotcontains $rule.IdentityReference.Value -or
+            ($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne
+                [Security.AccessControl.FileSystemRights]::FullControl
+        ) {
+            throw "Private signing directory contains an unexpected ACL entry: $Path"
+        }
+        [void]$fullControlSids.Add($rule.IdentityReference.Value)
+    }
+    foreach ($allowedSid in $allowedSidValues) {
+        if (-not $fullControlSids.Contains($allowedSid)) {
+            throw "Private signing directory is missing required full control for SID '$allowedSid'."
+        }
+    }
+}
+
+function Assert-RegularFileSystemDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "Required regular directory is missing: $Path"
+    }
+    $item = Get-Item -LiteralPath $Path -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Required directory must not be a reparse point: $Path"
+    }
+}
+
+function New-PrivateSigningDirectory {
+    $localAppData = [Environment]::GetFolderPath(
+        [Environment+SpecialFolder]::LocalApplicationData
+    )
+    if (
+        [string]::IsNullOrWhiteSpace($localAppData) -or
+        -not [IO.Path]::IsPathRooted($localAppData) -or
+        $localAppData.StartsWith('\\', [StringComparison]::Ordinal)
+    ) {
+        throw 'A local, absolute Windows LocalApplicationData directory is required for signing.'
+    }
+    $localAppData = [IO.Path]::GetFullPath($localAppData)
+    Assert-RegularFileSystemDirectory -Path $localAppData
+    Assert-PathHasNoReparsePoints `
+        -Path $localAppData `
+        -TrustedRoot ([IO.Path]::GetPathRoot($localAppData))
+
+    $allowedSids = @(Get-SigningAclSids)
+    Assert-AncestorsDoNotGrantUntrustedDeleteChild `
+        -Path $localAppData `
+        -AllowedSids $allowedSids
+    Assert-DirectoryNotWritableByUntrustedPrincipal `
+        -Path $localAppData `
+        -AllowedSids $allowedSids
+    $currentSid = Get-CurrentUserSid
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $security.SetOwner($currentSid)
+    $inheritanceFlags = (
+        [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    )
+    foreach ($sid in $allowedSids) {
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+            $sid,
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritanceFlags,
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow
+        )
+        [void]$security.AddAccessRule($rule)
+    }
+
+    for ($attempt = 0; $attempt -lt 8; $attempt += 1) {
+        $candidate = Join-Path $localAppData (
+            "NekoSSH-signing-$PID-$([guid]::NewGuid().ToString('N'))"
+        )
+        if (Test-Path -LiteralPath $candidate) {
+            continue
+        }
+        try {
+            [void][IO.Directory]::CreateDirectory($candidate, $security)
+            Assert-PrivateSigningDirectory -Path $candidate -AllowedSids $allowedSids
+            return $candidate
+        }
+        catch {
+            $creationFailure = $_
+            if (Test-Path -LiteralPath $candidate -PathType Container) {
+                try {
+                    [IO.Directory]::Delete($candidate, $false)
+                }
+                catch {
+                    Write-Warning (
+                        "Unable to remove rejected private signing directory '$candidate': " +
+                        $_.Exception.Message
+                    )
+                }
+            }
+            throw $creationFailure
+        }
+    }
+    throw 'Unable to allocate a unique private signing directory.'
+}
+
+function Initialize-SigningNativeMethods {
+    if ($null -ne ('NekoSSH.SigningNativeMethods' -as [type])) {
+        return
+    }
+    Add-Type -Language CSharp -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace NekoSSH
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SigningFileInformation
+    {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    public static class SigningNativeMethods
+    {
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandle(
+            SafeFileHandle file,
+            out SigningFileInformation information
+        );
+
+        public static SigningFileInformation GetFileInformation(SafeFileHandle file)
+        {
+            SigningFileInformation information;
+            if (!GetFileInformationByHandle(file, out information))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return information;
+        }
+    }
+}
+'@
+}
+
+function Get-SingleLinkFileIdentity {
+    param([Parameter(Mandatory)][string]$Path)
+
+    Assert-RegularFile -Path $Path
+    Initialize-SigningNativeMethods
+    $stream = [IO.File]::Open(
+        $Path,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read
+    )
+    try {
+        $information = [NekoSSH.SigningNativeMethods]::GetFileInformation(
+            $stream.SafeFileHandle
+        )
+        if ($information.NumberOfLinks -ne 1) {
+            throw "Private signing files must have exactly one hard link: $Path"
+        }
+        return (
+            '{0:x8}:{1:x8}{2:x8}' -f
+            $information.VolumeSerialNumber,
+            $information.FileIndexHigh,
+            $information.FileIndexLow
+        )
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Copy-RegularFileToNewPath {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination
+    )
+
+    Assert-RegularFile -Path $Source
+    $sourceStream = [IO.File]::Open(
+        $Source,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read
+    )
+    try {
+        $destinationStream = [IO.FileStream]::new(
+            $Destination,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write,
+            [IO.FileShare]::None,
+            4096,
+            [IO.FileOptions]::WriteThrough
+        )
+        try {
+            $sourceStream.CopyTo($destinationStream)
+            $destinationStream.Flush($true)
+        }
+        finally {
+            $destinationStream.Dispose()
+        }
+    }
+    finally {
+        $sourceStream.Dispose()
+    }
+}
+
+function Restore-UnsignedReceiptFromPrivateBackup {
+    param(
+        [Parameter(Mandatory)][string]$PrivateBackupPath,
+        [Parameter(Mandatory)][string]$ReceiptPath,
+        [Parameter(Mandatory)][string]$ReleaseDirectory,
+        [Parameter(Mandatory)][string]$ExpectedSha256
+    )
+
+    Assert-RegularFile -Path $PrivateBackupPath
+    [void](Get-SingleLinkFileIdentity -Path $PrivateBackupPath)
+    if ((Get-Sha256 -Path $PrivateBackupPath) -cne $ExpectedSha256) {
+        throw 'The protected unsigned receipt backup changed before recovery.'
+    }
+    if ((Get-AuthenticodeSignature -LiteralPath $PrivateBackupPath).Status.ToString() -cne 'NotSigned') {
+        throw 'The protected recovery receipt is no longer unsigned.'
+    }
+    $restorePath = Join-Path $ReleaseDirectory (
+        ".$receiptName.restore-$PID-$([guid]::NewGuid().ToString('N')).tmp.psd1"
+    )
+    $displacedPath = Join-Path $ReleaseDirectory (
+        ".$receiptName.displaced-$PID-$([guid]::NewGuid().ToString('N')).tmp.psd1"
+    )
+    try {
+        Copy-RegularFileToNewPath -Source $PrivateBackupPath -Destination $restorePath
+        if ((Get-Sha256 -Path $restorePath) -cne $ExpectedSha256) {
+            throw 'The release-directory recovery copy does not match the protected backup.'
+        }
+        Assert-PathHasNoReparsePoints -Path $ReleaseDirectory -TrustedRoot $repositoryRoot
+        Assert-PathHasNoReparsePoints -Path $restorePath -TrustedRoot $repositoryRoot
+        if (Test-Path -LiteralPath $ReceiptPath) {
+            Assert-RegularFile -Path $ReceiptPath
+            Assert-PathHasNoReparsePoints -Path $ReceiptPath -TrustedRoot $repositoryRoot
+            if (Test-Path -LiteralPath $displacedPath) {
+                throw 'The generated displaced-receipt path already exists.'
+            }
+            [IO.File]::Replace($restorePath, $ReceiptPath, $displacedPath, $true)
+        } else {
+            [IO.File]::Move($restorePath, $ReceiptPath)
+        }
+        Assert-RegularFile -Path $ReceiptPath
+        Assert-PathHasNoReparsePoints -Path $ReceiptPath -TrustedRoot $repositoryRoot
+        if ((Get-Sha256 -Path $ReceiptPath) -cne $ExpectedSha256) {
+            throw 'The unsigned smoke receipt recovery hash is invalid.'
+        }
+        $restoredSignature = Get-AuthenticodeSignature -LiteralPath $ReceiptPath
+        if (
+            $restoredSignature.Status.ToString() -cne 'NotSigned' -or
+            $null -ne $restoredSignature.SignerCertificate -or
+            $null -ne $restoredSignature.TimeStamperCertificate
+        ) {
+            throw 'The restored smoke receipt is not in its original unsigned state.'
+        }
+        if (Test-Path -LiteralPath $displacedPath) {
+            Assert-RegularFile -Path $displacedPath
+            Assert-PathHasNoReparsePoints -Path $displacedPath -TrustedRoot $repositoryRoot
+            Remove-Item -LiteralPath $displacedPath -Force
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $restorePath) {
+            Assert-RegularFile -Path $restorePath
+            Assert-PathHasNoReparsePoints -Path $restorePath -TrustedRoot $repositoryRoot
+            Remove-Item -LiteralPath $restorePath -Force
+        }
+        if (Test-Path -LiteralPath $displacedPath) {
+            Assert-RegularFile -Path $displacedPath
+            Assert-PathHasNoReparsePoints -Path $displacedPath -TrustedRoot $repositoryRoot
+            Remove-Item -LiteralPath $displacedPath -Force
+        }
+    }
+}
+
+function Remove-PrivateSigningDirectory {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]
+        [Security.Principal.SecurityIdentifier[]]$AllowedSids,
+        [Parameter(Mandatory)][string[]]$ExpectedFiles
+    )
+
+    Assert-PrivateSigningDirectory -Path $Path -AllowedSids $AllowedSids
+    $expectedPaths = @(
+        $ExpectedFiles |
+            ForEach-Object { [IO.Path]::GetFullPath($_) }
+    )
+    $actualItems = @(Get-ChildItem -LiteralPath $Path -Force)
+    foreach ($item in $actualItems) {
+        if (
+            $item.PSIsContainer -or
+            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            $expectedPaths -cnotcontains [IO.Path]::GetFullPath($item.FullName)
+        ) {
+            throw "Private signing directory contains an unexpected entry: $($item.FullName)"
+        }
+    }
+    foreach ($expectedPath in $expectedPaths) {
+        if (Test-Path -LiteralPath $expectedPath) {
+            Assert-RegularFile -Path $expectedPath
+            Remove-Item -LiteralPath $expectedPath -Force
+        }
+    }
+    [IO.Directory]::Delete($Path, $false)
+}
+
+function Get-ResolvedGitExecutable {
+    $commands = @(
+        Get-Command -Name git.exe -CommandType Application -ErrorAction Stop
+    )
+    if ($commands.Count -eq 0) {
+        throw 'A Git application executable is required.'
+    }
+    $gitPath = [IO.Path]::GetFullPath([string]$commands[0].Source)
+    if ($gitPath.StartsWith('\\', [StringComparison]::Ordinal)) {
+        throw 'The Git executable must be installed on a local Windows volume.'
+    }
+    Assert-RegularFile -Path $gitPath
+    Assert-PathHasNoReparsePoints `
+        -Path $gitPath `
+        -TrustedRoot ([IO.Path]::GetPathRoot($gitPath))
+    $gitSignature = Get-AuthenticodeSignature -LiteralPath $gitPath
+    if (
+        $gitSignature.Status.ToString() -cne 'Valid' -or
+        $null -eq $gitSignature.SignerCertificate -or
+        $null -eq $gitSignature.TimeStamperCertificate
+    ) {
+        throw 'The Git executable must have a valid, trusted, timestamped Authenticode signature.'
+    }
+    return $gitPath
+}
+
 function Get-CheckedGitOutput {
     param([Parameter(Mandatory)][string[]]$ArgumentList)
 
-    $output = & git -C $repositoryRoot @ArgumentList 2>&1
+    $output = & $gitExecutable -C $repositoryRoot @ArgumentList 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "Git command failed: git $($ArgumentList -join ' ')`n$($output -join "`n")"
+        throw "Git command failed: git.exe $($ArgumentList -join ' ')`n$($output -join "`n")"
     }
     return ($output -join "`n").Trim()
 }
@@ -117,6 +626,52 @@ function Invoke-CheckedGit {
     param([Parameter(Mandatory)][string[]]$ArgumentList)
 
     [void](Get-CheckedGitOutput -ArgumentList $ArgumentList)
+}
+
+function Assert-TrackedInputsMatchHead {
+    param([Parameter(Mandatory)][string[]]$Paths)
+
+    foreach ($trackedPath in $Paths) {
+        $workingPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot $trackedPath))
+        if (-not (Test-ChildPath -Path $workingPath -Parent $repositoryRoot)) {
+            throw "Trusted signing input escaped the repository: $trackedPath"
+        }
+        Assert-RegularFile -Path $workingPath
+        Assert-PathHasNoReparsePoints -Path $workingPath -TrustedRoot $repositoryRoot
+        $indexState = Get-CheckedGitOutput -ArgumentList @(
+            'ls-files',
+            '-v',
+            '--',
+            $trackedPath
+        )
+        if ($indexState -cne "H $trackedPath") {
+            throw (
+                "Trusted signing input '$trackedPath' has an unexpected Git index flag/state " +
+                "'$indexState'. Assume-unchanged and skip-worktree are forbidden."
+            )
+        }
+        $headBlob = Get-CheckedGitOutput -ArgumentList @(
+            'rev-parse',
+            "HEAD:$trackedPath"
+        )
+        $indexBlob = Get-CheckedGitOutput -ArgumentList @(
+            'rev-parse',
+            ":$trackedPath"
+        )
+        $worktreeBlob = Get-CheckedGitOutput -ArgumentList @(
+            'hash-object',
+            '--no-filters',
+            '--',
+            $trackedPath
+        )
+        if (
+            $headBlob -cnotmatch '^[0-9a-f]{40}$' -or
+            $indexBlob -cne $headBlob -or
+            $worktreeBlob -cne $headBlob
+        ) {
+            throw "Trusted signing input '$trackedPath' does not exactly match HEAD."
+        }
+    }
 }
 
 function Assert-ExactMapKeys {
@@ -404,6 +959,7 @@ foreach ($path in @(
     Assert-RegularFile -Path $path
     Assert-PathHasNoReparsePoints -Path $path -TrustedRoot $repositoryRoot
 }
+$gitExecutable = Get-ResolvedGitExecutable
 $canonicalSignerThumbprint = $SignerThumbprint.ToUpperInvariant()
 if ($canonicalSignerThumbprint -cnotmatch '^[0-9A-F]{40}$') {
     throw 'SignerThumbprint must be exactly 40 hexadecimal characters.'
@@ -421,6 +977,7 @@ if ((Get-CheckedGitOutput -ArgumentList @('symbolic-ref', '--short', 'HEAD')) -c
     throw 'Windows smoke receipts may only be signed from branch main.'
 }
 $trackedInputs = @(
+    '.gitattributes',
     'release-signing-policy.json',
     'release-signing-policy.schema.json',
     'release-manifest.schema.json',
@@ -429,13 +986,6 @@ $trackedInputs = @(
     'scripts/test-windows-release-installers.ps1',
     'scripts/verify-windows-web-portable.ps1'
 )
-foreach ($trackedInput in $trackedInputs) {
-    Invoke-CheckedGit -ArgumentList @('ls-files', '--error-unmatch', '--', $trackedInput)
-}
-$worktreeStatus = Get-CheckedGitOutput -ArgumentList @('status', '--porcelain=v1', '--untracked-files=all')
-if (-not [string]::IsNullOrWhiteSpace($worktreeStatus)) {
-    throw "Refusing to sign from a dirty Git worktree.`n$worktreeStatus"
-}
 $originUrl = Get-CheckedGitOutput -ArgumentList @('remote', 'get-url', 'origin')
 if (
     $originUrl -cnotmatch '^(?:https://github\.com/neko233-com/nekossh(?:\.git)?|git@github\.com:neko233-com/nekossh\.git|ssh://git@github\.com/neko233-com/nekossh\.git)$'
@@ -448,10 +998,26 @@ $originCommit = Get-CheckedGitOutput -ArgumentList @('rev-parse', 'refs/remotes/
 if ($headCommit -cne $originCommit) {
     throw "Local main ($headCommit) does not exactly match origin/main ($originCommit)."
 }
+Assert-TrackedInputsMatchHead -Paths $trackedInputs
+$worktreeStatus = Get-CheckedGitOutput -ArgumentList @(
+    'status',
+    '--porcelain=v1',
+    '--untracked-files=all'
+)
+if (-not [string]::IsNullOrWhiteSpace($worktreeStatus)) {
+    throw "Refusing to sign from a dirty Git worktree.`n$worktreeStatus"
+}
 Import-Module $policyModulePath -Force -ErrorAction Stop
 $policy = Import-ReleaseSigningPolicy -Path $policyPath
 if ($policy.Repository -cne $expectedRepository) {
     throw 'Release signing policy repository is invalid.'
+}
+$headPolicyBlob = Get-CheckedGitOutput -ArgumentList @(
+    'rev-parse',
+    'HEAD:release-signing-policy.json'
+)
+if ($policy.SourceGitBlobId -cne $headPolicyBlob) {
+    throw 'The parsed release signing policy bytes do not exactly match HEAD.'
 }
 
 $releaseRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'output/release'))
@@ -719,24 +1285,64 @@ foreach ($candidate in $certificates) {
 }
 $certificate = $certificates[0]
 
+$privateSigningDirectory = $null
+$privateSigningSids = @()
+$protectedUnsignedReceiptPath = $null
+$protectedSigningReceiptPath = $null
 $temporaryReceiptPath = Join-Path $resolvedReleaseDirectory (
-    ".$receiptName.signing-$PID-$([guid]::NewGuid().ToString('N')).tmp.psd1"
+    ".$receiptName.installing-$PID-$([guid]::NewGuid().ToString('N')).tmp.psd1"
 )
 $backupReceiptPath = Join-Path $resolvedReleaseDirectory (
     ".$receiptName.unsigned-backup-$PID-$([guid]::NewGuid().ToString('N')).tmp.psd1"
 )
-$preserveUnsignedBackup = $false
+$receiptWasReplaced = $false
+$signingCompleted = $false
+$preservePrivateSigningDirectory = $false
 try {
-    [IO.File]::Copy($receiptPath, $temporaryReceiptPath, $false)
-    Assert-RegularFile -Path $temporaryReceiptPath
-    if ((Get-AuthenticodeSignature -LiteralPath $temporaryReceiptPath).Status.ToString() -cne 'NotSigned') {
-        throw 'The temporary receipt copy is not in a clean unsigned state.'
+    Assert-TrackedInputsMatchHead -Paths $trackedInputs
+    $privateSigningDirectory = New-PrivateSigningDirectory
+    $privateSigningSids = @(Get-SigningAclSids)
+    $protectedUnsignedReceiptPath = Join-Path (
+        $privateSigningDirectory
+    ) 'unsigned-receipt.psd1'
+    $protectedSigningReceiptPath = Join-Path (
+        $privateSigningDirectory
+    ) 'receipt-to-sign.psd1'
+    Copy-RegularFileToNewPath `
+        -Source $receiptPath `
+        -Destination $protectedUnsignedReceiptPath
+    if ((Get-Sha256 -Path $protectedUnsignedReceiptPath) -cne $unsignedReceiptHash) {
+        throw 'The protected unsigned receipt backup does not match the validated input.'
     }
+    $protectedBackupSignature = Get-AuthenticodeSignature `
+        -LiteralPath $protectedUnsignedReceiptPath
+    if (
+        $protectedBackupSignature.Status.ToString() -cne 'NotSigned' -or
+        $null -ne $protectedBackupSignature.SignerCertificate -or
+        $null -ne $protectedBackupSignature.TimeStamperCertificate
+    ) {
+        throw 'The protected receipt backup is not in a clean unsigned state.'
+    }
+    [void](Get-SingleLinkFileIdentity -Path $protectedUnsignedReceiptPath)
+    Copy-RegularFileToNewPath `
+        -Source $protectedUnsignedReceiptPath `
+        -Destination $protectedSigningReceiptPath
+    if ((Get-Sha256 -Path $protectedSigningReceiptPath) -cne $unsignedReceiptHash) {
+        throw 'The private signing copy does not match the validated receipt.'
+    }
+    [void](Get-SingleLinkFileIdentity -Path $protectedSigningReceiptPath)
+    Assert-PrivateSigningDirectory `
+        -Path $privateSigningDirectory `
+        -AllowedSids $privateSigningSids
     $signedTemporaryReceipt = Set-AuthenticodeSignature `
-        -FilePath $temporaryReceiptPath `
+        -FilePath $protectedSigningReceiptPath `
         -Certificate $certificate `
         -HashAlgorithm SHA256 `
         -TimestampServer $TimestampUrl
+    Assert-PrivateSigningDirectory `
+        -Path $privateSigningDirectory `
+        -AllowedSids $privateSigningSids
+    [void](Get-SingleLinkFileIdentity -Path $protectedSigningReceiptPath)
     if (
         $signedTemporaryReceipt.Status.ToString() -cne 'Valid' -or
         $null -eq $signedTemporaryReceipt.SignerCertificate -or
@@ -748,7 +1354,8 @@ try {
     [void](Assert-ReleaseSigningCertificate `
         -Certificate $signedTemporaryReceipt.SignerCertificate `
         -Signer $policySigner)
-    $temporaryReceiptData = Import-PowerShellDataFile -LiteralPath $temporaryReceiptPath
+    $temporaryReceiptData = Import-PowerShellDataFile `
+        -LiteralPath $protectedSigningReceiptPath
     Assert-ReceiptData `
         -Receipt $temporaryReceiptData `
         -Manifest $manifest `
@@ -759,21 +1366,60 @@ try {
         -ExpectedNonce $ExpectedValidationNonce `
         -ExpectedImageId $ExpectedCleanVmImageId `
         -Policy $policy
+    $signedReceiptHash = Get-Sha256 -Path $protectedSigningReceiptPath
     if ((Get-Sha256 -Path $receiptPath) -cne $unsignedReceiptHash) {
         throw 'The unsigned smoke receipt changed during signing.'
     }
+
+    Copy-RegularFileToNewPath `
+        -Source $protectedSigningReceiptPath `
+        -Destination $temporaryReceiptPath
+    if ((Get-Sha256 -Path $temporaryReceiptPath) -cne $signedReceiptHash) {
+        throw 'The release-directory installation copy changed after private signing.'
+    }
+    $installationSignature = Get-AuthenticodeSignature -LiteralPath $temporaryReceiptPath
+    if (
+        $installationSignature.Status.ToString() -cne 'Valid' -or
+        $null -eq $installationSignature.SignerCertificate -or
+        $installationSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -cne
+            $canonicalSignerThumbprint -or
+        $null -eq $installationSignature.TimeStamperCertificate
+    ) {
+        throw 'The release-directory installation copy has an invalid signature.'
+    }
+    $installationReceipt = Import-PowerShellDataFile -LiteralPath $temporaryReceiptPath
+    Assert-ReceiptData `
+        -Receipt $installationReceipt `
+        -Manifest $manifest `
+        -ReleaseRecords $records `
+        -ManifestHash $manifestHash `
+        -ValidationScriptHash $validationScriptHash `
+        -SigningPolicyHash $policy.Sha256 `
+        -ExpectedNonce $ExpectedValidationNonce `
+        -ExpectedImageId $ExpectedCleanVmImageId `
+        -Policy $policy
 
     Assert-PathHasNoReparsePoints -Path $resolvedReleaseDirectory -TrustedRoot $repositoryRoot
     Assert-PathHasNoReparsePoints -Path $receiptPath -TrustedRoot $repositoryRoot
     Assert-PathHasNoReparsePoints -Path $temporaryReceiptPath -TrustedRoot $repositoryRoot
     Assert-RegularFile -Path $receiptPath
     Assert-RegularFile -Path $temporaryReceiptPath
+    if (
+        (Get-Sha256 -Path $receiptPath) -cne $unsignedReceiptHash -or
+        (Get-Sha256 -Path $temporaryReceiptPath) -cne $signedReceiptHash
+    ) {
+        throw 'A smoke receipt changed immediately before atomic installation.'
+    }
     if (Test-Path -LiteralPath $backupReceiptPath) {
         throw 'The generated unsigned-receipt backup path was unexpectedly created before replacement.'
     }
     [IO.File]::Replace($temporaryReceiptPath, $receiptPath, $backupReceiptPath, $true)
+    $receiptWasReplaced = $true
     Assert-RegularFile -Path $receiptPath
     Assert-PathHasNoReparsePoints -Path $receiptPath -TrustedRoot $repositoryRoot
+    if ((Get-Sha256 -Path $receiptPath) -cne $signedReceiptHash) {
+        throw 'The atomically installed smoke receipt hash is invalid.'
+    }
     $finalSignature = Get-AuthenticodeSignature -LiteralPath $receiptPath
     if (
         $finalSignature.Status.ToString() -cne 'Valid' -or
@@ -797,35 +1443,100 @@ try {
         -ExpectedNonce $ExpectedValidationNonce `
         -ExpectedImageId $ExpectedCleanVmImageId `
         -Policy $policy
+    Assert-RegularFile -Path $backupReceiptPath
+    Assert-PathHasNoReparsePoints -Path $backupReceiptPath -TrustedRoot $repositoryRoot
+    if ((Get-Sha256 -Path $backupReceiptPath) -cne $unsignedReceiptHash) {
+        throw 'The atomic replacement backup does not match the original unsigned receipt.'
+    }
     Remove-Item -LiteralPath $backupReceiptPath -Force
+    $signingCompleted = $true
 }
 catch {
+    $signingFailure = $_
+    $replacementEvidence = $receiptWasReplaced
     if (
-        (Test-Path -LiteralPath $backupReceiptPath -PathType Leaf) -and
-        (Test-Path -LiteralPath $receiptPath -PathType Leaf)
+        -not $replacementEvidence -and
+        -not $signingCompleted -and
+        -not [string]::IsNullOrWhiteSpace($protectedUnsignedReceiptPath) -and
+        (Test-Path -LiteralPath $protectedUnsignedReceiptPath -PathType Leaf)
     ) {
-        try {
-            $failedReceiptPath = "$temporaryReceiptPath.failed"
-            [IO.File]::Replace($backupReceiptPath, $receiptPath, $failedReceiptPath, $true)
-            if (Test-Path -LiteralPath $failedReceiptPath -PathType Leaf) {
-                Remove-Item -LiteralPath $failedReceiptPath -Force
+        if (Test-Path -LiteralPath $backupReceiptPath -PathType Leaf) {
+            $replacementEvidence = $true
+        } elseif (Test-Path -LiteralPath $receiptPath -PathType Leaf) {
+            try {
+                $replacementEvidence = (
+                    (Get-Sha256 -Path $receiptPath) -cne $unsignedReceiptHash
+                )
             }
+            catch {
+                $replacementEvidence = $true
+            }
+        } else {
+            $replacementEvidence = $true
+        }
+    }
+    if ($replacementEvidence -and -not $signingCompleted) {
+        try {
+            Restore-UnsignedReceiptFromPrivateBackup `
+                -PrivateBackupPath $protectedUnsignedReceiptPath `
+                -ReceiptPath $receiptPath `
+                -ReleaseDirectory $resolvedReleaseDirectory `
+                -ExpectedSha256 $unsignedReceiptHash
+            if (Test-Path -LiteralPath $backupReceiptPath) {
+                Assert-RegularFile -Path $backupReceiptPath
+                Assert-PathHasNoReparsePoints `
+                    -Path $backupReceiptPath `
+                    -TrustedRoot $repositoryRoot
+                if ((Get-Sha256 -Path $backupReceiptPath) -cne $unsignedReceiptHash) {
+                    throw 'The release-directory unsigned backup changed during recovery.'
+                }
+                Remove-Item -LiteralPath $backupReceiptPath -Force
+            }
+            $receiptWasReplaced = $false
         }
         catch {
-            $preserveUnsignedBackup = $true
-            Write-Warning "The original unsigned receipt backup could not be restored automatically; preserve it at '$backupReceiptPath'."
+            $preservePrivateSigningDirectory = $true
+            Write-Warning (
+                'The original unsigned receipt could not be restored automatically. ' +
+                "Preserve the protected backup at '$protectedUnsignedReceiptPath'. " +
+                "Recovery error: $($_.Exception.Message)"
+            )
         }
     }
-    throw
+    throw $signingFailure
 }
 finally {
-    $cleanupPaths = @($temporaryReceiptPath)
-    if (-not $preserveUnsignedBackup) {
-        $cleanupPaths += $backupReceiptPath
+    if (Test-Path -LiteralPath $temporaryReceiptPath) {
+        try {
+            Assert-RegularFile -Path $temporaryReceiptPath
+            Assert-PathHasNoReparsePoints `
+                -Path $temporaryReceiptPath `
+                -TrustedRoot $repositoryRoot
+            Remove-Item -LiteralPath $temporaryReceiptPath -Force
+        }
+        catch {
+            Write-Warning "Unable to remove installation temporary file safely: $($_.Exception.Message)"
+        }
     }
-    foreach ($temporaryPath in $cleanupPaths) {
-        if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
-            Remove-Item -LiteralPath $temporaryPath -Force
+    if (
+        -not $preservePrivateSigningDirectory -and
+        -not [string]::IsNullOrWhiteSpace($privateSigningDirectory) -and
+        (Test-Path -LiteralPath $privateSigningDirectory)
+    ) {
+        try {
+            Remove-PrivateSigningDirectory `
+                -Path $privateSigningDirectory `
+                -AllowedSids $privateSigningSids `
+                -ExpectedFiles @(
+                    $protectedUnsignedReceiptPath,
+                    $protectedSigningReceiptPath
+                )
+        }
+        catch {
+            Write-Warning (
+                "Unable to remove the private signing directory safely; inspect '$privateSigningDirectory'. " +
+                $_.Exception.Message
+            )
         }
     }
 }

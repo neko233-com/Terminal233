@@ -88,6 +88,104 @@ function Get-SafeTreeEntries {
     return [pscustomobject]@{ Directories = $directories; Files = $files }
 }
 
+function Get-ValidatedPayloadManifest {
+    param(
+        [Parameter(Mandatory)][string]$ManifestPath,
+        [Parameter(Mandatory)][string]$Root
+    )
+
+    $manifestItem = Get-Item -LiteralPath $ManifestPath -Force
+    if ($manifestItem.Length -le 0 -or $manifestItem.Length -gt 1MB) {
+        throw 'Web payload manifest must be between 1 byte and 1 MiB.'
+    }
+    $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+    try {
+        $manifestText = $strictUtf8.GetString([IO.File]::ReadAllBytes($ManifestPath))
+    } catch {
+        throw 'Web payload manifest must be valid UTF-8 without malformed sequences.'
+    }
+    if (
+        [string]::IsNullOrEmpty($manifestText) -or
+        $manifestText[0] -eq [char]0xFEFF
+    ) {
+        throw 'Web payload manifest must be non-empty UTF-8 without a byte-order mark.'
+    }
+
+    $lines = @($manifestText -split "`r?`n" | Where-Object { $_.Length -gt 0 })
+    if ($lines.Count -eq 0 -or $lines.Count -gt 500) {
+        throw 'Web payload manifest must contain between 1 and 500 non-empty lines.'
+    }
+    $declared = [Collections.Generic.Dictionary[string, string]]::new(
+        [StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($line in $lines) {
+        if ($line.Length -gt 1100) {
+            throw 'Web payload manifest contains an overlong line.'
+        }
+        if ($line -cnotmatch '^([0-9a-f]{64})  \*(.+)$') {
+            throw "Web payload manifest line is invalid: $line"
+        }
+        $expectedHash = $Matches[1]
+        $relative = $Matches[2]
+        if (
+            $relative.Length -gt 1024 -or
+            $relative.Contains('\') -or
+            $relative.StartsWith('/') -or
+            [IO.Path]::IsPathRooted($relative) -or
+            $relative -match '[\x00-\x1f\x7f]' -or
+            @($relative.Split('/')).Count -eq 0 -or
+            @($relative.Split('/')).Where({ $_ -in @('', '.', '..') }).Count -gt 0
+        ) {
+            throw "Web payload manifest path is unsafe: $relative"
+        }
+        if ($declared.ContainsKey($relative)) {
+            throw "Web payload manifest contains a duplicate path: $relative"
+        }
+        $candidate = [IO.Path]::GetFullPath(
+            (Join-Path $Root ($relative.Replace('/', [IO.Path]::DirectorySeparatorChar)))
+        )
+        if (-not (Test-ChildPath -Path $candidate -Parent $Root)) {
+            throw "Web payload manifest path escaped the archive root: $relative"
+        }
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            throw "Web payload manifest references a missing file: $relative"
+        }
+        $actualHash = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualHash -cne $expectedHash) {
+            throw "Web payload file hash does not match its manifest: $relative"
+        }
+        $declared.Add($relative, $candidate)
+    }
+    if ($declared.Count -eq 0) {
+        throw 'Web payload manifest does not declare any files.'
+    }
+    return ,$declared
+}
+
+function Assert-ExactPayloadFileSet {
+    param(
+        [Parameter(Mandatory)]
+        [Collections.Generic.Dictionary[string, string]]$Declared,
+        [Parameter(Mandatory)][string]$Root
+    )
+
+    $actual = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase
+    )
+    $tree = Get-SafeTreeEntries -Root $Root
+    foreach ($file in $tree.Files) {
+        $relative = $file.Substring($Root.Length).TrimStart('\', '/').Replace('\', '/')
+        if ($relative -in @('NekoSSH-Web.exe', 'PAYLOAD_SHA256SUMS.txt')) { continue }
+        [void]$actual.Add($relative)
+    }
+    if (
+        $actual.Count -ne $Declared.Count -or
+        @($actual.Where({ -not $Declared.ContainsKey($_) })).Count -gt 0
+    ) {
+        throw 'Web portable payload file set does not exactly match PAYLOAD_SHA256SUMS.txt.'
+    }
+}
+
 function Remove-SafeTree {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -394,14 +492,29 @@ try {
         $launcherPath,
         $nodePath,
         (Join-Path $verificationRoot 'PAYLOAD_SHA256SUMS.txt'),
+        (Join-Path $verificationRoot 'LICENSE'),
+        (Join-Path $verificationRoot 'THIRD_PARTY_NOTICES.txt'),
         (Join-Path $verificationRoot 'VERSION.json'),
+        (Join-Path $verificationRoot 'runtime/LICENSE'),
         (Join-Path $verificationRoot 'app/dist/index.html'),
-        (Join-Path $verificationRoot 'app/server/ssh2js-server.mjs')
+        (Join-Path $verificationRoot 'app/server/ssh2js-server.mjs'),
+        (Join-Path $verificationRoot 'app/server/ssh-algorithms.mjs'),
+        (Join-Path $verificationRoot 'app/server/content-disposition.mjs'),
+        (Join-Path $verificationRoot 'app/server/static-web.mjs'),
+        (Join-Path $verificationRoot 'app/server/session-lifecycle.mjs'),
+        (Join-Path $verificationRoot 'app/server/operation-admission.mjs'),
+        (Join-Path $verificationRoot 'app/server/terminal-admission.mjs'),
+        (Join-Path $verificationRoot 'app/node_modules/ssh2/package.json')
     )) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "Web portable archive is missing a required file: $required"
         }
     }
+    $payloadManifestPath = Join-Path $verificationRoot 'PAYLOAD_SHA256SUMS.txt'
+    $payloadManifest = Get-ValidatedPayloadManifest `
+        -ManifestPath $payloadManifestPath `
+        -Root $verificationRoot
+    Assert-ExactPayloadFileSet -Declared $payloadManifest -Root $verificationRoot
 
     $versionRecord = Get-Content -LiteralPath (Join-Path $verificationRoot 'VERSION.json') -Raw | ConvertFrom-Json
     $versionFields = @($versionRecord.PSObject.Properties.Name | Sort-Object)

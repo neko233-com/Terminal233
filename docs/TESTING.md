@@ -7,6 +7,7 @@
 ```powershell
 npm ci
 node --check server/ssh2js-server.mjs
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-release-signing-security.ps1
 npm run verify
 npm run audit:deps
 
@@ -26,11 +27,11 @@ Windows 上运行 Rust 验证前，还必须确保 Visual Studio C++ Build Tools
 自动测试应覆盖：
 
 - Tauri `AppManifest`、精确 `allow-ide-*` capability、生产/开发 CSP 分离，以及无 opener、shell、外部进程权限。
-- Rust `ssh2` 的 host-key prepare/trust/mismatch、DSA 拒绝、PTY 边界与 SFTP 输入限制。
+- Rust `ssh2` 的 host-key prepare/trust/mismatch、认证前后重新握手、现代算法精确白名单、旧 SHA-1/`ssh-rsa`/CBC/MD5 拒绝、PTY 边界与 SFTP 输入限制。
 - Tauri PTY 原始字节 Channel、逐块 ACK、ACK 超时、输入背压与断开清理。
 - Tauri SFTP 的上传边界、下载 started/chunk/completed 顺序、逐块 ACK、任务取消与大小/并发上限。
 - Tauri 阻塞 SSH 操作的全局/单连接准入上限、断开屏障、有界 drain、空闲过期回收与迟到资源自清理。
-- Web API 的 Origin、cookie owner、连接 TTL、原始 PTY 字节、terminal output 上限、输入背压与两阶段删除。
+- Web API 的 Origin、cookie owner、页面会话失效重建、连接 TTL、密码/加密私钥认证、现代算法无降级、UTF-8 下载文件名、原始 PTY 字节、terminal output 上限、输入背压与两阶段删除。
 - MCP token、版本协商、一次性 grant、attachment 隔离、scope 与硬 TTL。
 - 页面刷新/退出清理、活跃连接续期、过期连接不复活、共享 SSH transport 的通道错误隔离。
 - Tauri 与 Web 两种 Vite mode 分别构建，不携带另一入口的主界面 chunk。
@@ -40,7 +41,7 @@ Windows 上运行 Rust 验证前，还必须确保 Visual Studio C++ Build Tools
 
 需要验证真实协议互操作时，只使用授权的隔离 SSHD，并在测试结束后清理远端数据：
 
-1. 分别从 Web 与 Tauri 完成首次指纹确认、密码认证和错误密码回退；不要复用两端的连接或凭据状态。
+1. 分别从 Web 与 Tauri 完成首次指纹确认、密码认证、加密私钥认证和错误凭据回退；不要复用两端的连接或凭据状态。另用只开放 SHA-1/`ssh-rsa`/CBC/MD5 的隔离实例确认两端都拒绝协商，且不会降级。
 2. 运行持续输出、Unicode、全屏 TUI 与 PTY resize 场景，确认断流、背压或关闭都能得到明确反馈。
 3. 覆盖 SFTP 列表、上传、下载、改名、空目录删除、显式删除确认、大小上限、取消和网络中断。
 4. Web 额外验证 MCP grant → attachment → `ssh_exec`，以及错误 Origin、token、协议版本和过期 attachment 的拒绝路径。

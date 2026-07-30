@@ -292,6 +292,27 @@ function Get-CanonicalTextSha256Value {
     }
 }
 
+function Get-GitBlobIdForBytes {
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+
+    [byte[]]$header = [Text.Encoding]::ASCII.GetBytes(
+        "blob $($Bytes.Length)`0"
+    )
+    [byte[]]$blob = [byte[]]::new($header.Length + $Bytes.Length)
+    [Array]::Copy($header, 0, $blob, 0, $header.Length)
+    [Array]::Copy($Bytes, 0, $blob, $header.Length, $Bytes.Length)
+    $sha1 = [Security.Cryptography.SHA1]::Create()
+    try {
+        return (
+            [BitConverter]::ToString($sha1.ComputeHash($blob))
+        ).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha1.Dispose()
+        [Array]::Clear($blob, 0, $blob.Length)
+    }
+}
+
 function Get-ReleaseTextSha256 {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
@@ -908,7 +929,11 @@ function Import-ReleaseSigningPolicy {
     $utf8 = [Text.UTF8Encoding]::new($false, $true)
     try {
         [byte[]]$bytes = [IO.File]::ReadAllBytes($resolvedPath)
-        if ($bytes.Length -le 0 -or $bytes.Length -gt 65536) {
+        if (
+            $bytes.Length -le 0 -or
+            $bytes.Length -gt 65536 -or
+            [long]$bytes.Length -ne [long]$file.Length
+        ) {
             throw 'The release signing policy changed size while it was being read.'
         }
         $offset = 0
@@ -1026,6 +1051,7 @@ function Import-ReleaseSigningPolicy {
     $policy = [pscustomobject]@{
         Path = $resolvedPath
         Sha256 = Get-CanonicalTextSha256Value -Text $text
+        SourceGitBlobId = Get-GitBlobIdForBytes -Bytes $bytes
         SchemaVersion = 1
         Repository = $script:ExpectedRepository
         WindowsAuthenticode = [pscustomobject]@{
@@ -1251,6 +1277,42 @@ function Assert-ReleaseSigningCertificate {
         $now = [DateTime]::UtcNow
         if ($now -lt $Certificate.NotBefore.ToUniversalTime() -or $now -gt $Certificate.NotAfter.ToUniversalTime()) {
             throw 'The release signing certificate is not currently within its validity period.'
+        }
+
+        $chain = [Security.Cryptography.X509Certificates.X509Chain]::new()
+        try {
+            $chain.ChainPolicy.RevocationMode = (
+                [Security.Cryptography.X509Certificates.X509RevocationMode]::Online
+            )
+            $chain.ChainPolicy.RevocationFlag = (
+                [Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot
+            )
+            $chain.ChainPolicy.VerificationFlags = (
+                [Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
+            )
+            $chain.ChainPolicy.VerificationTime = [DateTime]::Now
+            $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(15)
+            [void]$chain.ChainPolicy.ApplicationPolicy.Add(
+                [Security.Cryptography.Oid]::new($script:CodeSigningEkuOid)
+            )
+            if (-not $chain.Build($Certificate)) {
+                $chainFailures = @(
+                    $chain.ChainStatus |
+                        ForEach-Object {
+                            "$($_.Status): $($_.StatusInformation.Trim())"
+                        } |
+                        Sort-Object -Unique
+                )
+                $failureText = if ($chainFailures.Count -eq 0) {
+                    'unknown certificate-chain error'
+                } else {
+                    $chainFailures -join '; '
+                }
+                throw "The release signing certificate chain is not trusted and revocation-valid: $failureText"
+            }
+        }
+        finally {
+            $chain.Dispose()
         }
     }
     return $Certificate

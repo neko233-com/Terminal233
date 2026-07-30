@@ -21,7 +21,7 @@ use crate::{
     operation_admission::{AdmissionError, OperationAdmission, OperationPermit, ProfileCloseGuard},
     sftp_transfer::{
         SftpTransferService, SshSftpDownloadEvent, SshSftpDownloadInput, SshSftpTransferStarted,
-        SshSftpUploadInput,
+        SshSftpUploadEvent, SshSftpUploadInput,
     },
     ssh::{SshCommandResult, SshDirectoryListing, SshHostKeyStatus, SshService},
     ssh_terminal::{SshTerminalEvent, SshTerminalStarted, TerminalService},
@@ -243,6 +243,7 @@ pub async fn ide_sftp_upload_start(
     connection_id: Uuid,
     remote_directory: String,
     files: Vec<SshSftpUploadInput>,
+    events: Channel<SshSftpUploadEvent>,
 ) -> CommandResult<SshSftpTransferStarted> {
     let transfer = Arc::clone(&state.transfer);
     run_profile_operation(
@@ -255,6 +256,7 @@ pub async fn ide_sftp_upload_start(
                 connection_id,
                 remote_directory,
                 files,
+                events,
                 permit.clone(),
             )?;
             if permit.profile_is_closing() {

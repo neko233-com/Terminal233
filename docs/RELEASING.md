@@ -29,7 +29,7 @@ NSIS 是面向个人用户的当前用户安装通道，MSI 是面向管理员�
 }
 ```
 
-模块会同时检查 Code Signing EKU、Thumbprint、精确 Subject、SPKI、公钥版本窗口和私钥可用性。新签名要求证书当前有效；带有效时间戳的历史安装包在证书自然过期后仍可用于升级验收。
+模块会同时检查 Code Signing EKU、Thumbprint、精确 Subject、SPKI、公钥版本窗口和私钥可用性。新签名还要求 Windows 能构建受信任的代码签名证书链，并在线完成除根证书外的吊销检查；带有效时间戳的历史安装包在证书自然过期后仍可用于升级验收。
 
 ## 2. 构建签名资产
 
@@ -137,7 +137,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-windows-smoke-r
   -ExpectedCleanVmImageId '<不可变镜像或快照 ID>'
 ```
 
-签名器会重新验证 manifest、所有文件哈希、两套升级元数据、验证脚本和签名策略哈希，再对回执做时间戳签名和原子替换。
+签名器只调用本地、受信任且带时间戳 Authenticode 签名的 `git.exe`，拒绝 Git `skip-worktree` / `assume-unchanged`，逐个确认策略、schema 与验证脚本的工作树、索引和 `HEAD` blob 完全一致，再验证 manifest、所有文件哈希、两套升级元数据和回执绑定。私钥操作只在当前签名身份专用、禁用 ACL 继承且限制为当前身份、SYSTEM 与 Administrators 的本地目录中进行；发行目录只接收已经签名并复验的副本。原子替换前保留独立的受保护未签回执，失败时即使目标文件已丢失也会恢复；无法安全恢复时不会删除该受保护备份。
 
 ## 6. 发布不可变 GitHub Release
 
