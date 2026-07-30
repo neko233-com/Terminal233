@@ -8,7 +8,8 @@
 ## SSH 技术边界
 
 - Web macOS 的 SSH/SFTP 必须由随项目启动的 Node.js 本地后端内置 `ssh2`（ssh2js）实现；浏览器只通过同源 localhost API 使用它。
-- Tauri v2 必须直接使用 Rust `ssh2` / libssh2 进程内实现 SSH、PTY 和 SFTP；不得通过 Web 后端中转。
+- Tauri v2 必须直接使用精确锁定的纯 Rust `puressh` 进程内实现 SSH、PTY 和 SFTP；不得通过 Web 后端中转。
+- Tauri SSH 实现及其密码学、传输依赖链禁止使用 `ssh2` / libssh2、OpenSSL / `openssl-sys`、`ring`、`aws-lc-*`，也禁止任何原生 C/ASM SSH 或密码学实现，以及需要 `cc`、CMake、Perl、NASM、nmake 的构建路径。纯 Rust 代码直接调用操作系统 TCP、线程、文件和 CSPRNG API 不视为 C SSH 运行时。
 - 两条链路都禁止调用或依赖 Windows OpenSSH、`ssh.exe`、PuTTY、plink、Windows Terminal 或其他外部 SSH 客户端。
 - Web 与 Tauri 可以共享数据模型和测试向量，不共享 SSH 运行时、连接对象、终端会话或凭据。
 
@@ -25,3 +26,11 @@
 - `codex/stable-dual-ssh-runtime` 合并完成后，所有后续开发、修复、提交与推送只在 `main` 分支进行。
 - 开始修改前必须先确认当前分支为 `main`；不得继续使用或新建 `codex/*` 开发分支。
 - 保留用户未提交的本地改动；提交时只暂存当前任务明确涉及的文件。
+- 每次新增构建、测试、打包或本机运行产物时都必须同步检查并维护 `.gitignore`；禁止把依赖目录、缓存、日志、临时目录、安装包、发布候选、凭据或签名材料提交到 Git。
+- 完成可交付改动后必须提交并推送 `main` 上本任务的全部改动；推送前后确认工作树干净且 `HEAD == origin/main`。
+
+## Windows 开发机交付
+
+- 只要 Windows 版本通过本轮验证，就必须使用命令行构建并静默安装最新的 NekoSSH 到开发机，再核验已安装版本；禁止依赖 GUI 或电脑操控完成安装。
+- 开发机安装以当前 `main` 的最新已验证提交为准。若缺少可信 Authenticode 证书，可以安装明确标记为本机验证用途的 unsigned 构建，但禁止把它上传为正式 GitHub Release。
+- GitHub Actions 必须保持禁用，仓库不得新增 `.github/workflows`；Windows 安装包与 GitHub Release 资产均走文档约定的手工流程。

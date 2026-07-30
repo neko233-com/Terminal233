@@ -104,8 +104,8 @@
         "target": { "const": "x86_64-pc-windows-msvc" },
         "tools": {
           "type": "array",
-          "minItems": 12,
-          "maxItems": 12,
+          "minItems": 10,
+          "maxItems": 10,
           "uniqueItems": true,
           "items": {
             "type": "object",
@@ -122,8 +122,6 @@
                   "rustc",
                   "cargo",
                   "cargoAudit",
-                  "perl",
-                  "nasm",
                   "vswhere",
                   "signtool"
                 ]

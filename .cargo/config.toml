@@ -1,4 +1,0 @@
-[target.x86_64-pc-windows-msvc]
-# Vendored OpenSSL's static objects reference a build-only PDB that is not distributed.
-# LNK4099 does not affect executable code or release symbols; suppress only that diagnostic.
-rustflags = ["-C", "link-arg=/IGNORE:4099"]

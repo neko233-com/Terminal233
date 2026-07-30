@@ -18,7 +18,7 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 base64 = "0.23.0"
-ssh2 = { version = "0.9.6", features = ["openssl-on-win32", "vendored-openssl"] }
+puressh = { path = "vendor/puressh", version = "=0.1.3", default-features = false, features = ["std", "client", "multichannel"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"

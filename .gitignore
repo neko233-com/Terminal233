@@ -51,6 +51,10 @@ neko233-known_hosts
 *.key
 *.p12
 *.pfx
+*.cer
+*.crt
+*.snk
+*.pvk
 *.jks
 *.keystore
 *.mobileprovision
@@ -68,6 +72,10 @@ id_xmss*
 !id_xmss*.pub
 ssh_host_*_key
 !ssh_host_*_key.pub
+release-toolchain-lock.json
+release-toolchain-lock.local.json
+release-toolchain-lock.*.local.json
+release-manifest.local.json
 
 # Test, browser and tooling artifacts
 .cache/

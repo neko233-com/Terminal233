@@ -13,8 +13,6 @@ $script:RequiredToolNames = @(
     'rustc',
     'cargo',
     'cargoAudit',
-    'perl',
-    'nasm',
     'vswhere',
     'signtool'
 )
@@ -507,14 +505,6 @@ function Get-ObservedToolVersion {
         }
         'cargoAudit' {
             Get-NativeToolOutput -FilePath $path -ArgumentList @('--version') -Context 'cargo-audit version probe'
-            break
-        }
-        'perl' {
-            Get-NativeToolOutput -FilePath $path -ArgumentList @('-e', 'print $^V') -Context 'Perl version probe'
-            break
-        }
-        'nasm' {
-            Get-NativeToolOutput -FilePath $path -ArgumentList @('-v') -Context 'NASM version probe'
             break
         }
         { $_ -in @('vswhere', 'signtool') } {

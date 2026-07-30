@@ -24,8 +24,6 @@ $toolNames = @(
     'rustc',
     'cargo',
     'cargoAudit',
-    'perl',
-    'nasm',
     'vswhere',
     'signtool'
 )
@@ -270,6 +268,15 @@ try {
         -MessagePattern '*identity is invalid*' `
         -FailureMessage 'Manifest parser did not reject duplicate tool identities.'
 
+    foreach ($obsoleteToolName in @('perl', 'nasm')) {
+        $manifest = New-TestManifest
+        $manifest.toolchain.tools[0].name = $obsoleteToolName
+        Assert-ManifestRejected `
+            -Manifest $manifest `
+            -MessagePattern '*identity is invalid*' `
+            -FailureMessage "Manifest parser accepted obsolete $obsoleteToolName tool identity."
+    }
+
     $manifest = New-TestManifest
     $manifest.schemaVersion = 3
     Assert-ManifestRejected `
@@ -287,6 +294,7 @@ try {
         ToolchainPolicySha256 = 'passed'
         ToolchainSignerIdentity = 'passed'
         ToolchainExactSet = 'passed'
+        ObsoleteNativeToolsRejected = 'passed'
         ObsoleteSchemaRejected = 'passed'
     } | ConvertTo-Json -Compress
 }

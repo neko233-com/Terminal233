@@ -9,8 +9,6 @@ param(
     [Parameter(Mandatory)][string]$RustcPath,
     [Parameter(Mandatory)][string]$CargoPath,
     [string]$CargoAuditPath = (Get-Command cargo-audit.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source,
-    [Parameter(Mandatory)][string]$PerlPath,
-    [Parameter(Mandatory)][string]$NasmPath,
     [string]$VsWherePath = (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'),
     [Parameter(Mandatory)][string]$SignToolPath
 )
@@ -42,8 +40,6 @@ $toolPaths = [ordered]@{
     rustc = $RustcPath
     cargo = $CargoPath
     cargoAudit = $CargoAuditPath
-    perl = $PerlPath
-    nasm = $NasmPath
     vswhere = $VsWherePath
     signtool = $SignToolPath
 }

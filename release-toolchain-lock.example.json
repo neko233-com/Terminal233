@@ -64,20 +64,6 @@
       "version": "replace-with-exact-observed-version",
       "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
     },
-    "perl": {
-      "path": "C:\\absolute\\trusted\\Perl\\perl.exe",
-      "length": 1,
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "version": "replace-with-exact-observed-version",
-      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
-    },
-    "nasm": {
-      "path": "C:\\absolute\\trusted\\NASM\\nasm.exe",
-      "length": 1,
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "version": "replace-with-exact-observed-version",
-      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
-    },
     "vswhere": {
       "path": "C:\\absolute\\trusted\\Visual Studio Installer\\vswhere.exe",
       "length": 1,

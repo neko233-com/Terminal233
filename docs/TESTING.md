@@ -24,20 +24,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows-rele
 ```
 
 仓库禁用 GitHub Actions。手工发布环境固定使用 Node.js 24.18.1、npm 12.0.2 与 Rust 1.97.1（`.nvmrc`、`packageManager`、`rust-toolchain.toml`）。
-Windows 上运行 Rust 验证前，还必须确保 Visual Studio C++ Build Tools、完整 Perl（`perl -MLocale::Maketext::Simple` 可成功执行）和 NASM 可用；它们用于从锁定依赖构建 vendored OpenSSL，发布脚本会在编译前显式检查。
+Windows 上运行 Rust/Tauri 验证仍需要锁定的 Visual Studio Build Tools 与 Windows SDK 作为 MSVC 链接和安装包工具，但 Tauri SSH 依赖链必须保持纯 Rust，不得要求 Perl、NASM、nmake、CMake 或 C/ASM 编译器来构建 SSH/密码学依赖。
 builder lock 中的 rustc/Cargo 必须显式指向 `rustup which --toolchain 1.97.1-x86_64-pc-windows-msvc rustc|cargo` 返回的实际二进制；禁止锁定 `%USERPROFILE%\.cargo\bin` 中字节相同的 rustup proxy。
-工具身份门禁当前是第一阶段：未覆盖 rustdoc、Tauri CLI/native binding 与 MSVC/SDK 的 `cl/link/lib/nmake/rc/mt`，所以脚本只允许 `-AllowUnsigned` 验证，正式打包、回执签名和发布按设计 fail-closed。
+工具身份门禁当前是第一阶段：未覆盖 rustdoc、Tauri CLI/native binding 与 MSVC/SDK 的 `cl/link/lib/rc/mt`，所以脚本只允许 `-AllowUnsigned` 验证，正式打包、回执签名和发布按设计 fail-closed。
 
 `npm run verify` 会执行 Tauri renderer 与 Web macOS renderer 的生产构建、运行时包隔离检查、前端与 Node 测试，以及 Rust fmt、Clippy 和测试。测试数量随覆盖面增长，不在文档中写死。
 
 `scripts/package-windows-release.ps1` 从全新的 Cargo target 构建并精确收集当前版本 NSIS/MSI，同时生成独立 Web macOS Windows 便携 ZIP、第三方许可、`SHA256SUMS.txt` 与提交绑定 manifest。正式打包与发布禁止以 npm script 作为入口；必须直接调用 PowerShell，并在任何 Git/gh/Node/npm 调用前以独立 SHA-256 锚定仓库外的 builder toolchain lock。正式构建还必须传入本机 Tauri 签名配置和策略允许的证书指纹，并要求真正分发的 Tauri 主程序、NSIS、MSI 与 Web 启动器均为有效时间戳签名。`-AllowUnsigned` 仅允许本机静态打包验证，manifest 固定为 `publishable=false`，且验证器不会执行未签名 EXE。详见 [手工发布说明](RELEASING.md)。
 
-稳定版还要求受控机器先生成一次性 nonce，再在一次性干净 Windows x64 VM 中以管理员身份执行 `scripts/test-windows-release-installers.ps1`。验收覆盖 NSIS 与 MSI 的安装、同格式升级、重装、降级阻止、ProductVersion、ARP 注册/卸载命令、卸载残留，全部实际安装 PE 与卸载器签名，Tauri 原生 libssh2 自检，以及签名 Web 便携包的 payload/Node/同源 API 自检。VM 只生成未签回执；受控签名机在七天内复验 nonce、镜像 ID、脚本/策略及全部资产哈希后再签名。
+私有仓库的本机 unsigned 验证可在外部完成 `git fetch origin main` 后追加
+`-UseExistingOriginMainForUnsigned`；它不向隔离进程注入凭据，只复验现有
+`origin/main`，且不能用于任何正式发布。
+
+稳定版还要求受控机器先生成一次性 nonce，再在一次性干净 Windows x64 VM 中以管理员身份执行 `scripts/test-windows-release-installers.ps1`。验收覆盖 NSIS 与 MSI 的安装、同格式升级、重装、降级阻止、ProductVersion、ARP 注册/卸载命令、卸载残留，全部实际安装 PE 与卸载器签名，Tauri 纯 Rust `puressh` 自检，以及签名 Web 便携包的 payload/Node/同源 API 自检。VM 只生成未签回执；受控签名机在七天内复验 nonce、镜像 ID、脚本/策略及全部资产哈希后再签名。
 
 自动测试应覆盖：
 
 - Tauri `AppManifest`、精确 `allow-ide-*` capability、生产/开发 CSP 分离，以及无 opener、shell、外部进程权限。
-- Rust `ssh2` 的 host-key prepare/trust/mismatch、认证前后重新握手、现代算法精确白名单、旧 SHA-1/`ssh-rsa`/CBC/MD5 拒绝、PTY 边界与 SFTP 输入限制。
+- 纯 Rust `puressh` 的 host-key prepare/trust/mismatch、认证前后重新握手、现代算法精确白名单、旧 SHA-1/`ssh-rsa`/CBC/MD5 拒绝、PTY 边界与 SFTP 输入限制；依赖树必须拒绝 `ssh2`、libssh2、OpenSSL、`ring`、`aws-lc-*`、原生 C/ASM SSH 或密码学实现及其构建链，并精确校验启用的 `puressh` features。Windows `ProcessPrng` 等系统 API 调用不属于 C SSH 运行时。
 - Tauri PTY 原始字节 Channel、逐块 ACK、ACK 超时、输入背压与断开清理。
 - Tauri SFTP 的上传边界、下载 started/chunk/completed 顺序、逐块 ACK、任务取消与大小/并发上限。
 - Tauri 阻塞 SSH 操作的全局/单连接准入上限、断开屏障、有界 drain、空闲过期回收与迟到资源自清理。

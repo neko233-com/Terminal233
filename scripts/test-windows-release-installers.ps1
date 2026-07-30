@@ -370,7 +370,7 @@ function Assert-InstalledPayload {
         $receipt.ok -isnot [bool] -or
         $receipt.ok -ne $true -or
         [string]$receipt.version -cne $ExpectedVersion -or
-        [string]$receipt.runtime -cne 'rust-libssh2' -or
+        [string]$receipt.runtime -cne 'pure-rust-puressh' -or
         [string]$receipt.persistence -cne 'memory_only'
     ) {
         throw "Installed Tauri native runtime self-test failed.`n$($selfTest.Stdout)"

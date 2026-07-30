@@ -1,7 +1,8 @@
 //! NekoSSH native Tauri v2 SSH IDE backend.
 //!
 //! The desktop path is deliberately independent from the browser workspace. It keeps SSH
-//! connection material in memory and uses Rust `ssh2` directly, without an external SSH client.
+//! connection material in memory and uses pure-Rust `puressh` directly, without an external SSH
+//! client or native SSH/cryptography library.
 
 pub mod domain;
 pub mod ephemeral;
@@ -14,15 +15,93 @@ mod ssh_terminal;
 
 use tauri::Manager;
 
+fn initialize_puressh_runtime() -> Result<(), String> {
+    use std::sync::{Arc, Mutex};
+
+    use puressh::{
+        client::{AlgoOverrides, Config},
+        known_hosts::KnownHosts,
+    };
+
+    const KEX_ALGORITHMS: &[&str] = &["curve25519-sha256"];
+    const HOST_KEY_ALGORITHMS: &[&str] = &[
+        "ssh-ed25519",
+        "ecdsa-sha2-nistp256",
+        "rsa-sha2-512",
+        "rsa-sha2-256",
+    ];
+    const CIPHERS: &[&str] = &[
+        "chacha20-poly1305@openssh.com",
+        "aes256-gcm@openssh.com",
+        "aes128-gcm@openssh.com",
+    ];
+    const MACS: &[&str] = &[
+        "hmac-sha2-256-etm@openssh.com",
+        "hmac-sha2-512-etm@openssh.com",
+    ];
+
+    if KEX_ALGORITHMS.first() != Some(&puressh::kex::Curve25519Sha256::NAME) {
+        return Err("纯 Rust SSH 运行时缺少 Curve25519 密钥交换".to_owned());
+    }
+    if HOST_KEY_ALGORITHMS
+        .iter()
+        .any(|name| !puressh::hostkey::HOST_KEY_VERIFY_NAMES.contains(name))
+    {
+        return Err("纯 Rust SSH 运行时缺少现代主机密钥算法".to_owned());
+    }
+    if CIPHERS
+        .iter()
+        .any(|name| puressh::cipher::by_name(name).is_none())
+    {
+        return Err("纯 Rust SSH 运行时缺少现代加密算法".to_owned());
+    }
+    if MACS
+        .iter()
+        .any(|name| puressh::mac::by_name(name).is_none())
+    {
+        return Err("纯 Rust SSH 运行时缺少 Encrypt-then-MAC 算法".to_owned());
+    }
+    if puressh::hostkey::allow_rsa_sha1() {
+        return Err("纯 Rust SSH 运行时意外启用了旧版 ssh-rsa/SHA-1".to_owned());
+    }
+
+    let mut config = Config::with_known_hosts(Arc::new(Mutex::new(KnownHosts::new())));
+    config.algorithms = AlgoOverrides {
+        ciphers: Some(CIPHERS.iter().map(|name| (*name).to_owned()).collect()),
+        macs: Some(MACS.iter().map(|name| (*name).to_owned()).collect()),
+        kex_algorithms: Some(
+            KEX_ALGORITHMS
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
+        ),
+        host_key_algorithms: Some(
+            HOST_KEY_ALGORITHMS
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
+        ),
+        pubkey_accepted_algorithms: Some(
+            HOST_KEY_ALGORITHMS
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
+        ),
+        ca_signature_algorithms: None,
+        compression: Some(false),
+    };
+    let _configured_runtime = config;
+    Ok(())
+}
+
 pub fn production_self_test_receipt() -> Result<String, String> {
-    let _session =
-        ssh2::Session::new().map_err(|error| format!("无法初始化进程内 libssh2：{error}"))?;
+    initialize_puressh_runtime()?;
     let state = ide_commands::IdeState::new();
     drop(state);
     Ok(serde_json::json!({
         "ok": true,
         "version": env!("CARGO_PKG_VERSION"),
-        "runtime": "rust-libssh2",
+        "runtime": "pure-rust-puressh",
         "persistence": "memory_only",
     })
     .to_string())
@@ -68,7 +147,7 @@ mod configuration_tests {
             serde_json::from_str(&super::production_self_test_receipt().expect("self-test"))
                 .expect("JSON receipt");
         assert_eq!(receipt["ok"].as_bool(), Some(true));
-        assert_eq!(receipt["runtime"].as_str(), Some("rust-libssh2"));
+        assert_eq!(receipt["runtime"].as_str(), Some("pure-rust-puressh"));
         assert_eq!(receipt["persistence"].as_str(), Some("memory_only"));
     }
 

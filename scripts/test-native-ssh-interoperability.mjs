@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { generateKeyPairSync } from 'node:crypto'
 import { once } from 'node:events'
 import {
   mkdtemp,
@@ -492,6 +491,9 @@ function configureAtomicSftp(channel) {
       failMalformed(error)
     }
   })
+  // A one-shot pure-Rust subsystem client sends SSH EOF after its bounded request batch.
+  // Mirror OpenSSH sftp-server by flushing replies and closing the channel at that point.
+  channel.on('end', () => channel.end())
 }
 
 function configureSftp(sftp, client) {
@@ -780,17 +782,14 @@ async function runCargoTest(port, privateKeyPath, testName) {
 }
 
 const hostPrivateKey = ssh2.utils.generateKeyPairSync('ed25519', {}).private
-const { privateKey: clientPrivateKey } = generateKeyPairSync('rsa', { modulusLength: 3072 })
-const clientPrivateKeyPem = clientPrivateKey.export({
-  type: 'pkcs8',
-  format: 'pem',
-  cipher: 'aes-256-cbc',
+const generatedClientKey = ssh2.utils.generateKeyPairSync('rsa', {
+  bits: 3072,
+  format: 'new',
+  cipher: 'aes256-ctr',
   passphrase: fixtureKeyPassphrase,
 })
-const parsedClientKey = ssh2.utils.parseKey(clientPrivateKey.export({
-  type: 'pkcs1',
-  format: 'pem',
-}))
+const clientPrivateKeyPem = generatedClientKey.private
+const parsedClientKey = ssh2.utils.parseKey(clientPrivateKeyPem, fixtureKeyPassphrase)
 assert.ok(!(parsedClientKey instanceof Error), 'fixture private key must parse')
 
 const clients = new Set()

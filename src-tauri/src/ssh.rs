@@ -7,15 +7,17 @@
 
 use std::{
     collections::HashMap,
-    io::Read,
     net::{TcpStream, ToSocketAddrs},
-    path::Path,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
+use puressh::{
+    client::{AlgoOverrides, Client, Config, HostKeyPolicy, KnownHostsPolicy, TofuAction},
+    key::PrivateKey,
+    known_hosts::KnownHosts,
+};
 use serde::Serialize;
-use ssh2::{ErrorCode, ExtendedData, HostKeyType, MethodType, Session};
 use uuid::Uuid;
 
 use crate::{
@@ -35,9 +37,8 @@ const MAX_DIRECTORY_ENTRIES: usize = 10_000;
 const MAX_DIRECTORY_ENTRY_NAME_BYTES: usize = 4 * 1024;
 const MAX_DIRECTORY_METADATA_BYTES: usize = 4 * 1024 * 1024;
 const MIN_RSA_HOST_KEY_BITS: usize = 2048;
-// libssh2 uses LIBSSH2_ERROR_FILE when a raw SFTP directory handle reaches EOF.
-const LIBSSH2_ERROR_FILE: i32 = -16;
 const MODERN_KEX_ALGORITHMS: &[&str] = &[
+    "mlkem768x25519-sha256",
     "curve25519-sha256",
     "curve25519-sha256@libssh.org",
     "ecdh-sha2-nistp521",
@@ -54,19 +55,21 @@ const MODERN_HOST_KEY_ALGORITHMS: &[&str] = &[
     "rsa-sha2-256",
 ];
 const MODERN_CIPHER_ALGORITHMS: &[&str] = &[
+    "chacha20-poly1305@openssh.com",
     "aes256-gcm@openssh.com",
     "aes128-gcm@openssh.com",
     "aes256-ctr",
     "aes192-ctr",
     "aes128-ctr",
 ];
+#[cfg(test)]
 const MODERN_AEAD_CIPHER_ALGORITHMS: &[&str] =
     &["aes256-gcm@openssh.com", "aes128-gcm@openssh.com"];
 const MODERN_MAC_ALGORITHMS: &[&str] = &[
-    "hmac-sha2-512-etm@openssh.com",
     "hmac-sha2-256-etm@openssh.com",
-    "hmac-sha2-512",
+    "hmac-sha2-512-etm@openssh.com",
     "hmac-sha2-256",
+    "hmac-sha2-512",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -176,8 +179,7 @@ impl SshService {
     /// remain unauthenticated until the caller explicitly approves the displayed fingerprint.
     pub fn prepare(&self, profile_id: Uuid) -> Result<SshHostKeyStatus> {
         let profile = self.profiles.ssh_profile_snapshot(profile_id)?;
-        let session = connect_and_handshake(&profile)?;
-        let presented = presented_host_key(&session)?;
+        let (mut session, presented) = connect_and_handshake(&profile)?;
 
         match self.profiles.verify_host_key(
             profile_id,
@@ -187,7 +189,7 @@ impl SshService {
             &presented.public_key,
         )? {
             HostKeyVerification::Trusted { fingerprint } => {
-                authenticate(&session, &profile)?;
+                authenticate(&mut session.client, &profile)?;
                 Ok(SshHostKeyStatus::Trusted {
                     host: profile.host,
                     port: profile.port,
@@ -298,31 +300,30 @@ impl SshService {
         close_signal: ProfileCloseSignal,
     ) -> Result<SshCommandResult> {
         let (command, working_directory) = command_for_working_directory(command, cwd)?;
-        let session = self.open_authenticated_for_terminal(profile_id)?;
-        let mut channel = session
-            .channel_session()
-            .map_err(|_| NekoError::SshCommandFailed)?;
-        // Merge output before execution so a large stderr stream cannot block while stdout is
-        // drained.  This is the most useful shape for the current terminal-style UI.
-        channel
-            .handle_extended_data(ExtendedData::Merge)
-            .map_err(|_| NekoError::SshCommandFailed)?;
+        let mut session = self.open_authenticated_for_terminal(profile_id)?;
         // Host resolution, handshake, host-key verification, authentication, and channel setup
         // may all outlive the command's initial admission. Linearize immediately before `exec`:
         // if disconnect closed the profile first, no remote command is issued.
         if !close_signal.try_begin_remote_effect() {
             return Err(NekoError::ProfileNotFound);
         }
-        channel
+        let executed = session
+            .client
             .exec(&command)
             .map_err(|_| NekoError::SshCommandFailed)?;
 
-        let (output, truncated) = read_channel_output(&mut channel, &close_signal)?;
-        if truncated {
-            let _ = channel.close();
-        }
-        let _ = channel.wait_close();
-        let exit_status = channel.exit_status().unwrap_or(-1);
+        // puressh drains both SSH data streams while processing packets, so a peer cannot
+        // deadlock the command by filling stderr. The UI consumes one terminal-style buffer;
+        // retain stdout first and then the separately captured stderr within the IPC cap.
+        let mut output_bytes = executed.stdout;
+        output_bytes.extend_from_slice(&executed.stderr);
+        let truncated = output_bytes.len() > MAX_COMMAND_OUTPUT_BYTES;
+        output_bytes.truncate(MAX_COMMAND_OUTPUT_BYTES);
+        let output = String::from_utf8_lossy(&output_bytes).into_owned();
+        let exit_status = executed
+            .exit_status
+            .and_then(|status| i32::try_from(status).ok())
+            .unwrap_or(-1);
 
         Ok(SshCommandResult {
             output,
@@ -332,14 +333,16 @@ impl SshService {
         })
     }
 
+    #[allow(deprecated)]
     pub fn list_directory(&self, profile_id: Uuid, path: String) -> Result<SshDirectoryListing> {
         validate_remote_path(&path)?;
-        let session = self.open_authenticated_for_terminal(profile_id)?;
-        let sftp = session
+        let mut session = self.open_authenticated_for_terminal(profile_id)?;
+        let mut sftp = session
+            .client
             .sftp()
             .map_err(|_| NekoError::SshDirectoryListFailed)?;
-        let mut directory = sftp
-            .opendir(Path::new(&path))
+        let directory = sftp
+            .opendir(path.as_bytes())
             .map_err(|_| NekoError::SshDirectoryListFailed)?;
         let mut entries = Vec::new();
         let mut entries_seen = 0_usize;
@@ -351,39 +354,48 @@ impl SshService {
                 truncated = true;
                 break;
             }
-            match directory.readdir() {
-                Ok((entry_path, stat)) => {
-                    entries_seen += 1;
-                    let name = entry_path.file_name().unwrap_or(entry_path.as_os_str());
-                    // Check the platform representation before lossy UTF-8 conversion so one
-                    // malicious server-controlled name cannot force an unexpectedly large String.
-                    if name.as_encoded_bytes().len() > MAX_DIRECTORY_ENTRY_NAME_BYTES {
-                        truncated = true;
-                        continue;
-                    }
-                    let name = name.to_string_lossy().into_owned();
-                    if name == "." || name == ".." {
-                        continue;
-                    }
-                    let Some(next_metadata_bytes) =
-                        reserve_directory_metadata_bytes(metadata_bytes, &name)
-                    else {
-                        truncated = true;
-                        break;
-                    };
-                    metadata_bytes = next_metadata_bytes;
-                    entries.push(SshDirectoryEntry {
-                        name,
-                        is_directory: stat.is_dir(),
-                        size: stat.size,
-                        modified_at_unix: stat.mtime,
-                    });
+            let batch = match sftp.readdir(&directory) {
+                Ok(Some(batch)) => batch,
+                Ok(None) => break,
+                Err(_) => {
+                    let _ = sftp.close(&directory);
+                    return Err(NekoError::SshDirectoryListFailed);
                 }
-                // ssh2's low-level File::readdir maps directory EOF to LIBSSH2_ERROR_FILE.
-                Err(error) if error.code() == ErrorCode::Session(LIBSSH2_ERROR_FILE) => break,
-                Err(_) => return Err(NekoError::SshDirectoryListFailed),
+            };
+            for entry in batch {
+                if entries_seen >= MAX_DIRECTORY_ENTRIES {
+                    truncated = true;
+                    break;
+                }
+                entries_seen += 1;
+                if entry.filename.len() > MAX_DIRECTORY_ENTRY_NAME_BYTES {
+                    truncated = true;
+                    continue;
+                }
+                let name = String::from_utf8_lossy(&entry.filename).into_owned();
+                if name == "." || name == ".." {
+                    continue;
+                }
+                let Some(next_metadata_bytes) =
+                    reserve_directory_metadata_bytes(metadata_bytes, &name)
+                else {
+                    truncated = true;
+                    break;
+                };
+                metadata_bytes = next_metadata_bytes;
+                entries.push(SshDirectoryEntry {
+                    name,
+                    is_directory: entry.attrs.is_dir(),
+                    size: entry.attrs.size,
+                    modified_at_unix: entry
+                        .attrs
+                        .atime_mtime
+                        .map(|(_, modified)| u64::from(modified)),
+                });
             }
         }
+        sftp.close(&directory)
+            .map_err(|_| NekoError::SshDirectoryListFailed)?;
 
         entries.sort_by(|left, right| {
             right
@@ -410,7 +422,10 @@ impl SshService {
     /// Opens a fresh transport only after the process-local known-hosts policy accepts the
     /// presented key.  Kept crate-private so the PTY service can use the same verification and
     /// authentication path as one-shot command/SFTP operations without exposing credentials.
-    pub(crate) fn open_authenticated_for_terminal(&self, profile_id: Uuid) -> Result<Session> {
+    pub(crate) fn open_authenticated_for_terminal(
+        &self,
+        profile_id: Uuid,
+    ) -> Result<NativeSshSession> {
         let profile = self.profiles.ssh_profile_snapshot(profile_id)?;
         self.open_authenticated_snapshot(&profile)
     }
@@ -418,9 +433,11 @@ impl SshService {
     /// Uses a caller-owned profile snapshot so a security-sensitive operation can pin the exact
     /// authenticated identity it is about to use. The snapshot never crosses IPC and
     /// is dropped (and its stored secrets zeroized) once the operation completes.
-    pub(crate) fn open_authenticated_snapshot(&self, profile: &SshProfile) -> Result<Session> {
-        let session = connect_and_handshake(profile)?;
-        let presented = presented_host_key(&session)?;
+    pub(crate) fn open_authenticated_snapshot(
+        &self,
+        profile: &SshProfile,
+    ) -> Result<NativeSshSession> {
+        let (mut session, presented) = connect_and_handshake(profile)?;
         match self.profiles.verify_host_key(
             profile.id,
             &profile.host,
@@ -432,11 +449,23 @@ impl SshService {
             HostKeyVerification::Unknown { .. } => return Err(NekoError::SshHostKeyUntrusted),
             HostKeyVerification::Mismatch { .. } => return Err(NekoError::SshHostKeyMismatch),
         }
-        authenticate(&session, profile)?;
+        authenticate(&mut session.client, profile)?;
         Ok(session)
     }
 }
 
+pub(crate) struct NativeSshSession {
+    pub(crate) client: Client,
+    shutdown_stream: TcpStream,
+}
+
+impl NativeSshSession {
+    pub(crate) fn into_parts(self) -> (Client, TcpStream) {
+        (self.client, self.shutdown_stream)
+    }
+}
+
+#[derive(Clone)]
 struct PresentedHostKey {
     key_algorithm: String,
     public_key: Vec<u8>,
@@ -487,98 +516,107 @@ impl PendingHostKeys {
     }
 }
 
-fn connect_and_handshake(profile: &SshProfile) -> Result<Session> {
+fn connect_and_handshake(profile: &SshProfile) -> Result<(NativeSshSession, PresentedHostKey)> {
     let addresses = (profile.host.as_str(), profile.port)
         .to_socket_addrs()
         .map_err(|_| NekoError::SshConnectionFailed)?;
+    let mut reached_peer = false;
     for address in addresses {
         match TcpStream::connect_timeout(&address, CONNECT_TIMEOUT) {
             Ok(stream) => {
+                reached_peer = true;
                 stream
                     .set_read_timeout(Some(Duration::from_millis(SSH_OPERATION_TIMEOUT_MS.into())))
                     .map_err(|_| NekoError::SshConnectionFailed)?;
                 stream
                     .set_write_timeout(Some(Duration::from_millis(SSH_OPERATION_TIMEOUT_MS.into())))
                     .map_err(|_| NekoError::SshConnectionFailed)?;
-                let mut session = Session::new().map_err(|_| NekoError::SshHandshakeFailed)?;
-                configure_modern_algorithm_policy(&session)?;
-                session.set_timeout(SSH_OPERATION_TIMEOUT_MS);
-                session.set_tcp_stream(stream);
-                session
-                    .handshake()
-                    .map_err(|_| NekoError::SshHandshakeFailed)?;
-                validate_negotiated_algorithm_policy(&session)?;
-                return Ok(session);
+                stream
+                    .set_nodelay(true)
+                    .map_err(|_| NekoError::SshConnectionFailed)?;
+                let shutdown_stream = stream
+                    .try_clone()
+                    .map_err(|_| NekoError::SshConnectionFailed)?;
+                let captured = Arc::new(Mutex::new(None::<PresentedHostKey>));
+                let callback_capture = Arc::clone(&captured);
+                let prompt = Arc::new(move |prompt: &puressh::client::HostKeyPrompt<'_>| {
+                    let presented = PresentedHostKey {
+                        key_algorithm: prompt.key_type.to_owned(),
+                        public_key: prompt.key_blob.to_vec(),
+                    };
+                    let accepted = validate_presented_host_key(&presented).is_ok();
+                    if let Ok(mut capture) = callback_capture.lock() {
+                        *capture = Some(presented);
+                    }
+                    accepted
+                });
+                let config = Config {
+                    host_key_policy: HostKeyPolicy::KnownHosts(KnownHostsPolicy {
+                        store: Arc::new(Mutex::new(KnownHosts::new())),
+                        save_path: None,
+                        hash_new: false,
+                        on_unknown: TofuAction::PromptDetailed(prompt),
+                        on_mismatch: TofuAction::Reject,
+                    }),
+                    timeout: Some(Duration::from_millis(SSH_OPERATION_TIMEOUT_MS.into())),
+                    algorithms: modern_algorithm_overrides(),
+                };
+                let connected =
+                    Client::connect_via(Box::new(stream), &profile.host, profile.port, config);
+                let presented = captured
+                    .lock()
+                    .map_err(|_| NekoError::LockPoisoned)?
+                    .clone();
+                let client = match connected {
+                    Ok(client) => client,
+                    Err(_) => {
+                        if let Some(presented) = presented {
+                            validate_presented_host_key(&presented)?;
+                        }
+                        continue;
+                    }
+                };
+                let presented = presented.ok_or(NekoError::SshHostKeyUnavailable)?;
+                validate_presented_host_key(&presented)?;
+                return Ok((
+                    NativeSshSession {
+                        client,
+                        shutdown_stream,
+                    },
+                    presented,
+                ));
             }
             Err(_) => continue,
         }
     }
-    Err(NekoError::SshConnectionFailed)
-}
-
-fn configure_modern_algorithm_policy(session: &Session) -> Result<()> {
-    for (method_type, policy) in algorithm_policies() {
-        let supported = session
-            .supported_algs(method_type)
-            .map_err(|_| NekoError::SshHandshakeFailed)?;
-        let preferences = supported_policy_preferences(policy, &supported)
-            .ok_or(NekoError::SshHandshakeFailed)?;
-        session
-            .method_pref(method_type, &preferences)
-            .map_err(|_| NekoError::SshHandshakeFailed)?;
-    }
-    Ok(())
-}
-
-fn validate_negotiated_algorithm_policy(session: &Session) -> Result<()> {
-    validate_negotiated_method(session, MethodType::Kex, MODERN_KEX_ALGORITHMS)?;
-    validate_negotiated_method(session, MethodType::HostKey, MODERN_HOST_KEY_ALGORITHMS)?;
-    validate_negotiated_transport_direction(session, MethodType::CryptCs, MethodType::MacCs)?;
-    validate_negotiated_transport_direction(session, MethodType::CryptSc, MethodType::MacSc)?;
-    Ok(())
-}
-
-fn validate_negotiated_method(
-    session: &Session,
-    method_type: MethodType,
-    policy: &[&str],
-) -> Result<()> {
-    let negotiated = session
-        .methods(method_type)
-        .ok_or(NekoError::SshHandshakeFailed)?;
-    if policy.contains(&negotiated) {
-        Ok(())
+    Err(if reached_peer {
+        NekoError::SshHandshakeFailed
     } else {
-        Err(NekoError::SshHandshakeFailed)
-    }
+        NekoError::SshConnectionFailed
+    })
 }
 
-fn validate_negotiated_transport_direction(
-    session: &Session,
-    cipher_type: MethodType,
-    mac_type: MethodType,
-) -> Result<()> {
-    let cipher = session
-        .methods(cipher_type)
-        .ok_or(NekoError::SshHandshakeFailed)?;
-    // AES-GCM is an AEAD construction, so libssh2 replaces the separately negotiated MAC with
-    // an internal display-only marker. Do not couple policy enforcement to that private marker.
-    let mac = if MODERN_AEAD_CIPHER_ALGORITHMS.contains(&cipher) {
-        None
-    } else {
+fn modern_algorithm_overrides() -> AlgoOverrides {
+    let strings = |values: &[&str]| {
         Some(
-            session
-                .methods(mac_type)
-                .ok_or(NekoError::SshHandshakeFailed)?,
+            values
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect::<Vec<_>>(),
         )
     };
-    if negotiated_transport_algorithms_are_allowed(cipher, mac) {
-        Ok(())
-    } else {
-        Err(NekoError::SshHandshakeFailed)
+    AlgoOverrides {
+        ciphers: strings(MODERN_CIPHER_ALGORITHMS),
+        macs: strings(MODERN_MAC_ALGORITHMS),
+        kex_algorithms: strings(MODERN_KEX_ALGORITHMS),
+        host_key_algorithms: strings(MODERN_HOST_KEY_ALGORITHMS),
+        pubkey_accepted_algorithms: strings(MODERN_HOST_KEY_ALGORITHMS),
+        ca_signature_algorithms: strings(MODERN_HOST_KEY_ALGORITHMS),
+        compression: Some(false),
     }
 }
 
+#[cfg(test)]
 fn negotiated_transport_algorithms_are_allowed(cipher: &str, mac: Option<&str>) -> bool {
     if !MODERN_CIPHER_ALGORITHMS.contains(&cipher) {
         return false;
@@ -590,67 +628,24 @@ fn negotiated_transport_algorithms_are_allowed(cipher: &str, mac: Option<&str>) 
     }
 }
 
-fn algorithm_policies() -> [(MethodType, &'static [&'static str]); 6] {
-    [
-        (MethodType::Kex, MODERN_KEX_ALGORITHMS),
-        (MethodType::HostKey, MODERN_HOST_KEY_ALGORITHMS),
-        (MethodType::CryptCs, MODERN_CIPHER_ALGORITHMS),
-        (MethodType::CryptSc, MODERN_CIPHER_ALGORITHMS),
-        (MethodType::MacCs, MODERN_MAC_ALGORITHMS),
-        (MethodType::MacSc, MODERN_MAC_ALGORITHMS),
-    ]
+fn validate_presented_host_key(presented: &PresentedHostKey) -> Result<()> {
+    validated_host_key_algorithm(&presented.key_algorithm)?;
+    validate_host_key_strength(&presented.key_algorithm, &presented.public_key)
 }
 
-fn supported_policy_preferences(policy: &[&str], supported: &[&str]) -> Option<String> {
-    let preferences = policy
-        .iter()
-        .copied()
-        .filter(|candidate| supported.contains(candidate))
-        .collect::<Vec<_>>();
-    (!preferences.is_empty()).then(|| preferences.join(","))
+fn validated_host_key_algorithm(negotiated_algorithm: &str) -> Result<&str> {
+    if MODERN_HOST_KEY_ALGORITHMS.contains(&negotiated_algorithm) {
+        Ok(negotiated_algorithm)
+    } else {
+        Err(NekoError::SshHostKeyAlgorithmRejected)
+    }
 }
 
-fn presented_host_key(session: &Session) -> Result<PresentedHostKey> {
-    let (public_key, key_type) = session.host_key().ok_or(NekoError::SshHostKeyUnavailable)?;
+fn validate_host_key_strength(key_algorithm: &str, public_key: &[u8]) -> Result<()> {
     if public_key.is_empty() {
         return Err(NekoError::SshHostKeyUnavailable);
     }
-    // DSA (`ssh-dss`) is obsolete and must never enter the trust flow, even when the bundled
-    // libssh2 build can negotiate it.  Keep the remaining host-key types explicit so every key
-    // that can be trusted is still fingerprinted and verified by the profile store.
-    let negotiated = session
-        .methods(MethodType::HostKey)
-        .ok_or(NekoError::SshHostKeyUnavailable)?;
-    let key_algorithm = validated_host_key_algorithm(key_type, negotiated)?;
-    validate_host_key_strength(key_type, public_key)?;
-    Ok(PresentedHostKey {
-        key_algorithm: key_algorithm.to_owned(),
-        public_key: public_key.to_vec(),
-    })
-}
-
-fn validated_host_key_algorithm(key_type: HostKeyType, negotiated_algorithm: &str) -> Result<&str> {
-    if !MODERN_HOST_KEY_ALGORITHMS.contains(&negotiated_algorithm) {
-        return Err(NekoError::SshHostKeyAlgorithmRejected);
-    }
-    let matches_key_type = match key_type {
-        HostKeyType::Rsa => matches!(negotiated_algorithm, "rsa-sha2-512" | "rsa-sha2-256"),
-        HostKeyType::Ecdsa256 => negotiated_algorithm == "ecdsa-sha2-nistp256",
-        HostKeyType::Ecdsa384 => negotiated_algorithm == "ecdsa-sha2-nistp384",
-        HostKeyType::Ecdsa521 => negotiated_algorithm == "ecdsa-sha2-nistp521",
-        HostKeyType::Ed25519 => negotiated_algorithm == "ssh-ed25519",
-        HostKeyType::Dss => return Err(NekoError::SshHostKeyAlgorithmRejected),
-        HostKeyType::Unknown => return Err(NekoError::SshHostKeyUnavailable),
-    };
-    if matches_key_type {
-        Ok(negotiated_algorithm)
-    } else {
-        Err(NekoError::SshHostKeyUnavailable)
-    }
-}
-
-fn validate_host_key_strength(key_type: HostKeyType, public_key: &[u8]) -> Result<()> {
-    if !matches!(key_type, HostKeyType::Rsa) {
+    if !matches!(key_algorithm, "rsa-sha2-512" | "rsa-sha2-256") {
         return Ok(());
     }
     let mut cursor = public_key;
@@ -691,11 +686,11 @@ fn read_ssh_field<'a>(input: &mut &'a [u8]) -> Result<&'a [u8]> {
     Ok(value)
 }
 
-fn authenticate(session: &Session, profile: &SshProfile) -> Result<()> {
+fn authenticate(session: &mut Client, profile: &SshProfile) -> Result<()> {
     match &profile.authentication {
         StoredAuthentication::Password { password } => password
-            .with_exposed(|password| session.userauth_password(&profile.username, password))
-            .map_err(|_| NekoError::SshAuthenticationFailed)?,
+            .with_exposed(|password| session.authenticate_password(&profile.username, password))
+            .map_err(map_authentication_error)?,
         StoredAuthentication::PrivateKey {
             private_key_pem,
             passphrase,
@@ -706,58 +701,35 @@ fn authenticate(session: &Session, profile: &SshProfile) -> Result<()> {
             passphrase.as_ref(),
         )?,
     };
-    if session.authenticated() {
-        Ok(())
-    } else {
-        Err(NekoError::SshAuthenticationFailed)
-    }
+    Ok(())
 }
 
 fn authenticate_private_key_memory(
-    session: &Session,
+    session: &mut Client,
     username: &str,
     private_key_pem: &StoredSecret,
     passphrase: Option<&StoredSecret>,
 ) -> Result<()> {
-    private_key_pem
-        .with_exposed(|private_key_pem| match passphrase {
-            Some(passphrase) => passphrase.with_exposed(|passphrase| {
-                session.userauth_pubkey_memory(username, None, private_key_pem, Some(passphrase))
-            }),
-            None => session.userauth_pubkey_memory(username, None, private_key_pem, None),
-        })
-        .map_err(|_| NekoError::SshAuthenticationFailed)
+    let parsed = private_key_pem.with_exposed(|private_key_pem| match passphrase {
+        Some(passphrase) => passphrase.with_exposed(|passphrase| {
+            PrivateKey::parse_pem(private_key_pem, Some(passphrase.as_bytes()))
+        }),
+        None => PrivateKey::parse_pem(private_key_pem, None),
+    });
+    let signer = parsed
+        .and_then(PrivateKey::into_host_key)
+        .map_err(|_| NekoError::SshAuthenticationFailed)?;
+    session
+        .authenticate_publickey(username, signer)
+        .map_err(map_authentication_error)
 }
 
-fn read_channel_output(
-    channel: &mut ssh2::Channel,
-    close_signal: &ProfileCloseSignal,
-) -> Result<(String, bool)> {
-    let mut bytes = Vec::new();
-    let mut buffer = [0_u8; 8 * 1024];
-    let mut truncated = false;
-
-    loop {
-        if close_signal.is_closing() {
-            let _ = channel.close();
-            return Err(NekoError::ProfileNotFound);
-        }
-        if bytes.len() >= MAX_COMMAND_OUTPUT_BYTES {
-            truncated = true;
-            break;
-        }
-        let remaining = MAX_COMMAND_OUTPUT_BYTES - bytes.len();
-        let chunk_len = remaining.min(buffer.len());
-        let read = channel
-            .read(&mut buffer[..chunk_len])
-            .map_err(|_| NekoError::SshCommandFailed)?;
-        if read == 0 {
-            break;
-        }
-        bytes.extend_from_slice(&buffer[..read]);
+fn map_authentication_error(_error: puressh::Error) -> NekoError {
+    #[cfg(test)]
+    if std::env::var("NEKOSSH_INTEROP_DEBUG").as_deref() == Ok("1") {
+        eprintln!("puressh authentication error: {_error:?}");
     }
-
-    Ok((String::from_utf8_lossy(&bytes).into_owned(), truncated))
+    NekoError::SshAuthenticationFailed
 }
 
 fn validate_command(command: &str) -> Result<()> {
@@ -902,7 +874,8 @@ mod tests {
     }
 
     /// Runs only through `scripts/test-native-ssh-interoperability.mjs`. The Node process is a
-    /// loopback SSH/SFTP fixture server; this side remains the production in-process libssh2
+    /// loopback SSH/SFTP fixture server; this side remains the production in-process pure-Rust
+    /// puressh
     /// implementation and never invokes an external SSH client.
     #[test]
     fn native_ssh_interoperability() {
@@ -929,30 +902,17 @@ mod tests {
         let private_key_pem =
             std::fs::read_to_string(private_key_path).expect("read fixture private key");
 
-        let probe_stream =
-            TcpStream::connect((host.as_str(), port)).expect("connect to loopback SSH fixture");
-        let mut probe_session = Session::new().expect("create loopback libssh2 session");
-        if std::env::var("NEKOSSH_INTEROP_DEBUG").as_deref() == Ok("1") {
-            for (index, (method_type, policy)) in algorithm_policies().into_iter().enumerate() {
-                eprintln!(
-                    "algorithm-policy-{index}: policy={policy:?} supported={:?}",
-                    probe_session
-                        .supported_algs(method_type)
-                        .expect("read supported algorithms")
-                );
-            }
-        }
-        configure_modern_algorithm_policy(&probe_session)
-            .expect("configure loopback modern algorithms");
-        probe_session.set_timeout(SSH_OPERATION_TIMEOUT_MS);
-        probe_session.set_tcp_stream(probe_stream);
-        probe_session
-            .handshake()
-            .expect("complete loopback SSH handshake");
-        validate_negotiated_algorithm_policy(&probe_session)
-            .expect("validate loopback negotiated algorithms");
-        drop(probe_session);
-        progress("algorithm handshake");
+        let algorithm_policy = modern_algorithm_overrides();
+        assert_eq!(
+            algorithm_policy.kex_algorithms.as_deref(),
+            Some(
+                &MODERN_KEX_ALGORITHMS
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect::<Vec<_>>()[..]
+            )
+        );
+        progress("pure-Rust algorithm policy");
 
         let owner = Uuid::new_v4();
         let store = Arc::new(EphemeralConnectionStore::new());
@@ -1289,16 +1249,15 @@ mod tests {
         assert!(MODERN_CIPHER_ALGORITHMS.contains(&"aes256-gcm@openssh.com"));
         assert!(MODERN_MAC_ALGORITHMS.contains(&"hmac-sha2-512-etm@openssh.com"));
         assert!(matches!(
-            validated_host_key_algorithm(HostKeyType::Rsa, "ssh-rsa"),
+            validated_host_key_algorithm("ssh-rsa"),
             Err(NekoError::SshHostKeyAlgorithmRejected)
         ));
         assert_eq!(
-            validated_host_key_algorithm(HostKeyType::Rsa, "rsa-sha2-512")
-                .expect("modern RSA signature"),
+            validated_host_key_algorithm("rsa-sha2-512").expect("modern RSA signature"),
             "rsa-sha2-512"
         );
         assert!(matches!(
-            validated_host_key_algorithm(HostKeyType::Dss, "ssh-ed25519"),
+            validated_host_key_algorithm("ssh-dss"),
             Err(NekoError::SshHostKeyAlgorithmRejected)
         ));
     }
@@ -1322,7 +1281,7 @@ mod tests {
         strong_modulus[1] = 0x80;
         assert!(
             validate_host_key_strength(
-                HostKeyType::Rsa,
+                "rsa-sha2-512",
                 &rsa_blob(&[0x01, 0x00, 0x01], &strong_modulus)
             )
             .is_ok()
@@ -1332,35 +1291,38 @@ mod tests {
         weak_modulus[1] = 0x40;
         assert!(matches!(
             validate_host_key_strength(
-                HostKeyType::Rsa,
+                "rsa-sha2-256",
                 &rsa_blob(&[0x01, 0x00, 0x01], &weak_modulus)
             ),
             Err(NekoError::SshHostKeyAlgorithmRejected)
         ));
         assert!(matches!(
-            validate_host_key_strength(HostKeyType::Rsa, &rsa_blob(&[0x03], &strong_modulus)),
+            validate_host_key_strength("rsa-sha2-512", &rsa_blob(&[0x03], &strong_modulus)),
             Err(NekoError::SshHostKeyAlgorithmRejected)
         ));
         assert!(matches!(
-            validate_host_key_strength(HostKeyType::Rsa, b"malformed"),
+            validate_host_key_strength("rsa-sha2-512", b"malformed"),
             Err(NekoError::SshHostKeyUnavailable)
         ));
-        assert!(validate_host_key_strength(HostKeyType::Ed25519, b"").is_ok());
+        assert!(validate_host_key_strength("ssh-ed25519", b"").is_err());
+        assert!(validate_host_key_strength("ssh-ed25519", b"non-empty").is_ok());
     }
 
     #[test]
-    fn bundled_libssh2_has_at_least_one_supported_algorithm_per_modern_policy() {
-        let session = Session::new().expect("libssh2 session");
-        configure_modern_algorithm_policy(&session).expect("modern policy is supported");
-        assert_eq!(
-            supported_policy_preferences(
-                &["preferred", "fallback"],
-                &["unrelated", "fallback", "preferred"]
-            )
-            .as_deref(),
-            Some("preferred,fallback")
-        );
-        assert!(supported_policy_preferences(&["modern"], &["legacy"]).is_none());
+    fn puressh_has_every_algorithm_in_the_modern_policy() {
+        for cipher in MODERN_CIPHER_ALGORITHMS {
+            assert!(puressh::cipher::by_name(cipher).is_some(), "{cipher}");
+        }
+        for mac in MODERN_MAC_ALGORITHMS {
+            assert!(puressh::mac::by_name(mac).is_some(), "{mac}");
+        }
+        for host_key in MODERN_HOST_KEY_ALGORITHMS {
+            assert!(
+                puressh::hostkey::HOST_KEY_VERIFY_NAMES.contains(host_key),
+                "{host_key}"
+            );
+        }
+        assert!(!puressh::hostkey::allow_rsa_sha1());
     }
 
     #[test]

@@ -73,6 +73,16 @@ $packagerSafeDirectoryBindings = [regex]::Matches(
 if ($packagerSafeDirectoryBindings.Count -ne 3) {
     throw 'Every packager Git process must bind safe.directory to the exact repository root.'
 }
+Assert-ContainsAll `
+    -Text $packagerSource `
+    -Fragments @(
+        '[switch]$UseExistingOriginMainForUnsigned',
+        '$UseExistingOriginMainForUnsigned -and -not $AllowUnsigned',
+        "Invoke-OriginFreshnessGate -Phase 'pre-build'",
+        "Invoke-OriginFreshnessGate -Phase 'post-build'",
+        'the resulting assets are not publishable'
+    ) `
+    -Context 'Unsigned existing-origin exception'
 
 $hardenedGit = Get-RequiredFunctionText -Name 'Invoke-HardenedPublishGit'
 Assert-ContainsAll `

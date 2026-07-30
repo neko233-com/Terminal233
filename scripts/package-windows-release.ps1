@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory)][string]$ExpectedToolchainLockSha256,
     [string]$TauriSigningConfig,
     [string]$ExpectedSignerThumbprint,
-    [switch]$AllowUnsigned
+    [switch]$AllowUnsigned,
+    [switch]$UseExistingOriginMainForUnsigned
 )
 
 Set-StrictMode -Version Latest
@@ -27,8 +28,6 @@ $npmCliExecutable = [string]$lockedToolchain.Tools.npm.Path
 $rustcExecutable = [string]$lockedToolchain.Tools.rustc.Path
 $cargoExecutable = [string]$lockedToolchain.Tools.cargo.Path
 $cargoAuditExecutable = [string]$lockedToolchain.Tools.cargoAudit.Path
-$perlExecutable = [string]$lockedToolchain.Tools.perl.Path
-$nasmExecutable = [string]$lockedToolchain.Tools.nasm.Path
 $vswhereExecutable = [string]$lockedToolchain.Tools.vswhere.Path
 $signToolPath = [string]$lockedToolchain.Tools.signtool.Path
 $resolvedSigningConfig = if ([string]::IsNullOrWhiteSpace($TauriSigningConfig)) {
@@ -374,6 +373,19 @@ function Invoke-OriginFetchChecked {
     }
 }
 
+function Invoke-OriginFreshnessGate {
+    param([Parameter(Mandatory)][ValidateSet('pre-build', 'post-build')][string]$Phase)
+
+    if ($UseExistingOriginMainForUnsigned) {
+        Write-Warning (
+            "Unsigned local validation is using the existing origin/main ref during $Phase; " +
+            'the resulting assets are not publishable.'
+        )
+        return
+    }
+    Invoke-OriginFetchChecked
+}
+
 function Assert-NoUnsafeLocalGitConfiguration {
     $names = Get-CheckedOutput -FilePath $gitExecutable -ArgumentList @(
         '--no-pager',
@@ -447,6 +459,8 @@ function Invoke-LockedReleaseVerification {
         Invoke-NpmChecked -ArgumentList @('run', $scriptName)
     }
 
+    & (Join-Path $sourceScriptsRoot 'test-pure-rust-ssh-dependencies.ps1') `
+        -CargoExecutable $cargoExecutable
     Invoke-Checked -FilePath $cargoExecutable -ArgumentList @(
         'fmt',
         '--manifest-path',
@@ -624,6 +638,9 @@ Assert-PathHasNoReparsePoints -Path $releaseOutputRoot -TrustedRoot $repositoryR
 if ($AllowUnsigned -and ($null -ne $resolvedSigningConfig -or $null -ne $normalizedExpectedSigner)) {
     throw '-AllowUnsigned cannot be combined with signing configuration or an expected signer.'
 }
+if ($UseExistingOriginMainForUnsigned -and -not $AllowUnsigned) {
+    throw '-UseExistingOriginMainForUnsigned is restricted to -AllowUnsigned local validation.'
+}
 if (-not $AllowUnsigned) {
     Assert-NekoSshCompleteProductionToolchainCoverage
     if ($null -eq $resolvedSigningConfig) {
@@ -676,9 +693,7 @@ foreach ($nameObject in @($processEnvironment.Keys)) {
 $lockedCommandDirectories = @(
     $nodeExecutable,
     $cargoExecutable,
-    $rustcExecutable,
-    $perlExecutable,
-    $nasmExecutable
+    $rustcExecutable
 ) | ForEach-Object { Split-Path -Parent $_ } | Select-Object -Unique
 $env:PATH = (@($lockedCommandDirectories) + @($previousReleasePath)) -join [IO.Path]::PathSeparator
 $env:RUSTC = $rustcExecutable
@@ -724,7 +739,7 @@ $releaseGitConfigLock = [IO.FileStream]::new(
 Push-Location $repositoryRoot
 try {
     Assert-NoUnsafeLocalGitConfiguration
-    Invoke-OriginFetchChecked
+    Invoke-OriginFreshnessGate -Phase 'pre-build'
     New-Item -ItemType Directory -Path $generatedOutputRoot -Force | Out-Null
     Assert-PathHasNoReparsePoints -Path $generatedOutputRoot -TrustedRoot $repositoryRoot
     $temporaryReleaseEnvironmentRoot = [IO.Path]::GetFullPath(
@@ -854,12 +869,6 @@ try {
     if ([string]::IsNullOrWhiteSpace($visualStudioPath)) {
         throw 'Visual Studio C++ x64 Build Tools are required.'
     }
-    Invoke-Checked -FilePath $perlExecutable -ArgumentList @(
-        '-MLocale::Maketext::Simple',
-        '-e',
-        'print qq(Perl modules ready\n)'
-    )
-    Invoke-Checked -FilePath $nasmExecutable -ArgumentList @('-v')
     $cargoAuditVersion = Get-CheckedOutput -FilePath $cargoAuditExecutable -ArgumentList @('--version')
     if ($cargoAuditVersion -notmatch '\b0\.22\.2\b') {
         throw "cargo-audit 0.22.2 is required; found '$cargoAuditVersion'."
@@ -1303,6 +1312,11 @@ try {
         } else {
             "本次资产已通过 Authenticode 签名、时间戳和证书指纹校验（$normalizedExpectedSigner）。"
         }
+        $originVerificationNote = if ($UseExistingOriginMainForUnsigned) {
+            '- 私有仓库凭据未交给隔离打包进程；本次仅复验打包前已同步的现有 origin/main，因此资产不可发布'
+        } else {
+            '- 打包前后均从 canonical GitHub 仓库重新获取 main，并要求 HEAD 与 origin/main 精确一致'
+        }
         $webVerificationNote = if ($isUnsigned) {
             '- Web 可携包已验证 payload manifest、全部文件哈希链和官方 Node 签名；为避免执行不可信二进制，未签名启动器自检按策略跳过（selfTest=skipped-unsigned）'
         } else {
@@ -1328,6 +1342,7 @@ NSIS 与 MSI 是两个独立部署通道；切换格式前必须先卸载已有�
 - 源提交：``$commit``
 - 已执行双运行时生产构建、运行时隔离检查、前端/Node/Rust 测试、Rust fmt 与 Clippy
 - 已执行 npm audit 与 cargo-audit
+$originVerificationNote
 $webVerificationNote
 
 ## 签名状态
@@ -1339,7 +1354,7 @@ $releaseType
 
         $checksumFile = Get-Item -LiteralPath $checksumPath
         $releaseNotesFile = Get-Item -LiteralPath $releaseNotesPath
-        Invoke-OriginFetchChecked
+        Invoke-OriginFreshnessGate -Phase 'post-build'
         $postPackagingIdentity = Assert-NekoSshGitSourceIntegrity `
             -RepositoryRoot $repositoryRoot `
             -GitExecutable $gitExecutable `

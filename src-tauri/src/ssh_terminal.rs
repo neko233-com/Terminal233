@@ -1,26 +1,26 @@
 //! Persistent SSH PTY sessions for the desktop terminal.
 //!
-//! Each terminal owns one worker thread and one verified `ssh2` channel.  The renderer can only
+//! Each terminal owns one verified pure-Rust `puressh` channel. The renderer can only
 //! enqueue keystrokes, resize requests, or a close request by opaque session id; it never sees a
-//! `Session`, host-key bytes, password, or private key.  The worker is the sole reader/writer of
-//! its non-blocking channel, which avoids libssh2 lock contention between Tauri commands and
-//! terminal output reads.
+//! client, host-key bytes, password, or private key. A dedicated reader and bounded controller
+//! share only puressh's channel-safe handle, while a cloned TCP handle makes close deterministic.
 
 use std::{
-    collections::{HashMap, VecDeque},
-    io::{ErrorKind, Read, Write},
+    collections::HashMap,
+    io::Read,
+    net::{Shutdown, TcpStream},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc::{self, Receiver, SyncSender, TryRecvError},
+        mpsc::{self, Receiver, SyncSender},
     },
     thread,
     time::{Duration, Instant},
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use puressh::shared::{OwnedChannelStream, SharedClient};
 use serde::Serialize;
-use ssh2::{Channel, ExtendedData, Session};
 use tauri::ipc::Channel as IpcChannel;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -38,9 +38,9 @@ const MAX_ROWS: u32 = 300;
 const MAX_ACTIVE_SESSIONS: usize = 12;
 const MAX_INPUT_CHUNK_BYTES: usize = 16 * 1024;
 const MAX_PENDING_CONTROLS: usize = 32;
-const MAX_PENDING_WRITE_BYTES: usize = 256 * 1024;
 const MAX_OUTPUT_CHUNK_BYTES: usize = 32 * 1024;
 const WORKER_IDLE_WAIT: Duration = Duration::from_millis(8);
+const SSH_PUMP_TIMEOUT: Duration = Duration::from_millis(50);
 const OUTPUT_ACK_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -102,11 +102,6 @@ enum TerminalControl {
     Close,
 }
 
-struct PendingWrite {
-    bytes: Zeroizing<Vec<u8>>,
-    offset: usize,
-}
-
 impl TerminalService {
     pub fn new(ssh: Arc<SshService>) -> Self {
         Self {
@@ -132,26 +127,19 @@ impl TerminalService {
         // simultaneous DNS/TCP/handshake work before the active-session cap is observed.
         let mut reservation = self.reserve_start()?;
         let session = self.ssh.open_authenticated_for_terminal(profile_id)?;
-        let mut channel = session
-            .channel_session()
-            .map_err(|_| NekoError::SshTerminalStartFailed)?;
-        channel
-            .handle_extended_data(ExtendedData::Merge)
-            .map_err(|_| NekoError::SshTerminalStartFailed)?;
-        channel
-            .request_pty("xterm-256color", None, Some((columns, rows, 0, 0)))
+        let (client, shutdown_stream) = session.into_parts();
+        let shared = SharedClient::from(client);
+        shared
+            .set_read_timeout(Some(SSH_PUMP_TIMEOUT))
             .map_err(|_| NekoError::SshTerminalStartFailed)?;
         // A shell can execute remote startup scripts. Recheck after the handshake/PTY request and
         // linearize immediately before starting it so a closing profile cannot launch a late PTY.
         if !close_signal.try_begin_remote_effect() {
             return Err(NekoError::ProfileNotFound);
         }
-        channel
-            .shell()
+        let channel = shared
+            .shell_stream("xterm-256color", columns, rows, 0, 0, Vec::new())
             .map_err(|_| NekoError::SshTerminalStartFailed)?;
-        // The worker alternates control messages with output reads.  Non-blocking libssh2 calls
-        // ensure a quiet remote shell cannot hold the session mutex and starve terminal input.
-        session.set_blocking(false);
 
         let session_id = Uuid::new_v4();
         let (controls, receiver) = mpsc::sync_channel(MAX_PENDING_CONTROLS);
@@ -187,8 +175,9 @@ impl TerminalService {
             .spawn(move || {
                 terminal_worker(
                     session_id,
-                    session,
+                    shared,
                     channel,
+                    shutdown_stream,
                     receiver,
                     worker_close_requested,
                     worker_last_output_sequence,
@@ -374,10 +363,9 @@ fn terminal_size(columns: Option<u32>, rows: Option<u32>) -> Result<(u32, u32)> 
 #[allow(clippy::too_many_arguments)]
 fn terminal_worker(
     session_id: Uuid,
-    // Keeping a Session owner in this worker makes the socket lifecycle explicit.  `Channel`
-    // retains its own Arc internally, but it must never be handed to another thread.
-    _session: Session,
-    mut channel: Channel,
+    shared: SharedClient,
+    mut channel: OwnedChannelStream,
+    shutdown_stream: TcpStream,
     receiver: Receiver<TerminalControl>,
     close_requested: Arc<AtomicBool>,
     last_output_sequence: Arc<AtomicU64>,
@@ -385,66 +373,90 @@ fn terminal_worker(
     registry: Arc<Mutex<TerminalRegistry>>,
     events: IpcChannel<SshTerminalEvent>,
 ) {
-    let mut pending_writes = VecDeque::new();
-    let mut output_flow = OutputFlow::new();
-    let mut failure_code = None;
+    let channel_id = channel.channel_id();
+    let failure_code = Arc::new(Mutex::new(None::<&'static str>));
+    let controller = shutdown_stream
+        .try_clone()
+        .ok()
+        .and_then(|controller_shutdown| {
+            let controller_shared = shared.clone();
+            let controller_close = Arc::clone(&close_requested);
+            let controller_failure = Arc::clone(&failure_code);
+            thread::Builder::new()
+                .name(format!("nekossh-pty-control-{session_id}"))
+                .spawn(move || {
+                    terminal_control_worker(
+                        controller_shared,
+                        channel_id,
+                        controller_shutdown,
+                        receiver,
+                        controller_close,
+                        controller_failure,
+                    );
+                })
+                .ok()
+        });
+    if controller.is_none() {
+        set_terminal_failure(&failure_code, "ssh_terminal_transport_failed");
+        close_requested.store(true, Ordering::Release);
+        let _ = shutdown_stream.shutdown(Shutdown::Both);
+    }
 
+    let mut output_flow = OutputFlow::new();
     loop {
         if close_requested.load(Ordering::Acquire) {
             break;
         }
-
-        match drain_controls(&receiver, &mut channel, &mut pending_writes) {
-            Ok(WorkerControlState::Continue) => {}
-            Ok(WorkerControlState::Close) => break,
-            Err(()) => {
-                failure_code = Some("ssh_terminal_transport_failed");
-                break;
-            }
-        }
-        if let Err(()) = flush_pending_writes(&mut channel, &mut pending_writes) {
-            failure_code = Some("ssh_terminal_transport_failed");
-            break;
-        }
-        match poll_available_output(
-            &events,
-            session_id,
-            &mut channel,
-            &last_output_sequence,
+        match wait_for_output_ack(
             &acknowledged_output_sequence,
+            &close_requested,
             &mut output_flow,
         ) {
-            Ok(OutputState::Open) => {}
-            Ok(OutputState::Closed) => break,
+            Ok(true) => {}
+            Ok(false) => break,
             Err(code) => {
-                failure_code = Some(code);
+                set_terminal_failure(&failure_code, code);
+                close_requested.store(true, Ordering::Release);
+                let _ = shutdown_stream.shutdown(Shutdown::Both);
                 break;
             }
         }
 
-        if pending_write_bytes(&pending_writes) >= MAX_PENDING_WRITE_BYTES {
-            thread::sleep(WORKER_IDLE_WAIT);
-            continue;
-        }
-        match receiver.recv_timeout(WORKER_IDLE_WAIT) {
-            Ok(control) => match process_control(control, &mut channel, &mut pending_writes) {
-                Ok(WorkerControlState::Continue) => {}
-                Ok(WorkerControlState::Close) => break,
-                Err(()) => {
-                    failure_code = Some("ssh_terminal_transport_failed");
-                    break;
-                }
-            },
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        let mut buffer = [0_u8; MAX_OUTPUT_CHUNK_BYTES];
+        let read = match channel.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(_) if close_requested.load(Ordering::Acquire) => break,
+            Err(_) => {
+                set_terminal_failure(&failure_code, "ssh_terminal_transport_failed");
+                close_requested.store(true, Ordering::Release);
+                break;
+            }
+        };
+        if let Err(code) = send_terminal_output(
+            &events,
+            session_id,
+            &buffer[..read],
+            &last_output_sequence,
+            &mut output_flow,
+        ) {
+            set_terminal_failure(&failure_code, code);
+            close_requested.store(true, Ordering::Release);
+            let _ = shutdown_stream.shutdown(Shutdown::Both);
+            break;
         }
     }
 
-    if let Some(code) = failure_code {
+    let exit_status = channel.exit_status();
+    close_requested.store(true, Ordering::Release);
+    let _ = shutdown_stream.shutdown(Shutdown::Both);
+    drop(channel);
+    if let Some(controller) = controller {
+        let _ = controller.join();
+    }
+    if let Some(code) = failure_code.lock().ok().and_then(|failure| *failure) {
         let _ = events.send(SshTerminalEvent::Error { session_id, code });
     }
-    let exit_status = channel.exit_status().ok();
-    let _ = channel.close();
     if let Ok(mut active) = registry.lock() {
         active.sessions.remove(&session_id);
     }
@@ -454,86 +466,56 @@ fn terminal_worker(
     });
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WorkerControlState {
-    Continue,
-    Close,
-}
-
-fn drain_controls(
-    receiver: &Receiver<TerminalControl>,
-    channel: &mut Channel,
-    pending_writes: &mut VecDeque<PendingWrite>,
-) -> std::result::Result<WorkerControlState, ()> {
-    loop {
-        if pending_write_bytes(pending_writes) >= MAX_PENDING_WRITE_BYTES {
-            return Ok(WorkerControlState::Continue);
-        }
-        match receiver.try_recv() {
-            Ok(control) => {
-                if process_control(control, channel, pending_writes)? == WorkerControlState::Close {
-                    return Ok(WorkerControlState::Close);
+fn terminal_control_worker(
+    shared: SharedClient,
+    channel_id: u32,
+    shutdown_stream: TcpStream,
+    receiver: Receiver<TerminalControl>,
+    close_requested: Arc<AtomicBool>,
+    failure_code: Arc<Mutex<Option<&'static str>>>,
+) {
+    while !close_requested.load(Ordering::Acquire) {
+        let control = match receiver.recv_timeout(WORKER_IDLE_WAIT) {
+            Ok(control) => control,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        let result = match control {
+            TerminalControl::Input(bytes) => {
+                let mut offset = 0;
+                while offset < bytes.len() {
+                    match shared.channel_send_data(channel_id, &bytes[offset..]) {
+                        Ok(0) => {
+                            set_terminal_failure(&failure_code, "ssh_terminal_transport_failed");
+                            close_requested.store(true, Ordering::Release);
+                            break;
+                        }
+                        Ok(written) => offset += written,
+                        Err(_) => {
+                            set_terminal_failure(&failure_code, "ssh_terminal_transport_failed");
+                            close_requested.store(true, Ordering::Release);
+                            break;
+                        }
+                    }
                 }
+                Ok(())
             }
-            Err(TryRecvError::Empty) => return Ok(WorkerControlState::Continue),
-            Err(TryRecvError::Disconnected) => return Ok(WorkerControlState::Close),
-        }
-    }
-}
-
-fn pending_write_bytes(pending_writes: &VecDeque<PendingWrite>) -> usize {
-    pending_writes
-        .iter()
-        .map(|pending| pending.bytes.len().saturating_sub(pending.offset))
-        .sum()
-}
-
-fn process_control(
-    control: TerminalControl,
-    channel: &mut Channel,
-    pending_writes: &mut VecDeque<PendingWrite>,
-) -> std::result::Result<WorkerControlState, ()> {
-    match control {
-        TerminalControl::Input(bytes) => {
-            pending_writes.push_back(PendingWrite { bytes, offset: 0 });
-            Ok(WorkerControlState::Continue)
-        }
-        TerminalControl::Resize { columns, rows } => channel
-            .request_pty_size(columns, rows, None, None)
-            .map(|_| WorkerControlState::Continue)
-            .map_err(|_| ()),
-        TerminalControl::Close => Ok(WorkerControlState::Close),
-    }
-}
-
-fn flush_pending_writes(
-    channel: &mut Channel,
-    pending_writes: &mut VecDeque<PendingWrite>,
-) -> std::result::Result<(), ()> {
-    while let Some(pending) = pending_writes.front_mut() {
-        match channel.write(&pending.bytes[pending.offset..]) {
-            Ok(0) => break,
-            Ok(written) => {
-                pending.offset += written;
-                if pending.offset == pending.bytes.len() {
-                    pending_writes.pop_front();
-                }
+            TerminalControl::Resize { columns, rows } => shared
+                .send_window_change(channel_id, columns, rows, 0, 0)
+                .map_err(|_| ()),
+            TerminalControl::Close => {
+                close_requested.store(true, Ordering::Release);
+                Ok(())
             }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => break,
-            Err(_) => return Err(()),
+        };
+        if result.is_err() {
+            set_terminal_failure(&failure_code, "ssh_terminal_transport_failed");
+            close_requested.store(true, Ordering::Release);
+            break;
         }
     }
-    match channel.flush() {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(()),
-        Err(_) => Err(()),
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OutputState {
-    Open,
-    Closed,
+    let _ = shared.channel_send_eof(channel_id);
+    let _ = shutdown_stream.shutdown(Shutdown::Both);
 }
 
 struct PendingOutputAck {
@@ -555,49 +537,59 @@ impl OutputFlow {
     }
 }
 
-fn poll_available_output(
-    events: &IpcChannel<SshTerminalEvent>,
-    session_id: Uuid,
-    channel: &mut Channel,
-    last_output_sequence: &AtomicU64,
+fn wait_for_output_ack(
     acknowledged_output_sequence: &AtomicU64,
+    close_requested: &AtomicBool,
     flow: &mut OutputFlow,
-) -> std::result::Result<OutputState, &'static str> {
-    if let Some(pending) = &flow.pending_ack {
+) -> std::result::Result<bool, &'static str> {
+    while let Some(pending) = &flow.pending_ack {
         if acknowledged_output_sequence.load(Ordering::Acquire) == pending.sequence {
             flow.pending_ack = None;
-        } else if pending.sent_at.elapsed() >= OUTPUT_ACK_TIMEOUT {
+            break;
+        }
+        if pending.sent_at.elapsed() >= OUTPUT_ACK_TIMEOUT {
             return Err("ssh_terminal_output_backpressure");
-        } else {
-            return Ok(OutputState::Open);
         }
+        if close_requested.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        thread::sleep(WORKER_IDLE_WAIT);
     }
+    Ok(true)
+}
 
-    let mut buffer = [0_u8; MAX_OUTPUT_CHUNK_BYTES];
-    match channel.read(&mut buffer) {
-        Ok(0) => Ok(OutputState::Closed),
-        Ok(read) => {
-            let sequence = flow.next_sequence;
-            let next_sequence = sequence
-                .checked_add(1)
-                .ok_or("ssh_terminal_output_sequence_exhausted")?;
-            last_output_sequence.store(sequence, Ordering::Release);
-            events
-                .send(SshTerminalEvent::Output {
-                    session_id,
-                    sequence,
-                    data_base64: STANDARD.encode(&buffer[..read]),
-                })
-                .map_err(|_| "ssh_terminal_output_delivery_failed")?;
-            flow.next_sequence = next_sequence;
-            flow.pending_ack = Some(PendingOutputAck {
-                sequence,
-                sent_at: Instant::now(),
-            });
-            Ok(OutputState::Open)
-        }
-        Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(OutputState::Open),
-        Err(_) => Err("ssh_terminal_transport_failed"),
+fn send_terminal_output(
+    events: &IpcChannel<SshTerminalEvent>,
+    session_id: Uuid,
+    bytes: &[u8],
+    last_output_sequence: &AtomicU64,
+    flow: &mut OutputFlow,
+) -> std::result::Result<(), &'static str> {
+    let sequence = flow.next_sequence;
+    let next_sequence = sequence
+        .checked_add(1)
+        .ok_or("ssh_terminal_output_sequence_exhausted")?;
+    last_output_sequence.store(sequence, Ordering::Release);
+    events
+        .send(SshTerminalEvent::Output {
+            session_id,
+            sequence,
+            data_base64: STANDARD.encode(bytes),
+        })
+        .map_err(|_| "ssh_terminal_output_delivery_failed")?;
+    flow.next_sequence = next_sequence;
+    flow.pending_ack = Some(PendingOutputAck {
+        sequence,
+        sent_at: Instant::now(),
+    });
+    Ok(())
+}
+
+fn set_terminal_failure(failure_code: &Mutex<Option<&'static str>>, code: &'static str) {
+    if let Ok(mut failure) = failure_code.lock()
+        && failure.is_none()
+    {
+        *failure = Some(code);
     }
 }
 

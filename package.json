@@ -26,6 +26,7 @@
     "test:ui": "vitest run",
     "test:server": "node --test server/*.node-test.mjs",
     "test:native-ssh": "node scripts/test-native-ssh-interoperability.mjs",
+    "test:pure-rust-ssh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-pure-rust-ssh-dependencies.ps1",
     "test:watch": "vitest",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -36,7 +37,7 @@
     "verify:web-launcher": "cargo fmt --manifest-path web-launcher/Cargo.toml --all -- --check && cargo clippy --manifest-path web-launcher/Cargo.toml --locked --all-targets -- -D warnings && cargo test --manifest-path web-launcher/Cargo.toml --locked",
     "audit:rust": "cargo audit --file src-tauri/Cargo.lock && cargo audit --file web-launcher/Cargo.lock",
     "audit:deps": "npm audit --audit-level=low && npm run audit:rust",
-    "verify": "npm run build && npm run web:build && npm test && cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --locked --all-features && npm run test:native-ssh && npm run verify:web-launcher"
+    "verify": "npm run build && npm run web:build && npm test && npm run test:pure-rust-ssh && cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --locked --all-features && npm run test:native-ssh && npm run verify:web-launcher"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

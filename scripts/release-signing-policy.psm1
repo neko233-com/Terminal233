@@ -612,7 +612,7 @@ function Import-NekoSshReleaseManifest {
         $manifest.toolchain.platform -cne 'windows-x64' -or
         $manifest.toolchain.target -cne 'x86_64-pc-windows-msvc' -or
         $manifest.toolchain.tools -isnot [Array] -or
-        $manifest.toolchain.tools.Count -ne 12
+        $manifest.toolchain.tools.Count -ne 10
     ) {
         throw 'Release manifest toolchain platform, target, or tool count is unsupported.'
     }
@@ -625,8 +625,6 @@ function Import-NekoSshReleaseManifest {
         'rustc',
         'cargo',
         'cargoAudit',
-        'perl',
-        'nasm',
         'vswhere',
         'signtool'
     )

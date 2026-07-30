@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 
 const repositoryRoot = resolve(import.meta.dirname, '..')
 const compareOrdinal = (left, right) => left < right ? -1 : left > right ? 1 : 0
@@ -34,8 +34,13 @@ if (cargo.error || cargo.status !== 0) {
 }
 const metadata = JSON.parse(cargo.stdout)
 const resolvedCargoPackages = new Set(metadata.resolve.nodes.map((node) => node.id))
+const cargoVendorRoot = resolve(repositoryRoot, 'src-tauri', 'vendor')
+const isVendoredCargoPackage = (record) => {
+  const packageDirectory = resolve(dirname(record.manifest_path))
+  return packageDirectory === cargoVendorRoot || packageDirectory.startsWith(`${cargoVendorRoot}${sep}`)
+}
 for (const packageRecord of metadata.packages
-  .filter((record) => record.source !== null && resolvedCargoPackages.has(record.id))
+  .filter((record) => (record.source !== null || isVendoredCargoPackage(record)) && resolvedCargoPackages.has(record.id))
   .sort((left, right) => compareOrdinal(`${left.name}@${left.version}`, `${right.name}@${right.version}`))) {
   sections.push(packageSection(
     'Cargo',

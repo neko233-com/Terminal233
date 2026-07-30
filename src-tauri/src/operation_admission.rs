@@ -141,7 +141,7 @@ impl OperationAdmission {
     }
 
     /// Reserves one blocking operation without waiting.  Immediate backpressure keeps both the
-    /// async runtime and libssh2 connection fan-out bounded even under a hostile renderer.
+    /// async runtime and puressh connection fan-out bounded even under a hostile renderer.
     pub(crate) fn try_acquire(&self, profile_id: Uuid) -> Result<OperationPermit, AdmissionError> {
         let mut state = self
             .inner

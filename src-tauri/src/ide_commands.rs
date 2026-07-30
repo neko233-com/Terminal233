@@ -1,8 +1,8 @@
 //! Native Tauri v2 SSH IDE commands.
 //!
-//! Rust connects through the in-process `ssh2` library. No system `ssh.exe`, PuTTY, plink,
-//! external terminal, persistent credential store, sync provider, or localhost Web backend
-//! participates.
+//! Rust connects through the in-process pure-Rust `puressh` library. No system `ssh.exe`, PuTTY,
+//! plink, native SSH/cryptography library, external terminal, persistent credential store, sync
+//! provider, or localhost Web backend participates.
 
 use std::{
     sync::{Arc, Weak},

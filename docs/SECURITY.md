@@ -5,7 +5,7 @@
 | 边界 | 实现 |
 | --- | --- |
 | Web macOS | 外部浏览器只访问 `127.0.0.1`；SSH/SFTP 由本地 Node.js `ssh2` 进程执行 |
-| Tauri v2 | Renderer 只调用窄 IPC；Rust `ssh2` 直接建立 TCP、SSH、PTY 与 SFTP |
+| Tauri v2 | Renderer 只调用窄 IPC；纯 Rust `puressh` 直接建立 TCP、SSH、PTY 与 SFTP |
 | 运行时隔离 | 两端不共享凭据、主机信任、SSH transport、终端会话或 SFTP 任务 |
 | 系统客户端 | 两条链路都不调用 `ssh.exe`、PuTTY、plink、Windows Terminal 或 shell |
 | 持久化 | 连接、密码、主机信任、终端与 Agent grant 仅保存在所属进程内 |
@@ -14,7 +14,7 @@
 
 Web 和 Tauri 都先完成 SSH 握手并返回服务器算法与 SHA-256 指纹。未知密钥必须由用户确认；确认 token 与具体 connection ID 绑定且短时有效。确认前不会继续认证。连接期间出现不同指纹会被拒绝，过时的 `ssh-dss`/DSA 主机密钥不会进入信任流程。
 
-Web 探测连接只读取指纹，不携带密码并立即关闭；用户确认后新建认证连接，并再次用保存的指纹验证服务器。Tauri 使用 Rust `ssh2` 的 prepare/trust 流程，并在每次新连接时重新验证。
+Web 探测连接只读取指纹，不携带密码并立即关闭；用户确认后新建认证连接，并再次用保存的指纹验证服务器。Tauri 使用纯 Rust `puressh` 的 prepare/trust 流程，并在每次新连接时重新验证。
 
 两条链路都使用精确的现代算法策略：密钥交换只允许 Curve25519、ECDH 与 SHA-2 Diffie-Hellman，主机密钥只允许 Ed25519、ECDSA 与 RSA-SHA2，加密只允许 AES-GCM/AES-CTR，MAC 只允许 HMAC-SHA2。SHA-1、`ssh-rsa`、CBC、MD5 与协商结果不在白名单的服务器会直接失败，不做兼容性降级。
 
@@ -37,11 +37,12 @@ Web 探测连接只读取指纹，不携带密码并立即关闭；用户确认�
 
 JavaScript 引擎和垃圾回收器可能产生无法显式覆盖的短时字符串副本，因此 Web 模式是“本机进程内临时凭据”，不是硬件级秘密隔离。
 
-## Tauri Rust SSH
+## Tauri 纯 Rust SSH
 
 - `EphemeralConnectionStore` 持有临时 profile 与主机信任。
-- Rust `ssh2` / libssh2 直接建立连接，不通过本地 Web 后端或外部进程。
-- Windows 构建启用 vendored OpenSSL，使粘贴私钥直接通过 libssh2 内存认证；不会为私钥创建临时磁盘文件。任意文件路径认证不对 Renderer 开放。
+- 精确锁定的 `puressh` 直接建立连接，不通过本地 Web 后端或外部进程。
+- Tauri SSH 与密码学依赖链保持纯 Rust，禁止 `ssh2` / libssh2、OpenSSL / `openssl-sys`、`ring`、`aws-lc-*` 以及原生 C/ASM SSH 或密码学实现。发布前必须检查依赖树，出现这些依赖或 `cc`、CMake、Perl、NASM、nmake 构建路径即失败。Rust 代码仍会通过系统 ABI 使用 Windows TCP、线程、文件和 `ProcessPrng` CSPRNG；这些是操作系统服务，不是 C SSH/密码学运行时。
+- 粘贴私钥直接在 `puressh` 进程内认证，不会为私钥创建临时磁盘文件。任意文件路径认证不对 Renderer 开放。
 - 每个终端 session 通过调用者专属 IPC Channel 发送 Base64 封装的原始 PTY 字节。Rust 最多发送一个未确认的 32 KiB 输出块；Renderer 写入 xterm 后 ACK，15 秒未确认即关闭会话。
 - 终端输入单块最大 16 KiB，控制队列、行列数与并发 session 均有限制；Renderer 侧也使用有界输入队列。
 - SFTP 每任务最多 32 个文件、单文件 16 MiB、总量 64 MiB，同时最多 4 个任务。上传与下载都使用调用者专属 IPC Channel，避免全局事件监听竞态；上传 worker 有并发上限，并以 `EXCLUSIVE`、`0600` 创建随机临时文件，Renderer 会拒绝重复、乱序或越界的任务状态；下载每次仅保留一个未 ACK 的 64 KiB 数据块，15 秒未确认即取消。目录列表同样受 10,000 项、4 KiB 单名和 4 MiB 累计元数据预算约束。
@@ -70,8 +71,8 @@ JavaScript 引擎和垃圾回收器可能产生无法显式覆盖的短时字符
 
 - 使用锁定的 Node.js 24.18.1、npm 12.0.2 与 Rust 1.97.1 执行 `npm run verify`、`npm audit --audit-level=low`，并审计 Tauri 与 Web 启动器两份 Cargo lockfile。
 - 仓库级 GitHub Actions 保持禁用，版本库不保留自动 workflow；所有发布验证和打包都从干净且已推送的 `main` 手工执行。
-- Windows 资产必须直接运行 `powershell.exe -File scripts/package-windows-release.ps1` 生成，禁止由 npm bootstrap 正式打包；脚本在首次调用 Git/Node/npm 前以独立 SHA-256 锚定仓库外的 builder toolchain lock，并把 12 项工具身份写入 manifest。脚本只删除当前版本的精确旧产物、拒绝 reparse point、精确选择新产物、记录 SHA-256，并在发布前检查 Authenticode、时间戳和预期证书指纹。
-- 第一阶段工具 lock 尚未绑定 rustdoc、Tauri CLI/native binding 与 `cl/link/lib/nmake/rc/mt`，因此正式打包、回执签名和发布强制 fail-closed；只有 `-AllowUnsigned` 本机验证可运行，补齐全部 identity 前不得提供绕过。
+- Windows 资产必须直接运行 `powershell.exe -File scripts/package-windows-release.ps1` 生成，禁止由 npm bootstrap 正式打包；脚本在首次调用 Git/Node/npm 前以独立 SHA-256 锚定仓库外的 builder toolchain lock，并把全部工具身份写入 manifest。脚本只删除当前版本的精确旧产物、拒绝 reparse point、精确选择新产物、记录 SHA-256，并在发布前检查 Authenticode、时间戳和预期证书指纹。
+- 第一阶段工具 lock 尚未绑定 rustdoc、Tauri CLI/native binding 与 `cl/link/lib/rc/mt`，因此正式打包、回执签名和发布强制 fail-closed；只有 `-AllowUnsigned` 本机验证可运行，补齐全部 identity 前不得提供绕过。
 - 独立 Web ZIP 只包含签名项目启动器、固定且经官方哈希与 OpenJS 签名验证的 Node.js、Web 构建和最小纯 JavaScript `ssh2` 依赖。启动器清除 `NODE_OPTIONS`、`NODE_PATH`、外部 MCP token 等注入环境，在 Node 权限模式下运行，不授予子进程或原生扩展能力，并以嵌入启动器的 manifest 哈希验证全部 payload 及额外文件。无签名 ZIP 只做静态本机校验，验证器不会执行其中的 EXE。
 - 在隔离 SSHD 上覆盖 host-key 变化、错误密码、网络中断、PTY resize 与 SFTP 限额。
 - 检查 Tauri capability、CSP、降级策略与依赖清单；正式分发的 Tauri 主程序、NSIS、MSI 与 Web 启动器必须完成 Authenticode 签名、RFC 3161 时间戳，以及签名策略中的 Thumbprint、Subject、SPKI 和版本窗口校验。无签名输出一律 `publishable=false`。

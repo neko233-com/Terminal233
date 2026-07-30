@@ -5,7 +5,7 @@ NekoSSH 禁用 GitHub Actions。Windows 构建、验收、签名和 GitHub Relea
 ## 强制门禁
 
 - 只允许从干净且已推送的 `main` 构建；`HEAD`、`origin/main`、manifest 与 annotated tag 必须指向同一提交。所有 tracked 文件的 index 与工作树必须逐字节对应 `HEAD`，任何 `skip-worktree`、`assume-unchanged`、未合并状态、大小写路径冲突、symlink 或 submodule 都会 fail-closed。
-- Node.js、npm、Rust、Cargo 和 `cargo-audit` 必须与仓库锁定版本一致；Windows 还需要 Visual Studio C++ Build Tools、完整 Perl 与 NASM。
+- Node.js、npm、Rust、Cargo 和 `cargo-audit` 必须与仓库锁定版本一致；Windows 还需要 Visual Studio Build Tools 与 Windows SDK 完成 MSVC 链接和安装包构建。Tauri SSH 依赖链不得要求 Perl、NASM、nmake、CMake 或 C/ASM 编译器。
 - 正式打包和发布入口只能直接调用 `powershell.exe -File ...`，不能先经过 npm。运行任何 Git、GitHub CLI、Node.js 或 npm 命令前，脚本都必须以命令行单独提供的 SHA-256 锚定仓库外的 builder toolchain lock。
 - 正式发布只接受稳定 SemVer、可信 Authenticode 签名和 RFC 3161 时间戳。`-AllowUnsigned` 永远生成 `publishable=false` 的本机验证产物，发布器会拒绝它。
 - `release-signing-policy.json` 必须预先提交真实 signer 的精确 Thumbprint、Subject、SPKI SHA-256 和版本窗口。空 allowlist 会按设计 fail-closed。
@@ -25,14 +25,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-release-toolchai
   -NodePath C:\trusted\node-v24.18.1-win-x64\node.exe `
   -RustcPath (rustup which --toolchain 1.97.1-x86_64-pc-windows-msvc rustc) `
   -CargoPath (rustup which --toolchain 1.97.1-x86_64-pc-windows-msvc cargo) `
-  -PerlPath C:\trusted\strawberry-perl\perl\bin\perl.exe `
-  -NasmPath C:\trusted\strawberry-perl\c\bin\nasm.exe `
   -SignToolPath 'C:\Program Files (x86)\Windows Kits\10\bin\<SDK 版本>\x64\signtool.exe'
 ```
 
 `RustcPath` 与 `CargoPath` 必须是 `rustup which --toolchain <锁定工具链> ...` 返回的实际 toolchain binary，不能是 `%USERPROFILE%\.cargo\bin\` 下的 rustup proxy；门禁还会拒绝字节完全相同的 rustc/Cargo proxy。生成器输出 `expectedSha256`。把这 64 位小写摘要保存到与 lock 分离的发布记录或离线介质；打包、回执签名与发布时必须通过 `-ExpectedToolchainLockSha256` 显式提供，禁止从 lock 同目录的辅助文件、环境变量或仓库配置自动读取。
 
-lock 使用严格 JSON，拒绝重复/大小写歧义/未知字段。它固定 PowerShell、Git、GitHub CLI、Node.js、npm CLI、rustc、Cargo、cargo-audit、Perl、NASM、vswhere 和 SignTool 的唯一规范绝对路径、文件长度、SHA-256、精确版本，以及 Authenticode 状态。每条路径必须是本地固定卷上的普通文件且整条路径不得经过 reparse point。已签名工具精确绑定 Subject、Thumbprint、SPKI SHA-256 和是否带时间戳；未签名工具必须明确记录 `NotSigned`、空 signer 字段和文件哈希。发布器会把 lock 原始文件哈希及去路径的 observed identities 与 manifest 重验，任何文件或路径替换都会 fail-closed。
+lock 使用严格 JSON，拒绝重复/大小写歧义/未知字段。它固定 PowerShell、Git、GitHub CLI、Node.js、npm CLI、rustc、Cargo、cargo-audit、vswhere 和 SignTool 的唯一规范绝对路径、文件长度、SHA-256、精确版本，以及 Authenticode 状态。每条路径必须是本地固定卷上的普通文件且整条路径不得经过 reparse point。已签名工具精确绑定 Subject、Thumbprint、SPKI SHA-256 和是否带时间戳；未签名工具必须明确记录 `NotSigned`、空 signer 字段和文件哈希。发布器会把 lock 原始文件哈希及去路径的 observed identities 与 manifest 重验，任何文件或路径替换都会 fail-closed。
 
 `release-toolchain-lock.schema.json` 是交换格式约束。生成 lock 只是 enrollment，不替代维护者对下载来源、安装介质和 builder ACL 的独立核验。
 
@@ -92,6 +90,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows-rele
   -AllowUnsigned
 ```
 
+私有仓库若不允许把 credential helper 或令牌交给隔离打包进程，可先在脚本外显式执行
+`git fetch origin main`，确认 `HEAD == origin/main`，再在上述命令末尾追加
+`-UseExistingOriginMainForUnsigned`。该开关只能与 `-AllowUnsigned` 同用，构建前后仍会复验
+本地 `origin/main` 与全部源码字节，但不会在隔离进程内刷新远端，因此产物始终
+`publishable=false`，禁止上传或占用 Release tag。正式发布不能使用此开关，必须完成
+canonical GitHub 的构建前后双重获取。
+
 脚本先拒绝隐藏 index 标志并用 `git hash-object --no-filters`、文件长度和原始字节 SHA-256 逐项比对 `HEAD` blob，避免 Git stat 缓存、换行转换或 clean filter 掩盖修改；随后用 `git cat-file blob` 的二进制输出把每个已提交 blob 直接导出到随机的 `output/.source-snapshot-<pid>-<guid>/`，将全部 tracked 文件设为只读，并只从该快照执行构建。快照不含 `.git`，不会运行 smudge filter，也不会覆盖现有 `output/release/` 候选。构建中途和生成 manifest 前都会重新验证原仓库与只读快照；任一 branch、commit、origin、tree、文件内容或保护属性变化都会终止。临时目录只按已解析的任务专属绝对路径清理，清理失败则保留现场并报错。
 
 脚本从全新的 Cargo target 构建，执行源码门禁安全回归、双入口生产构建、测试、Clippy、依赖审计和第三方许可生成，然后核验 MSI ProductCode/UpgradeCode、签名身份与全部哈希。正式签名集合只包含真正分发的 Tauri 主程序、NSIS、MSI 和 Web 启动器；构建用 `cdylib` 不是安装资产。
@@ -106,7 +111,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows-rele
 - `RELEASE_NOTES.md`
 - `release-manifest.json`
 
-`release-manifest.json` 使用 schema v4，由严格解析器和 `release-manifest.schema.json` 约束。除提交、构建时间、工具链、MSI 身份、签名策略、签名证书身份及资产哈希外，`source` 还记录 `main`、完整 commit、Git root tree、tracked 文件数，以及按 ordinal 路径顺序对每项 `mode + UTF-8 路径长度/路径 + 原始 blob 长度/内容` 进行域分离流式 SHA-256 得到的源码摘要（`digestFormat=git-raw-blobs-sha256-v1`）。它不以 Git SHA-1 对象号作为内容摘要；工作树和导出快照还会逐文件复核原始字节长度与 SHA-256。`toolchain` 绑定外部 lock 的原始 SHA-256，以及 12 项工具去除本机路径后的 length/hash/version/Authenticode observed identities。签名、验收和发布阶段都会把这些字段与当前完整 Git 源快照重新绑定，发布阶段还会重新读取外部 lock 并重新观察每个工具。`output/` 被 Git 忽略，不得提交安装包、builder lock 或私钥。
+`release-manifest.json` 使用 schema v4，由严格解析器和 `release-manifest.schema.json` 约束。除提交、构建时间、工具链、MSI 身份、签名策略、签名证书身份及资产哈希外，`source` 还记录 `main`、完整 commit、Git root tree、tracked 文件数，以及按 ordinal 路径顺序对每项 `mode + UTF-8 路径长度/路径 + 原始 blob 长度/内容` 进行域分离流式 SHA-256 得到的源码摘要（`digestFormat=git-raw-blobs-sha256-v1`）。它不以 Git SHA-1 对象号作为内容摘要；工作树和导出快照还会逐文件复核原始字节长度与 SHA-256。`toolchain` 绑定外部 lock 的原始 SHA-256，以及 10 项工具去除本机路径后的 length/hash/version/Authenticode observed identities。签名、验收和发布阶段都会把这些字段与当前完整 Git 源快照重新绑定，发布阶段还会重新读取外部 lock 并重新观察每个工具。`output/` 被 Git 忽略，不得提交安装包、builder lock 或私钥。
 
 ## 4. 预发验收挑战
 
@@ -152,7 +157,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-windows-release
   -PreviousSignerThumbprint <上一稳定版 signer>
 ```
 
-验收覆盖 NSIS 和 MSI 的安装、同格式升级、重装、降级阻止、ProductVersion、ARP 注册/卸载命令、全部实际安装 PE 的签名、原生 libssh2 自检、卸载残留，以及签名 Web 可携包的 payload、Node、同源 API 与会话自检。正常安装、升级和卸载不接受需要重启的退出码。
+验收覆盖 NSIS 和 MSI 的安装、同格式升级、重装、降级阻止、ProductVersion、ARP 注册/卸载命令、全部实际安装 PE 的签名、纯 Rust `puressh` 自检、卸载残留，以及签名 Web 可携包的 payload、Node、同源 API 与会话自检。正常安装、升级和卸载不接受需要重启的退出码。
 
 成功后 VM 生成未签名的 `WINDOWS_SMOKE_RECEIPT.psd1`。把未改动的回执复制回原发行目录。
 

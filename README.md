@@ -5,7 +5,7 @@ NekoSSH 提供两个完全独立的 SSH 入口：
 | 入口 | 用途 | SSH 实现 |
 | --- | --- | --- |
 | Web macOS | 外部本地浏览器中的 macOS 伪桌面、Terminal、Finder、拖拽与右键操作 | Node.js 本地后端内置 `ssh2`（ssh2js） |
-| Tauri v2 | 传统三栏 SSH IDE：连接列表、远端文件、终端、会话状态 | Rust `ssh2` / libssh2 进程内实现 |
+| Tauri v2 | 传统三栏 SSH IDE：连接列表、远端文件、终端、会话状态 | 纯 Rust `puressh` 进程内实现 |
 
 两条链路拥有各自的进程内凭据、主机信任、SSH 连接、PTY 与 SFTP 状态，互不共享或中转。它们都不调用 Windows OpenSSH、`ssh.exe`、PuTTY、plink、Windows Terminal 或其他系统 SSH 客户端；Vite 只负责界面渲染。
 
@@ -14,7 +14,7 @@ NekoSSH 提供两个完全独立的 SSH 入口：
 - Web macOS 必须在系统浏览器中运行，不嵌入 Tauri WebView。
 - Tauri 只提供传统 SSH IDE，不包含 macOS 伪桌面、长期凭据存储、云同步或密码锁。
 - SSH 密码、内嵌私钥、私钥口令与临时主机信任只保存在当前进程内；断开或退出后清理。
-- Web `ssh2` 与 Tauri libssh2 都强制现代 SSH 算法白名单，拒绝 SHA-1、`ssh-rsa`、CBC、MD5 和白名单外协商，不提供旧算法降级。
+- Web `ssh2` 与 Tauri `puressh` 都强制现代 SSH 算法白名单，拒绝 SHA-1、`ssh-rsa`、CBC、MD5 和白名单外协商，不提供旧算法降级。
 - 首次连接必须确认服务器 SHA-256 指纹；变化的主机密钥会阻止连接。
 - 文件上传默认不覆盖。删除只允许单文件、链接或空目录，并要求显式确认。
 
@@ -22,7 +22,7 @@ NekoSSH 提供两个完全独立的 SSH 入口：
 
 ## 运行
 
-先安装 Node.js 24.18.1（npm 12.0.2）与 Rust 1.97.1，并准备 Tauri v2 对应平台依赖。Windows 原生构建还需要 Visual Studio C++ Build Tools、完整 Perl（含 `Locale::Maketext::Simple`）与 NASM，用于编译内存私钥认证所需的 vendored OpenSSL。仓库中的 `.nvmrc` 和 `rust-toolchain.toml` 固定了应用运行时版本，手工发布脚本会显式检查这些原生构建前置条件。
+先安装 Node.js 24.18.1（npm 12.0.2）与 Rust 1.97.1，并准备 Tauri v2 对应平台依赖。Windows 构建仍需要 Visual Studio Build Tools 与 Windows SDK 完成 MSVC 链接和安装包构建；Tauri SSH 与密码学依赖链使用纯 Rust `puressh`，不需要 Perl、NASM、OpenSSL 或其他原生 SSH/密码学构建工具。仓库中的 `.nvmrc` 和 `rust-toolchain.toml` 固定了应用运行时版本，手工发布脚本会显式检查这些构建前置条件。
 
 ```powershell
 npm ci

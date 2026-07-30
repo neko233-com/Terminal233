@@ -20,8 +20,6 @@
         "rustc",
         "cargo",
         "cargoAudit",
-        "perl",
-        "nasm",
         "vswhere",
         "signtool"
       ],
@@ -34,8 +32,6 @@
         "rustc": { "$ref": "#/$defs/tool" },
         "cargo": { "$ref": "#/$defs/tool" },
         "cargoAudit": { "$ref": "#/$defs/tool" },
-        "perl": { "$ref": "#/$defs/tool" },
-        "nasm": { "$ref": "#/$defs/tool" },
         "vswhere": { "$ref": "#/$defs/tool" },
         "signtool": { "$ref": "#/$defs/tool" }
       }

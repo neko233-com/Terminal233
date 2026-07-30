@@ -1,0 +1,155 @@
+[package]
+name = "puressh"
+version = "0.1.3"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+description = "A pure-Rust SSH (Secure Shell) protocol library, in the spirit of libssh, built on purecrypto."
+repository = "https://github.com/KarpelesLab/puressh"
+documentation = "https://docs.rs/puressh"
+readme = "README.md"
+keywords = ["ssh", "ssh2", "crypto", "network", "no-std"]
+categories = ["cryptography", "network-programming"]
+# Cargo's auto-discovery scans `src/bin/` for `.rs` files and turns each one
+# into a binary. We list every binary explicitly below; turning auto-discovery
+# off lets us drop shared helpers in `src/bin/common.rs` (pulled in via
+# `#[path = "common.rs"] mod common;`) without Cargo trying to compile them
+# as a standalone binary.
+autobins = false
+
+[features]
+default = ["std", "client", "server", "compress", "pam", "multichannel"]
+std = ["purecrypto/std", "alloc"]
+alloc = ["purecrypto/alloc"]
+# High-level client and server APIs depend on `std::net` / `std::io` /
+# `std::thread`, so they require the `std` feature.
+client = ["std"]
+server = ["std"]
+compress = ["dep:compcol"]
+# Concurrent multi-channel client layer (SharedClient, OwnedChannelStream,
+# SftpSession). Enables several SFTP / exec / shell / direct-tcpip handles
+# to coexist on one connection with per-channel fairness (Condvar-based
+# pumper-or-wait) and per-channel backpressure (window credit deferred to
+# drain). Default on; turning it off keeps the borrow-based Client API and
+# strips ~600 lines of code from `src/shared.rs`.
+multichannel = ["client"]
+# Runtime-agnostic async client frontend (`AsyncClient`), driving the same
+# sans-IO `ClientDriver` as the blocking `Client` over any
+# `futures_io::AsyncRead + AsyncWrite` transport (tokio via compat, smol,
+# async-std, …). Default-off; pulls in `futures-util` only when enabled.
+async = ["std", "client", "dep:futures-util"]
+# Native tokio frontend. Builds on the runtime-agnostic `async` core and adds
+# `connect_tokio` / `accept_tokio` constructors that accept tokio's own
+# `AsyncRead`/`AsyncWrite` streams (e.g. `tokio::net::TcpStream`) directly,
+# bridged to the `futures` traits with tokio-util's compat shim. No tokio
+# runtime is pulled into the library; the caller owns the runtime.
+tokio = ["async", "dep:tokio", "dep:tokio-util"]
+# Native mio frontend (readiness/non-blocking). The `MioClient` drives the
+# sans-IO `ClientDriver` over any `std::io::Read + Write` whose `WouldBlock`
+# signals readiness — which `mio::net::TcpStream` is — so the library needs no
+# dependency on `mio` itself; callers register the stream in their own `Poll`.
+mio = ["client"]
+# PAM session integration for the `sshd` binary. Default-on but opt-out:
+# building with `--no-default-features` (or `--features ...` without `pam`)
+# drops the libpam runtime dep entirely. The dep itself is also gated to
+# `cfg(unix)`, so Windows builds stay clean.
+pam = ["dep:pam-client2"]
+
+[dependencies]
+purecrypto = { version = "0.6.17", default-features = false, features = [
+    "hash", "cipher", "kdf", "rng", "rsa", "dh", "ec", "der", "mlkem",
+] }
+compcol = { version = "0.4.2", default-features = false, features = ["alloc", "zlib"], optional = true }
+# `zeroize` provides `Zeroizing<T>` (drop wipes the inner value) and a derive
+# for compound secrets. Kept default-on so `no_std + alloc` builds still get
+# secret-wiping for derived KDF output, password buffers carried across FFI,
+# and similar transient secrets. The crate itself is `no_std`-friendly.
+zeroize = { version = "1", default-features = false, features = ["alloc", "derive"] }
+# Runtime-agnostic async I/O traits (`AsyncRead`/`AsyncWrite`) plus their
+# `read`/`write_all` combinators, used only by the optional `async` frontend.
+futures-util = { version = "0.3", default-features = false, features = ["io"], optional = true }
+# The `tokio` feature needs tokio's `AsyncRead`/`AsyncWrite` traits to bound the
+# `connect_tokio`/`accept_tokio` constructors, and tokio-util's `compat` shim to
+# bridge them to the `futures` traits the async core speaks. `default-features
+# = false` keeps it to the io traits — no runtime, reactor, or scheduler is
+# linked into the library; the caller owns the tokio runtime (see dev-deps).
+tokio = { version = "1", default-features = false, optional = true }
+tokio-util = { version = "0.7", default-features = false, features = ["compat"], optional = true }
+
+# Unix-only deps for the `sshd` binary: fork(), forkpty(), waitpid(),
+# set_winsize(), SIGCHLD plumbing. Library code never touches `nix` — it
+# stays no-std-friendly. Confined to `cfg(unix)` so Windows builds keep a
+# clean dependency graph.
+#
+# Feature map in nix 0.30:
+#   process — waitpid, fork, execvp
+#   signal  — signal handlers, kill
+#   term    — pty / forkpty / Winsize (the pty module is gated by `term`)
+#   fs      — fcntl flags / O_NONBLOCK
+#   ioctl   — TIOCSWINSZ
+#   user    — User::from_name, setuid/setgid/initgroups, geteuid/getegid
+#   poll    — poll(2) for the ProxyCommand non-blocking read-with-deadline
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30", default-features = false, features = [
+    "process", "signal", "term", "fs", "ioctl", "user", "poll",
+] }
+# `libc` for the few low-level POSIX bits the binaries need (terminal
+# echo control in the password reader; geteuid + Unix-socket stat() for
+# the SSH_AUTH_SOCK trust check in the agent client). The library
+# proper continues to stay no-std-friendly; only the cfg(unix)-gated
+# bin/agent paths reach for libc.
+libc = { version = "0.2", default-features = false }
+
+# `pam-client2` is gated to **Linux only**, not all of `cfg(unix)`.
+# Upstream `pam-client2 0.5.5` references Linux-PAM constants
+# (`PAM_CONV_AGAIN`, `PAM_INCOMPLETE`) that OpenPAM (macOS / *BSD) does not
+# expose, so the crate fails to compile there. Confining the dep to Linux
+# keeps `cargo build --all-features` green on macOS, at the cost of PAM
+# session integration being a Linux-only feature for now.
+#
+# `default-features = false` drops the `cli` feature (which would pull in
+# `rpassword`) — the sshd binary is a non-interactive PAM consumer.
+[target.'cfg(target_os = "linux")'.dependencies]
+pam-client2 = { version = "0.5", default-features = false, optional = true }
+
+[dev-dependencies]
+hex = "0.4"
+# Real runtimes used only to exercise the native frontends in tests:
+# `--features tokio` drives `connect_tokio` on a tokio runtime; `--features mio`
+# drives the readiness frontend in a mio `Poll` loop. Neither is a library dep.
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util"] }
+mio = { version = "1", default-features = false, features = ["net", "os-poll"] }
+
+[lib]
+name = "puressh"
+path = "src/lib.rs"
+# NekoSSH vendors the Rust library only.
+crate-type = ["lib"]
+
+[[bin]]
+name = "ssh"
+path = "src/bin/ssh.rs"
+# `multichannel` is needed for the interactive shell path — it spins a
+# sibling `SharedClient` clone to deliver SIGWINCH-driven `window-change`
+# requests while the stdio threads hold the channel stream.
+required-features = ["std", "client", "multichannel"]
+
+[[bin]]
+name = "sshd"
+path = "src/bin/sshd.rs"
+required-features = ["std", "server"]
+
+[[bin]]
+name = "ssh-keygen"
+path = "src/bin/ssh-keygen.rs"
+required-features = ["std"]
+
+[[bin]]
+name = "sftp"
+path = "src/bin/sftp.rs"
+required-features = ["std", "client"]
+
+[[bin]]
+name = "scp"
+path = "src/bin/scp.rs"
+required-features = ["std", "client"]
