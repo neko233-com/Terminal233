@@ -922,6 +922,11 @@ try {
         } else {
             "本次资产已通过 Authenticode 签名、时间戳和证书指纹校验（$normalizedExpectedSigner）。"
         }
+        $webVerificationNote = if ($isUnsigned) {
+            '- Web 可携包已验证 payload manifest、全部文件哈希链和官方 Node 签名；为避免执行不可信二进制，未签名启动器自检按策略跳过（selfTest=skipped-unsigned）'
+        } else {
+            '- Web 可携包已验证签名启动器 → payload manifest → 全部文件哈希链，并完成无浏览器自检'
+        }
         $releaseNotes = @"
 # NekoSSH v$version
 
@@ -942,7 +947,7 @@ NSIS 与 MSI 是两个独立部署通道；切换格式前必须先卸载已有�
 - 源提交：``$commit``
 - 已执行双运行时生产构建、运行时隔离检查、前端/Node/Rust 测试、Rust fmt 与 Clippy
 - 已执行 npm audit 与 cargo-audit
-- Web 可携包已验证签名启动器 → payload manifest → 全部文件哈希链，并完成无浏览器自检
+$webVerificationNote
 
 ## 签名状态
 
