@@ -22,8 +22,8 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
-use ssh2::{OpenFlags, OpenType, RenameFlags};
-use tauri::{AppHandle, Emitter, ipc::Channel as IpcChannel};
+use ssh2::{ErrorCode, OpenFlags, OpenType, RenameFlags, Session, Sftp};
+use tauri::{AppHandle, Emitter, Runtime, ipc::Channel as IpcChannel};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -44,6 +44,17 @@ const MAX_FILE_NAME_BYTES: usize = 240;
 const TRANSFER_CHUNK_BYTES: usize = 64 * 1024;
 const TEMPORARY_UPLOAD_MODE: i32 = 0o600;
 const DOWNLOAD_ACK_TIMEOUT: Duration = Duration::from_secs(15);
+const SSH_FX_NO_SUCH_FILE: i32 = 2;
+const SSH_FX_OK: u32 = 0;
+const SSH_FX_OP_UNSUPPORTED: u32 = 8;
+const SSH_FXP_INIT: u8 = 1;
+const SSH_FXP_VERSION: u8 = 2;
+const SSH_FXP_STATUS: u8 = 101;
+const SSH_FXP_EXTENDED: u8 = 200;
+const SFTP_PROTOCOL_VERSION: u32 = 3;
+const SFTP_POSIX_RENAME_EXTENSION: &[u8] = b"posix-rename@openssh.com";
+const SFTP_POSIX_RENAME_VERSION: &[u8] = b"1";
+const MAX_SFTP_CONTROL_PACKET_BYTES: usize = 256 * 1024;
 
 /// Narrow upload input: the webview may provide only a simple remote basename and file bytes.
 /// It cannot ask the Rust process to read a local path.
@@ -353,6 +364,8 @@ enum TransferOutcome {
     Cancelled,
 }
 
+type DownloadProgressEmitter = Arc<dyn Fn(SshSftpTransferProgress) + Send + Sync>;
+
 impl SftpTransferService {
     pub fn new(ssh: Arc<SshService>) -> Self {
         Self {
@@ -362,9 +375,44 @@ impl SftpTransferService {
         }
     }
 
-    pub fn start_upload(
+    pub fn start_upload<R: Runtime>(
         &self,
-        app: AppHandle,
+        _app: AppHandle<R>,
+        profile_id: Uuid,
+        remote_directory: String,
+        files: Vec<SshSftpUploadInput>,
+        events: IpcChannel<SshSftpUploadEvent>,
+        operation_permit: OperationPermit,
+    ) -> Result<SshSftpTransferStarted> {
+        self.start_upload_core(
+            profile_id,
+            remote_directory,
+            files,
+            events,
+            operation_permit,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn start_upload_headless(
+        &self,
+        profile_id: Uuid,
+        remote_directory: String,
+        files: Vec<SshSftpUploadInput>,
+        events: IpcChannel<SshSftpUploadEvent>,
+        operation_permit: OperationPermit,
+    ) -> Result<SshSftpTransferStarted> {
+        self.start_upload_core(
+            profile_id,
+            remote_directory,
+            files,
+            events,
+            operation_permit,
+        )
+    }
+
+    fn start_upload_core(
+        &self,
         profile_id: Uuid,
         remote_directory: String,
         files: Vec<SshSftpUploadInput>,
@@ -461,7 +509,6 @@ impl SftpTransferService {
 
         let tracker = Arc::new(JobTracker::new(Some(total_bytes)));
         if let Err(error) = self.spawn_job(
-            app,
             profile_id,
             job_id,
             SshSftpTransferDirection::Upload,
@@ -470,6 +517,7 @@ impl SftpTransferService {
             tracker,
             Some(events),
             None,
+            Arc::new(|_| {}),
         ) {
             self.remove_job(job_id);
             return Err(error);
@@ -478,13 +526,49 @@ impl SftpTransferService {
         Ok(started)
     }
 
-    pub fn start_download(
+    pub fn start_download<R: Runtime>(
         &self,
-        app: AppHandle,
+        app: AppHandle<R>,
         profile_id: Uuid,
         files: Vec<SshSftpDownloadInput>,
         events: IpcChannel<SshSftpDownloadEvent>,
         operation_permit: OperationPermit,
+    ) -> Result<SshSftpTransferStarted> {
+        self.start_download_core(
+            profile_id,
+            files,
+            events,
+            operation_permit,
+            Arc::new(move |progress| {
+                emit(&app, SSH_SFTP_TRANSFER_PROGRESS_EVENT, progress);
+            }),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn start_download_headless(
+        &self,
+        profile_id: Uuid,
+        files: Vec<SshSftpDownloadInput>,
+        events: IpcChannel<SshSftpDownloadEvent>,
+        operation_permit: OperationPermit,
+    ) -> Result<SshSftpTransferStarted> {
+        self.start_download_core(
+            profile_id,
+            files,
+            events,
+            operation_permit,
+            Arc::new(|_| {}),
+        )
+    }
+
+    fn start_download_core(
+        &self,
+        profile_id: Uuid,
+        files: Vec<SshSftpDownloadInput>,
+        events: IpcChannel<SshSftpDownloadEvent>,
+        operation_permit: OperationPermit,
+        progress_emitter: DownloadProgressEmitter,
     ) -> Result<SshSftpTransferStarted> {
         let job_id = Uuid::new_v4();
         let control = self.reserve_job(job_id, profile_id, operation_permit)?;
@@ -548,7 +632,6 @@ impl SftpTransferService {
 
         let tracker = Arc::new(JobTracker::new(None));
         if let Err(error) = self.spawn_job(
-            app,
             profile_id,
             job_id,
             SshSftpTransferDirection::Download,
@@ -557,6 +640,7 @@ impl SftpTransferService {
             tracker,
             None,
             Some(events),
+            progress_emitter,
         ) {
             self.remove_job(job_id);
             return Err(error);
@@ -642,16 +726,26 @@ impl SftpTransferService {
         validate_destructive_remote_path(&from_path)?;
         validate_destructive_remote_path(&to_path)?;
         let session = self.ssh.open_authenticated_for_terminal(profile_id)?;
-        let sftp = session.sftp().map_err(|_| NekoError::SshTransferFailed)?;
-        if !close_signal.try_begin_remote_effect() {
-            return Err(NekoError::ProfileNotFound);
+        if overwrite {
+            if !close_signal.try_begin_remote_effect() {
+                return Err(NekoError::ProfileNotFound);
+            }
+            atomic_overwrite_rename(&session, &from_path, &to_path)
+        } else {
+            let sftp = session.sftp().map_err(|_| NekoError::SshTransferFailed)?;
+            if sftp_path_exists(&sftp, Path::new(&to_path))? {
+                return Err(NekoError::SshTransferFailed);
+            }
+            if !close_signal.try_begin_remote_effect() {
+                return Err(NekoError::ProfileNotFound);
+            }
+            sftp.rename(
+                Path::new(&from_path),
+                Path::new(&to_path),
+                Some(non_overwriting_rename_flags()),
+            )
+            .map_err(|_| NekoError::SshTransferFailed)
         }
-        sftp.rename(
-            Path::new(&from_path),
-            Path::new(&to_path),
-            Some(rename_flags(overwrite)),
-        )
-        .map_err(|_| NekoError::SshTransferFailed)
     }
 
     /// Deletes one file/symlink or an empty directory only.  Recursive deletion is deliberately
@@ -730,7 +824,6 @@ impl SftpTransferService {
     #[allow(clippy::too_many_arguments)]
     fn spawn_job(
         &self,
-        app: AppHandle,
         profile_id: Uuid,
         job_id: Uuid,
         direction: SshSftpTransferDirection,
@@ -739,6 +832,7 @@ impl SftpTransferService {
         tracker: Arc<JobTracker>,
         upload_events: Option<IpcChannel<SshSftpUploadEvent>>,
         download_events: Option<IpcChannel<SshSftpDownloadEvent>>,
+        progress_emitter: DownloadProgressEmitter,
     ) -> Result<()> {
         // Downloads use one worker: the sole outstanding 64 KiB chunk is therefore a strict
         // end-to-end cap on queued WebView data. Uploads retain their bounded parallelism.
@@ -759,16 +853,15 @@ impl SftpTransferService {
                 // SSH session, so libssh2 sessions are never accessed from more than one thread.
                 thread::scope(|scope| {
                     for _ in 0..worker_count {
-                        let worker_app = app.clone();
                         let worker_ssh = Arc::clone(&ssh);
                         let worker_queue = Arc::clone(&queue);
                         let worker_control = Arc::clone(&control);
                         let worker_tracker = Arc::clone(&tracker);
                         let worker_upload_events = upload_events.as_ref().map(Arc::clone);
                         let worker_download_events = download_events.as_ref().map(Arc::clone);
+                        let worker_progress_emitter = Arc::clone(&progress_emitter);
                         scope.spawn(move || {
                             transfer_worker(
-                                worker_app,
                                 worker_ssh,
                                 profile_id,
                                 job_id,
@@ -777,6 +870,7 @@ impl SftpTransferService {
                                 worker_tracker,
                                 worker_upload_events,
                                 worker_download_events,
+                                worker_progress_emitter,
                             );
                         });
                     }
@@ -835,7 +929,6 @@ impl JobTracker {
 
 #[allow(clippy::too_many_arguments)]
 fn transfer_worker(
-    app: AppHandle,
     ssh: Arc<SshService>,
     profile_id: Uuid,
     job_id: Uuid,
@@ -844,6 +937,7 @@ fn transfer_worker(
     tracker: Arc<JobTracker>,
     upload_events: Option<Arc<IpcChannel<SshSftpUploadEvent>>>,
     download_events: Option<Arc<IpcChannel<SshSftpDownloadEvent>>>,
+    progress_emitter: DownloadProgressEmitter,
 ) {
     loop {
         let task = match queue.lock() {
@@ -871,7 +965,6 @@ fn transfer_worker(
                     upload_events.as_deref(),
                 ),
                 TransferTask::Download(task) => download_one(
-                    &app,
                     &ssh,
                     profile_id,
                     job_id,
@@ -879,6 +972,7 @@ fn transfer_worker(
                     &control,
                     &tracker,
                     download_events.as_deref(),
+                    &progress_emitter,
                 ),
             }
         };
@@ -899,6 +993,9 @@ fn upload_one(
         let session = ssh.open_authenticated_for_terminal(profile_id)?;
         let sftp = session.sftp().map_err(|_| NekoError::SshTransferFailed)?;
         let temporary_path = temporary_upload_path(&task.remote_path, task.file_id)?;
+        if !task.overwrite && sftp_path_exists(&sftp, Path::new(&task.remote_path))? {
+            return Err(NekoError::SshTransferFailed);
+        }
         if !control.remote_effect_allowed() {
             return Ok(false);
         }
@@ -967,16 +1064,19 @@ fn upload_one(
                     let _ = sftp.unlink(Path::new(&temporary_path));
                     return Ok(false);
                 }
-                if sftp
-                    .rename(
+                let publish_result = if task.overwrite {
+                    atomic_overwrite_rename(&session, &temporary_path, &task.remote_path)
+                } else {
+                    sftp.rename(
                         Path::new(&temporary_path),
                         Path::new(&task.remote_path),
-                        Some(rename_flags(task.overwrite)),
+                        Some(non_overwriting_rename_flags()),
                     )
-                    .is_err()
-                {
+                    .map_err(|_| NekoError::SshTransferFailed)
+                };
+                if let Err(error) = publish_result {
                     let _ = sftp.unlink(Path::new(&temporary_path));
-                    return Err(NekoError::SshTransferFailed);
+                    return Err(error);
                 }
                 Ok(true)
             }
@@ -995,7 +1095,6 @@ fn upload_one(
 
 #[allow(clippy::too_many_arguments)]
 fn download_one(
-    app: &AppHandle,
     ssh: &SshService,
     profile_id: Uuid,
     job_id: Uuid,
@@ -1003,6 +1102,7 @@ fn download_one(
     control: &JobControl,
     tracker: &JobTracker,
     events: Option<&IpcChannel<SshSftpDownloadEvent>>,
+    progress_emitter: &DownloadProgressEmitter,
 ) -> TransferOutcome {
     let result = (|| -> Result<bool> {
         let session = ssh.open_authenticated_for_terminal(profile_id)?;
@@ -1062,20 +1162,16 @@ fn download_one(
                 return Ok(false);
             }
             offset = next_offset;
-            emit(
-                app,
-                SSH_SFTP_TRANSFER_PROGRESS_EVENT,
-                SshSftpTransferProgress {
-                    job_id,
-                    file_id: task.file_id,
-                    name: task.name.clone(),
-                    direction: SshSftpTransferDirection::Download,
-                    file_bytes_transferred: offset,
-                    file_total_bytes,
-                    job_bytes_transferred: job_bytes,
-                    job_total_bytes: tracker.total_bytes,
-                },
-            );
+            progress_emitter(SshSftpTransferProgress {
+                job_id,
+                file_id: task.file_id,
+                name: task.name.clone(),
+                direction: SshSftpTransferDirection::Download,
+                file_bytes_transferred: offset,
+                file_total_bytes,
+                job_bytes_transferred: job_bytes,
+                job_total_bytes: tracker.total_bytes,
+            });
         }
     })();
     outcome_from_result(result, control)
@@ -1221,11 +1317,208 @@ fn temporary_upload_path(remote_path: &str, file_id: Uuid) -> Result<String> {
     join_remote_path(directory, &temporary_name)
 }
 
-fn rename_flags(overwrite: bool) -> RenameFlags {
-    if overwrite {
-        RenameFlags::OVERWRITE
-    } else {
-        RenameFlags::empty()
+fn non_overwriting_rename_flags() -> RenameFlags {
+    RenameFlags::empty()
+}
+
+fn sftp_path_exists(sftp: &Sftp, remote_path: &Path) -> Result<bool> {
+    match sftp.lstat(remote_path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.code() == ErrorCode::SFTP(SSH_FX_NO_SUCH_FILE) => Ok(false),
+        // Permission denied, transport loss, and malformed/protocol errors must never be
+        // interpreted as absence: doing so could turn overwrite=false into a destructive action.
+        Err(_) => Err(NekoError::SshTransferFailed),
+    }
+}
+
+/// Performs the OpenSSH POSIX rename extension on a separate libssh2 channel.
+///
+/// `ssh2::Sftp::rename` only expresses an atomic *preference* for SFTP v5 and sends an ordinary
+/// SSH_FXP_RENAME on the overwhelmingly common v3 protocol.  The high-level crate does not expose
+/// `libssh2_sftp_posix_rename_ex` or a safe raw SFTP handle, so reaching through its private layout
+/// would be unsound. This small protocol wrapper stays on the authenticated in-process libssh2
+/// session, negotiates SFTP v3 itself, requires the advertised OpenSSH extension version, and
+/// fails closed if the server cannot guarantee rename(2)-style replacement.
+fn atomic_overwrite_rename(session: &Session, from_path: &str, to_path: &str) -> Result<()> {
+    let mut channel = session
+        .channel_session()
+        .map_err(|_| NekoError::SshTransferFailed)?;
+    channel
+        .subsystem("sftp")
+        .map_err(|_| NekoError::SshTransferFailed)?;
+
+    let operation = (|| -> std::result::Result<(), AtomicOverwriteError> {
+        write_sftp_packet(
+            &mut channel,
+            SSH_FXP_INIT,
+            &SFTP_PROTOCOL_VERSION.to_be_bytes(),
+        )?;
+        let (packet_type, version_payload) = read_sftp_packet(&mut channel)?;
+        if packet_type != SSH_FXP_VERSION {
+            return Err(AtomicOverwriteError::Protocol);
+        }
+        let mut version = SftpPacketCursor::new(&version_payload);
+        if version.read_u32()? != SFTP_PROTOCOL_VERSION {
+            return Err(AtomicOverwriteError::Protocol);
+        }
+        let mut supports_posix_rename = false;
+        while !version.is_empty() {
+            let name = version.read_string()?;
+            let value = version.read_string()?;
+            if name == SFTP_POSIX_RENAME_EXTENSION && value == SFTP_POSIX_RENAME_VERSION {
+                supports_posix_rename = true;
+            }
+        }
+        if !supports_posix_rename {
+            return Err(AtomicOverwriteError::Unsupported);
+        }
+
+        let mut request = Vec::with_capacity(
+            4 + 4 + SFTP_POSIX_RENAME_EXTENSION.len() + 4 + from_path.len() + 4 + to_path.len(),
+        );
+        request.extend_from_slice(&1_u32.to_be_bytes());
+        push_sftp_string(&mut request, SFTP_POSIX_RENAME_EXTENSION)?;
+        push_sftp_string(&mut request, from_path.as_bytes())?;
+        push_sftp_string(&mut request, to_path.as_bytes())?;
+        write_sftp_packet(&mut channel, SSH_FXP_EXTENDED, &request)?;
+
+        let (packet_type, status_payload) = read_sftp_packet(&mut channel)?;
+        if packet_type != SSH_FXP_STATUS {
+            return Err(AtomicOverwriteError::Protocol);
+        }
+        let mut status = SftpPacketCursor::new(&status_payload);
+        if status.read_u32()? != 1 {
+            return Err(AtomicOverwriteError::Protocol);
+        }
+        match status.read_u32()? {
+            SSH_FX_OK => Ok(()),
+            SSH_FX_OP_UNSUPPORTED => Err(AtomicOverwriteError::Unsupported),
+            _ => Err(AtomicOverwriteError::Remote),
+        }
+    })();
+
+    // Never let channel-shutdown diagnostics replace the authoritative rename result. The SSH
+    // session timeout still bounds a peer that stops responding during cleanup.
+    let _ = channel.close();
+    let _ = channel.wait_close();
+
+    match operation {
+        Ok(()) => Ok(()),
+        Err(AtomicOverwriteError::Unsupported) => Err(NekoError::SshAtomicOverwriteUnsupported),
+        Err(
+            AtomicOverwriteError::Io
+            | AtomicOverwriteError::Protocol
+            | AtomicOverwriteError::Remote,
+        ) => Err(NekoError::SshTransferFailed),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AtomicOverwriteError {
+    Unsupported,
+    Protocol,
+    Remote,
+    Io,
+}
+
+impl From<std::io::Error> for AtomicOverwriteError {
+    fn from(_: std::io::Error) -> Self {
+        Self::Io
+    }
+}
+
+fn write_sftp_packet(
+    channel: &mut ssh2::Channel,
+    packet_type: u8,
+    payload: &[u8],
+) -> std::result::Result<(), AtomicOverwriteError> {
+    let packet_length = payload
+        .len()
+        .checked_add(1)
+        .filter(|length| *length <= MAX_SFTP_CONTROL_PACKET_BYTES)
+        .and_then(|length| u32::try_from(length).ok())
+        .ok_or(AtomicOverwriteError::Protocol)?;
+    channel.write_all(&packet_length.to_be_bytes())?;
+    channel.write_all(&[packet_type])?;
+    channel.write_all(payload)?;
+    channel.flush()?;
+    Ok(())
+}
+
+fn read_sftp_packet(
+    channel: &mut ssh2::Channel,
+) -> std::result::Result<(u8, Vec<u8>), AtomicOverwriteError> {
+    let mut length = [0_u8; 4];
+    channel.read_exact(&mut length)?;
+    let length =
+        usize::try_from(u32::from_be_bytes(length)).map_err(|_| AtomicOverwriteError::Protocol)?;
+    if !(1..=MAX_SFTP_CONTROL_PACKET_BYTES).contains(&length) {
+        return Err(AtomicOverwriteError::Protocol);
+    }
+    let mut packet = vec![0_u8; length];
+    channel.read_exact(&mut packet)?;
+    let packet_type = packet[0];
+    packet.remove(0);
+    Ok((packet_type, packet))
+}
+
+fn push_sftp_string(
+    output: &mut Vec<u8>,
+    value: &[u8],
+) -> std::result::Result<(), AtomicOverwriteError> {
+    let length = u32::try_from(value.len()).map_err(|_| AtomicOverwriteError::Protocol)?;
+    let final_length = output
+        .len()
+        .checked_add(4)
+        .and_then(|size| size.checked_add(value.len()))
+        .filter(|size| *size <= MAX_SFTP_CONTROL_PACKET_BYTES)
+        .ok_or(AtomicOverwriteError::Protocol)?;
+    output.reserve(final_length - output.len());
+    output.extend_from_slice(&length.to_be_bytes());
+    output.extend_from_slice(value);
+    Ok(())
+}
+
+struct SftpPacketCursor<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> SftpPacketCursor<'a> {
+    const fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.offset == self.bytes.len()
+    }
+
+    fn read_u32(&mut self) -> std::result::Result<u32, AtomicOverwriteError> {
+        let end = self
+            .offset
+            .checked_add(4)
+            .filter(|end| *end <= self.bytes.len())
+            .ok_or(AtomicOverwriteError::Protocol)?;
+        let value = u32::from_be_bytes(
+            self.bytes[self.offset..end]
+                .try_into()
+                .map_err(|_| AtomicOverwriteError::Protocol)?,
+        );
+        self.offset = end;
+        Ok(value)
+    }
+
+    fn read_string(&mut self) -> std::result::Result<&'a [u8], AtomicOverwriteError> {
+        let length =
+            usize::try_from(self.read_u32()?).map_err(|_| AtomicOverwriteError::Protocol)?;
+        let end = self
+            .offset
+            .checked_add(length)
+            .filter(|end| *end <= self.bytes.len())
+            .ok_or(AtomicOverwriteError::Protocol)?;
+        let value = &self.bytes[self.offset..end];
+        self.offset = end;
+        Ok(value)
     }
 }
 
@@ -1240,7 +1533,7 @@ const fn max_encoded_file_bytes() -> usize {
     MAX_FILE_BYTES.div_ceil(3) * 4
 }
 
-fn emit<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
+fn emit<R: Runtime, T: Serialize + Clone>(app: &AppHandle<R>, event: &str, payload: T) {
     // Renderer shutdown/event delivery failure must not panic a transfer worker.
     let _ = app.emit(event, payload);
 }
@@ -1248,7 +1541,52 @@ fn emit<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ephemeral::EphemeralConnectionStore, operation_admission::OperationAdmission};
+    use std::{
+        sync::mpsc::{self, Receiver},
+        time::Duration,
+    };
+
+    use serde_json::Value;
+
+    use crate::{
+        domain::{ProfileAuthenticationInput, SshProfileInput, TerminalPreferences},
+        ephemeral::EphemeralConnectionStore,
+        operation_admission::OperationAdmission,
+        ssh::SshHostKeyStatus,
+    };
+
+    fn receive_upload_events(receiver: &Receiver<Value>) -> Vec<Value> {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut events = Vec::new();
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .expect("upload must finish before the integration-test deadline");
+            let event = receiver
+                .recv_timeout(remaining)
+                .expect("receive upload IPC event");
+            let completed = event["kind"] == "completed";
+            events.push(event);
+            if completed {
+                return events;
+            }
+        }
+    }
+
+    fn read_remote_file(ssh: &SshService, profile_id: Uuid, remote_path: &str) -> Option<Vec<u8>> {
+        let session = ssh
+            .open_authenticated_for_terminal(profile_id)
+            .expect("open authenticated fixture transport");
+        let sftp = session.sftp().expect("open fixture SFTP");
+        let mut file = match sftp.open(Path::new(remote_path)) {
+            Ok(file) => file,
+            Err(error) if error.code() == ErrorCode::SFTP(SSH_FX_NO_SUCH_FILE) => return None,
+            Err(error) => panic!("read fixture file {remote_path}: {error}"),
+        };
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).expect("read fixture file");
+        Some(data)
+    }
 
     #[test]
     fn upload_names_cannot_escape_the_selected_remote_directory() {
@@ -1272,8 +1610,7 @@ mod tests {
                 .expect("safe temporary path"),
             "/srv/uploads/.report.csv.nekossh-00000000-0000-0000-0000-000000000000.part"
         );
-        assert!(rename_flags(false).is_empty());
-        assert!(rename_flags(true).contains(RenameFlags::OVERWRITE));
+        assert!(non_overwriting_rename_flags().is_empty());
         assert!(validate_destructive_remote_path("/srv/uploads/report.csv").is_ok());
         for invalid in ["/", ".", "..", "/srv/../etc", "/srv/./report.csv"] {
             assert!(matches!(
@@ -1299,6 +1636,32 @@ mod tests {
         assert!(!flags.contains(OpenFlags::READ));
         assert!(!flags.contains(OpenFlags::APPEND));
         assert!(!flags.contains(OpenFlags::TRUNCATE));
+    }
+
+    #[test]
+    fn posix_rename_control_packets_are_strictly_bounded_and_parsed() {
+        let mut encoded = Vec::new();
+        push_sftp_string(&mut encoded, SFTP_POSIX_RENAME_EXTENSION).expect("bounded extension");
+        push_sftp_string(&mut encoded, b"1").expect("bounded version");
+        let mut cursor = SftpPacketCursor::new(&encoded);
+        assert_eq!(
+            cursor.read_string().expect("extension"),
+            SFTP_POSIX_RENAME_EXTENSION
+        );
+        assert_eq!(
+            cursor.read_string().expect("version"),
+            SFTP_POSIX_RENAME_VERSION
+        );
+        assert!(cursor.is_empty());
+
+        let truncated = &encoded[..encoded.len() - 1];
+        let mut cursor = SftpPacketCursor::new(truncated);
+        assert!(cursor.read_string().is_ok());
+        assert_eq!(cursor.read_string(), Err(AtomicOverwriteError::Protocol));
+        assert_eq!(
+            push_sftp_string(&mut Vec::new(), &vec![0_u8; MAX_SFTP_CONTROL_PACKET_BYTES]),
+            Err(AtomicOverwriteError::Protocol)
+        );
     }
 
     #[test]
@@ -1445,5 +1808,229 @@ mod tests {
             .expect("cancel matching profile");
         assert!(target_control.cancelled.load(Ordering::Acquire));
         assert!(!other_control.cancelled.load(Ordering::Acquire));
+    }
+
+    /// Runs only through `scripts/test-native-ssh-interoperability.mjs`. The fixture speaks SFTP
+    /// v3 over a raw ssh2 server channel, so these assertions cover the production libssh2
+    /// transport and the explicit posix-rename@openssh.com wire request.
+    #[test]
+    fn native_sftp_overwrite_interoperability() {
+        if std::env::var("NEKOSSH_NATIVE_INTEROP").as_deref() != Ok("1") {
+            return;
+        }
+
+        let host = std::env::var("NEKOSSH_NATIVE_INTEROP_HOST").expect("fixture host");
+        let port = std::env::var("NEKOSSH_NATIVE_INTEROP_PORT")
+            .expect("fixture port")
+            .parse::<u16>()
+            .expect("valid fixture port");
+        let username = std::env::var("NEKOSSH_NATIVE_INTEROP_USERNAME").expect("fixture username");
+        let password = std::env::var("NEKOSSH_NATIVE_INTEROP_PASSWORD").expect("fixture password");
+
+        let owner = Uuid::new_v4();
+        let store = Arc::new(EphemeralConnectionStore::new());
+        let profile = store
+            .create(
+                owner,
+                SshProfileInput {
+                    label: "native-atomic-overwrite".to_owned(),
+                    host,
+                    port,
+                    username,
+                    authentication: ProfileAuthenticationInput::Password { password },
+                    tags: Vec::new(),
+                    terminal: TerminalPreferences::default(),
+                },
+            )
+            .expect("create overwrite fixture profile");
+        let ssh = Arc::new(SshService::new(store));
+        let confirmation_id = match ssh.prepare(profile.id).expect("prepare fixture host") {
+            SshHostKeyStatus::ConfirmationRequired {
+                confirmation_id, ..
+            } => confirmation_id,
+            unexpected => panic!("fixture host must require confirmation: {unexpected:?}"),
+        };
+        assert!(matches!(
+            ssh.trust_host_key(profile.id, confirmation_id)
+                .expect("trust and authenticate fixture host"),
+            SshHostKeyStatus::Trusted { .. }
+        ));
+
+        let service = SftpTransferService::new(Arc::clone(&ssh));
+        let admission = OperationAdmission::new();
+
+        let old_target = b"existing-target";
+        let no_overwrite_source = b"no-overwrite-source";
+        let no_overwrite = admission.try_acquire(profile.id).expect("admit rename");
+        assert!(matches!(
+            service.rename_remote(
+                profile.id,
+                "/workspace/no-overwrite-source.bin".to_owned(),
+                "/workspace/no-overwrite-target.bin".to_owned(),
+                false,
+                no_overwrite.close_signal(),
+            ),
+            Err(NekoError::SshTransferFailed)
+        ));
+        drop(no_overwrite);
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/no-overwrite-target.bin").as_deref(),
+            Some(old_target.as_slice())
+        );
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/no-overwrite-source.bin").as_deref(),
+            Some(no_overwrite_source.as_slice())
+        );
+
+        let permission_source = b"permission-source";
+        let permission_target = b"permission-target";
+        let permission = admission
+            .try_acquire(profile.id)
+            .expect("admit permission-denied rename");
+        assert!(matches!(
+            service.rename_remote(
+                profile.id,
+                "/workspace/permission-source.bin".to_owned(),
+                "/workspace/permission-denied.bin".to_owned(),
+                false,
+                permission.close_signal(),
+            ),
+            Err(NekoError::SshTransferFailed)
+        ));
+        drop(permission);
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/permission-source.bin").as_deref(),
+            Some(permission_source.as_slice())
+        );
+        // Reading is allowed by the fixture; only LSTAT is denied. This proves the old bytes were
+        // preserved rather than treating SSH_FX_PERMISSION_DENIED as "missing".
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/permission-denied.bin").as_deref(),
+            Some(permission_target.as_slice())
+        );
+
+        let atomic_source = b"atomic-source";
+        let atomic = admission
+            .try_acquire(profile.id)
+            .expect("admit atomic rename");
+        service
+            .rename_remote(
+                profile.id,
+                "/workspace/atomic-source.bin".to_owned(),
+                "/workspace/atomic-target.bin".to_owned(),
+                true,
+                atomic.close_signal(),
+            )
+            .expect("atomically replace existing target");
+        drop(atomic);
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/atomic-target.bin").as_deref(),
+            Some(atomic_source.as_slice())
+        );
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/atomic-source.bin"),
+            None
+        );
+
+        let unsupported_source = b"unsupported-source";
+        let unsupported_target = b"unsupported-target";
+        let unsupported = admission
+            .try_acquire(profile.id)
+            .expect("admit unsupported atomic rename");
+        let error = service
+            .rename_remote(
+                profile.id,
+                "/workspace/unsupported-source.bin".to_owned(),
+                "/workspace/unsupported-target.bin".to_owned(),
+                true,
+                unsupported.close_signal(),
+            )
+            .expect_err("unsupported extension must fail closed");
+        drop(unsupported);
+        assert!(matches!(&error, NekoError::SshAtomicOverwriteUnsupported));
+        assert_eq!(
+            error.public_message(),
+            "服务器不支持安全原子覆盖（posix-rename@openssh.com），原文件已保留。"
+        );
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/unsupported-source.bin").as_deref(),
+            Some(unsupported_source.as_slice())
+        );
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/unsupported-target.bin").as_deref(),
+            Some(unsupported_target.as_slice())
+        );
+
+        let start_upload =
+            |name: &str, bytes: &[u8], overwrite: bool| -> (SshSftpTransferStarted, Vec<Value>) {
+                let (sender, receiver) = mpsc::channel();
+                let events = IpcChannel::new(move |body| {
+                    let event = body
+                        .deserialize::<Value>()
+                        .expect("deserialize upload IPC event");
+                    sender.send(event).expect("capture upload IPC event");
+                    Ok(())
+                });
+                let permit = admission.try_acquire(profile.id).expect("admit upload");
+                let started = service
+                    .start_upload_headless(
+                        profile.id,
+                        "/workspace".to_owned(),
+                        vec![SshSftpUploadInput {
+                            name: name.to_owned(),
+                            data_base64: STANDARD.encode(bytes),
+                            overwrite,
+                        }],
+                        events,
+                        permit,
+                    )
+                    .expect("start production upload");
+                let events = receive_upload_events(&receiver);
+                (started, events)
+            };
+
+        let (no_overwrite_upload, no_overwrite_events) =
+            start_upload("upload-existing.bin", b"new-upload", false);
+        assert_eq!(no_overwrite_upload.total_files, 1);
+        assert_eq!(
+            no_overwrite_events.last().expect("upload completion")["status"],
+            "completed_with_errors"
+        );
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/upload-existing.bin").as_deref(),
+            Some(b"old-upload".as_slice())
+        );
+
+        let (_, overwrite_events) = start_upload("upload-existing.bin", b"atomic-upload", true);
+        assert_eq!(
+            overwrite_events.last().expect("upload completion")["status"],
+            "completed"
+        );
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/upload-existing.bin").as_deref(),
+            Some(b"atomic-upload".as_slice())
+        );
+
+        let (_, unsupported_upload_events) =
+            start_upload("upload-unsupported.bin", b"rejected-upload", true);
+        assert_eq!(
+            unsupported_upload_events.last().expect("upload completion")["status"],
+            "completed_with_errors"
+        );
+        assert_eq!(
+            read_remote_file(&ssh, profile.id, "/workspace/upload-unsupported.bin").as_deref(),
+            Some(b"old-unsupported-upload".as_slice())
+        );
+
+        let listing = ssh
+            .list_directory(profile.id, "/workspace".to_owned())
+            .expect("list fixture after uploads");
+        assert!(
+            listing
+                .entries
+                .iter()
+                .all(|entry| !entry.name.ends_with(".part")),
+            "failed/successful uploads must not leave .part objects"
+        );
     }
 }

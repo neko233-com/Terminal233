@@ -9,6 +9,7 @@ import {
   MODERN_SSH_ALGORITHMS,
   connectModernSshClient,
   modernSshAlgorithms,
+  validatePresentedHostKey,
 } from './ssh-algorithms.mjs'
 
 const LEGACY_ONLY_OFFER = {
@@ -88,6 +89,47 @@ test('Web SSH transport rejects an actual legacy-only ssh2 server', { timeout: 5
     server.close()
     await once(server, 'close')
   }
+})
+
+test('Web SSH host-key validation rejects weak RSA keys and accepts modern key shapes', () => {
+  const { privateKey: strongRsa } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const { privateKey: weakRsa } = generateKeyPairSync('rsa', { modulusLength: 1024 })
+  const { privateKey: wrongExponentRsa } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicExponent: 3,
+  })
+  const { publicKey: ed25519 } = generateKeyPairSync('ed25519')
+
+  const rsaPublicBlob = (privateKey) => {
+    const parsed = ssh2.utils.parseKey(privateKey.export({ type: 'pkcs1', format: 'pem' }))
+    assert.ok(!(parsed instanceof Error))
+    return parsed.getPublicSSH()
+  }
+  const sshString = (value) => {
+    const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, 'ascii')
+    const length = Buffer.allocUnsafe(4)
+    length.writeUInt32BE(bytes.length)
+    return Buffer.concat([length, bytes])
+  }
+  const ed25519PublicBlob = Buffer.concat([
+    sshString('ssh-ed25519'),
+    sshString(Buffer.from(ed25519.export({ format: 'jwk' }).x, 'base64url')),
+  ])
+
+  assert.equal(validatePresentedHostKey(rsaPublicBlob(strongRsa)), 'ssh-rsa')
+  assert.equal(validatePresentedHostKey(ed25519PublicBlob), 'ssh-ed25519')
+  assert.throws(
+    () => validatePresentedHostKey(rsaPublicBlob(weakRsa)),
+    /between 2048 and 16384 bits/,
+  )
+  assert.throws(
+    () => validatePresentedHostKey(rsaPublicBlob(wrongExponentRsa)),
+    /public exponent 65537/,
+  )
+  assert.throws(
+    () => validatePresentedHostKey(Buffer.from([0, 0, 0, 7, 0x73, 0x73])),
+    /truncated/,
+  )
 })
 
 test('the Web backend cannot bypass the modern SSH connection wrapper', async () => {

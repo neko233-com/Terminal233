@@ -179,8 +179,13 @@ describe('Tauri SSH IDE', () => {
     expect(dialog).toHaveAttribute('autocomplete', 'off')
     expect(within(dialog).getByLabelText('用户')).toHaveAttribute('autocomplete', 'off')
     expect(within(dialog).getByLabelText('密码')).toHaveAttribute('autocomplete', 'new-password')
+    const authenticationSelect = within(dialog).getByRole('combobox', { name: '认证方式' })
+    expect(
+      within(authenticationSelect).getAllByRole('option').map((option) => option.textContent),
+    ).toEqual(['密码', '粘贴私钥'])
+    expect(within(dialog).queryByRole('option', { name: 'SSH Agent' })).not.toBeInTheDocument()
 
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: '认证方式' }), 'private_key')
+    await user.selectOptions(authenticationSelect, 'private_key')
     expect(within(dialog).getByLabelText('私钥')).toHaveAttribute('autocomplete', 'off')
     expect(within(dialog).getByLabelText('私钥口令（可选）')).toHaveAttribute(
       'autocomplete',

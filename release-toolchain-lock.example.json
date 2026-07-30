@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "platform": "windows-x64",
+  "tools": {
+    "powershell": {
+      "path": "C:\\absolute\\trusted\\WindowsPowerShell\\powershell.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": {
+        "status": "NotSigned",
+        "subject": null,
+        "thumbprint": null,
+        "spkiSha256": null,
+        "timestamped": false
+      }
+    },
+    "git": {
+      "path": "C:\\absolute\\trusted\\Git\\git.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    },
+    "gh": {
+      "path": "C:\\absolute\\trusted\\GitHub CLI\\gh.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    },
+    "node": {
+      "path": "C:\\absolute\\trusted\\Node\\node.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    },
+    "npm": {
+      "path": "C:\\absolute\\trusted\\npm\\npm-cli.js",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    },
+    "rustc": {
+      "path": "C:\\absolute\\trusted\\Rust\\rustc.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    },
+    "cargo": {
+      "path": "C:\\absolute\\trusted\\Rust\\cargo.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    },
+    "cargoAudit": {
+      "path": "C:\\absolute\\trusted\\Rust\\cargo-audit.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    },
+    "perl": {
+      "path": "C:\\absolute\\trusted\\Perl\\perl.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    },
+    "nasm": {
+      "path": "C:\\absolute\\trusted\\NASM\\nasm.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    },
+    "vswhere": {
+      "path": "C:\\absolute\\trusted\\Visual Studio Installer\\vswhere.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    },
+    "signtool": {
+      "path": "C:\\absolute\\trusted\\Windows SDK\\signtool.exe",
+      "length": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "replace-with-exact-observed-version",
+      "signature": { "status": "NotSigned", "subject": null, "thumbprint": null, "spkiSha256": null, "timestamped": false }
+    }
+  }
+}

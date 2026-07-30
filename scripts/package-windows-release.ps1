@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$OutputRoot,
-    [string]$NpmCliPath = $env:NEKOSSH_NPM_CLI,
+    [Parameter(Mandatory)][string]$ToolchainLockPath,
+    [Parameter(Mandatory)][string]$ExpectedToolchainLockSha256,
     [string]$TauriSigningConfig,
     [string]$ExpectedSignerThumbprint,
     [switch]$AllowUnsigned
@@ -12,13 +13,24 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$signingPolicyPath = Join-Path $repositoryRoot 'release-signing-policy.json'
-$signingPolicyModulePath = Join-Path $PSScriptRoot 'release-signing-policy.psm1'
-$resolvedNpmCli = if ([string]::IsNullOrWhiteSpace($NpmCliPath)) {
-    $null
-} else {
-    (Resolve-Path -LiteralPath $NpmCliPath).Path
-}
+$toolchainLockModulePath = Join-Path $PSScriptRoot 'release-toolchain-lock.psm1'
+Import-Module -Name $toolchainLockModulePath -Force -ErrorAction Stop
+$lockedToolchain = Import-NekoSshReleaseToolchainLock `
+    -Path $ToolchainLockPath `
+    -ExpectedSha256 $ExpectedToolchainLockSha256
+Assert-NekoSshToolchainLockOutsideRepository `
+    -LockPath $lockedToolchain.LockPath `
+    -RepositoryRoot $repositoryRoot
+$gitExecutable = [string]$lockedToolchain.Tools.git.Path
+$nodeExecutable = [string]$lockedToolchain.Tools.node.Path
+$npmCliExecutable = [string]$lockedToolchain.Tools.npm.Path
+$rustcExecutable = [string]$lockedToolchain.Tools.rustc.Path
+$cargoExecutable = [string]$lockedToolchain.Tools.cargo.Path
+$cargoAuditExecutable = [string]$lockedToolchain.Tools.cargoAudit.Path
+$perlExecutable = [string]$lockedToolchain.Tools.perl.Path
+$nasmExecutable = [string]$lockedToolchain.Tools.nasm.Path
+$vswhereExecutable = [string]$lockedToolchain.Tools.vswhere.Path
+$signToolPath = [string]$lockedToolchain.Tools.signtool.Path
 $resolvedSigningConfig = if ([string]::IsNullOrWhiteSpace($TauriSigningConfig)) {
     $null
 } else {
@@ -178,6 +190,127 @@ function Remove-SafeBuildTree {
     }
 }
 
+function ConvertTo-NativeArgument {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') {
+        return $Value
+    }
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashes += 1
+            continue
+        }
+        if ($character -eq '"') {
+            [void]$builder.Append(('\' * (($backslashes * 2) + 1)))
+            [void]$builder.Append('"')
+            $backslashes = 0
+            continue
+        }
+        if ($backslashes -gt 0) {
+            [void]$builder.Append(('\' * $backslashes))
+            $backslashes = 0
+        }
+        [void]$builder.Append($character)
+    }
+    if ($backslashes -gt 0) {
+        [void]$builder.Append(('\' * ($backslashes * 2)))
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function Export-CheckedGitHeadBlob {
+    param(
+        [Parameter(Mandatory)][string]$GitExecutable,
+        [Parameter(Mandatory)][string]$TrackedPath,
+        [Parameter(Mandatory)][string]$Destination
+    )
+
+    if (Test-Path -LiteralPath $Destination) {
+        throw "Trusted Git blob destination already exists: $Destination"
+    }
+    $arguments = @(
+        '--no-optional-locks',
+        '--no-replace-objects',
+        '-c', 'core.fsmonitor=false',
+        '-c', 'core.hooksPath=NUL',
+        '-c', 'core.attributesFile=NUL',
+        '-C', $repositoryRoot,
+        'cat-file',
+        'blob',
+        "HEAD:$TrackedPath"
+    )
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $GitExecutable
+    $startInfo.Arguments = (
+        $arguments |
+            ForEach-Object { ConvertTo-NativeArgument -Value ([string]$_) }
+    ) -join ' '
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardErrorEncoding = [Text.UTF8Encoding]::new($false, $true)
+    $gitEnvironment = $startInfo.EnvironmentVariables
+    if ($null -eq $gitEnvironment) {
+        $gitEnvironment = $startInfo.EnvironmentVariables
+    }
+    if ($null -eq $gitEnvironment) {
+        throw 'Unable to initialize the trusted Git export environment.'
+    }
+    $gitEnvironment['GIT_TERMINAL_PROMPT'] = '0'
+    $gitEnvironment['GIT_CONFIG_NOSYSTEM'] = '1'
+    $gitEnvironment['GIT_CONFIG_GLOBAL'] = 'NUL'
+    $gitEnvironment['GIT_NO_REPLACE_OBJECTS'] = '1'
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $stream = [IO.FileStream]::new(
+        $Destination,
+        [IO.FileMode]::CreateNew,
+        [IO.FileAccess]::Write,
+        [IO.FileShare]::None
+    )
+    try {
+        if (-not $process.Start()) {
+            throw 'Git process did not start while exporting the trusted source gate.'
+        }
+        $copyTask = $process.StandardOutput.BaseStream.CopyToAsync($stream)
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $copyTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $stream.Flush($true)
+        if ($process.ExitCode -ne 0) {
+            throw (
+                "Unable to export HEAD:$TrackedPath with Git exit code " +
+                "$($process.ExitCode): $($stderr.Trim())"
+            )
+        }
+    }
+    catch {
+        $stream.Dispose()
+        if (Test-Path -LiteralPath $Destination) {
+            Remove-Item -LiteralPath $Destination -Force
+        }
+        throw
+    }
+    finally {
+        $stream.Dispose()
+        $process.Dispose()
+    }
+    $file = Get-Item -LiteralPath $Destination -Force
+    if (
+        $file.Length -le 0 -or
+        ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+    ) {
+        throw 'The exported Git source gate is empty or unsafe.'
+    }
+}
+
 function Invoke-Checked {
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -192,9 +325,39 @@ function Invoke-Checked {
 
 function Invoke-OriginFetchChecked {
     $maximumAttempts = 4
+    $canonicalRepository = 'https://github.com/neko233-com/nekossh.git'
+    $mainRefspec = '+refs/heads/main:refs/remotes/origin/main'
     for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
         try {
-            Invoke-Checked -FilePath 'git' -ArgumentList @('fetch', '--prune', 'origin')
+            Invoke-Checked -FilePath $gitExecutable -ArgumentList @(
+                '--no-pager',
+                '--no-optional-locks',
+                '--no-replace-objects',
+                '-c',
+                'core.fsmonitor=false',
+                '-c',
+                'core.hooksPath=NUL',
+                '-c',
+                'core.attributesFile=NUL',
+                '-c',
+                'core.unsetenvvars=',
+                '-c',
+                'credential.helper=',
+                '-c',
+                'fetch.fsckObjects=true',
+                '-c',
+                'transfer.fsckObjects=true',
+                '-C',
+                $repositoryRoot,
+                'fetch',
+                '--no-tags',
+                '--no-recurse-submodules',
+                '--no-auto-maintenance',
+                '--no-write-commit-graph',
+                '--force',
+                $canonicalRepository,
+                $mainRefspec
+            )
             return
         }
         catch {
@@ -204,6 +367,40 @@ function Invoke-OriginFetchChecked {
             $retryDelaySeconds = 1 -shl $attempt
             Write-Warning "git fetch attempt $attempt of $maximumAttempts failed; retrying in $retryDelaySeconds seconds."
             Start-Sleep -Seconds $retryDelaySeconds
+        }
+    }
+}
+
+function Assert-NoUnsafeLocalGitConfiguration {
+    $names = Get-CheckedOutput -FilePath $gitExecutable -ArgumentList @(
+        '--no-pager',
+        '--no-optional-locks',
+        '--no-replace-objects',
+        '-c', 'core.hooksPath=NUL',
+        '-c', 'core.unsetenvvars=',
+        '-c', 'credential.helper=',
+        '-C', $repositoryRoot,
+        'config',
+        '--local',
+        '--no-includes',
+        '--name-only',
+        '--list'
+    )
+    foreach ($name in @($names -split "`r?`n" | Where-Object { $_ })) {
+        if (
+            $name -match '^(?i:(?:include|includeif)\.)' -or
+            $name -match '^(?i:url\..*\.(?:push)?insteadof)$' -or
+            $name -match '^(?i:credential\.)' -or
+            $name -match '^(?i:hook\.)' -or
+            $name -match '^(?i:http\.)' -or
+            $name -match '^(?i:protocol\.)' -or
+            $name -match '^(?i:fetch\.bundleURI)$' -or
+            $name -match '^(?i:gc\.recentObjectsHook)$' -or
+            $name -match '^(?i:extensions\.(?:partialClone|worktreeConfig))$' -or
+            $name -match '^(?i:core\.(?:alternateRefsCommand|askPass|excludesFile|hooksPath|fsmonitor|sshCommand|gitProxy|unsetenvvars))$' -or
+            $name -match '^(?i:remote\..*\.(?:partialCloneFilter|promisor|proxy|proxyAuthMethod|uploadpack|receivepack|vcs))$'
+        ) {
+            throw "Release fetch rejects unsafe local Git configuration: $name"
         }
     }
 }
@@ -224,37 +421,100 @@ function Get-CheckedOutput {
 function Invoke-NpmChecked {
     param([Parameter(Mandatory)][string[]]$ArgumentList)
 
-    if ($null -eq $resolvedNpmCli) {
-        Invoke-Checked -FilePath 'npm' -ArgumentList $ArgumentList
-    } else {
-        Invoke-Checked -FilePath 'node' -ArgumentList (@($resolvedNpmCli) + $ArgumentList)
-    }
+    Invoke-Checked `
+        -FilePath $nodeExecutable `
+        -ArgumentList (@($npmCliExecutable) + $ArgumentList)
 }
 
 function Get-NpmCheckedOutput {
     param([Parameter(Mandatory)][string[]]$ArgumentList)
 
-    if ($null -eq $resolvedNpmCli) {
-        return Get-CheckedOutput -FilePath 'npm' -ArgumentList $ArgumentList
+    return Get-CheckedOutput `
+        -FilePath $nodeExecutable `
+        -ArgumentList (@($npmCliExecutable) + $ArgumentList)
+}
+
+function Invoke-LockedReleaseVerification {
+    # Do not call the aggregate npm "verify" or "test" scripts here. Those scripts
+    # intentionally remain convenient for developers, but their nested `npm run`
+    # commands would resolve npm again through PATH. A release must keep every npm
+    # invocation anchored to the locked Node.js + npm-cli.js pair.
+    foreach ($scriptName in @('build', 'web:build', 'test:ui', 'test:server')) {
+        Invoke-NpmChecked -ArgumentList @('run', $scriptName)
     }
-    return Get-CheckedOutput -FilePath 'node' -ArgumentList (@($resolvedNpmCli) + $ArgumentList)
+
+    Invoke-Checked -FilePath $cargoExecutable -ArgumentList @(
+        'fmt',
+        '--manifest-path',
+        'src-tauri/Cargo.toml',
+        '--all',
+        '--',
+        '--check'
+    )
+    Invoke-Checked -FilePath $cargoExecutable -ArgumentList @(
+        'clippy',
+        '--manifest-path',
+        'src-tauri/Cargo.toml',
+        '--locked',
+        '--all-targets',
+        '--all-features',
+        '--',
+        '-D',
+        'warnings'
+    )
+    Invoke-Checked -FilePath $cargoExecutable -ArgumentList @(
+        'test',
+        '--manifest-path',
+        'src-tauri/Cargo.toml',
+        '--locked',
+        '--all-features'
+    )
+    Invoke-Checked -FilePath $nodeExecutable -ArgumentList @(
+        'scripts/test-native-ssh-interoperability.mjs'
+    )
+    Invoke-Checked -FilePath $cargoExecutable -ArgumentList @(
+        'fmt',
+        '--manifest-path',
+        'web-launcher/Cargo.toml',
+        '--all',
+        '--',
+        '--check'
+    )
+    Invoke-Checked -FilePath $cargoExecutable -ArgumentList @(
+        'clippy',
+        '--manifest-path',
+        'web-launcher/Cargo.toml',
+        '--locked',
+        '--all-targets',
+        '--',
+        '-D',
+        'warnings'
+    )
+    Invoke-Checked -FilePath $cargoExecutable -ArgumentList @(
+        'test',
+        '--manifest-path',
+        'web-launcher/Cargo.toml',
+        '--locked'
+    )
 }
 
 function Get-PackageVersion {
-    $package = Get-Content -LiteralPath (Join-Path $repositoryRoot 'package.json') -Raw | ConvertFrom-Json
+    param([Parameter(Mandatory)][string]$SourceRoot)
+
+    $package = Get-Content -LiteralPath (Join-Path $SourceRoot 'package.json') -Raw | ConvertFrom-Json
     Add-Type -AssemblyName System.Web.Extensions
     $serializer = New-Object System.Web.Script.Serialization.JavaScriptSerializer
     $serializer.MaxJsonLength = [int]::MaxValue
     $lock = $serializer.DeserializeObject(
-        (Get-Content -LiteralPath (Join-Path $repositoryRoot 'package-lock.json') -Raw)
+        (Get-Content -LiteralPath (Join-Path $SourceRoot 'package-lock.json') -Raw)
     )
-    $tauri = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json
-    $cargo = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src-tauri/Cargo.toml') -Raw
+    $tauri = Get-Content -LiteralPath (Join-Path $SourceRoot 'src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json
+    $cargo = Get-Content -LiteralPath (Join-Path $SourceRoot 'src-tauri/Cargo.toml') -Raw
     $cargoVersionMatch = [regex]::Match($cargo, '(?ms)^\[package\]\s.*?^version\s*=\s*"([^"]+)"')
     if (-not $cargoVersionMatch.Success) {
         throw 'Unable to read the package version from src-tauri/Cargo.toml.'
     }
-    $webLauncherCargo = Get-Content -LiteralPath (Join-Path $repositoryRoot 'web-launcher/Cargo.toml') -Raw
+    $webLauncherCargo = Get-Content -LiteralPath (Join-Path $SourceRoot 'web-launcher/Cargo.toml') -Raw
     $webLauncherVersionMatch = [regex]::Match(
         $webLauncherCargo,
         '(?ms)^\[package\]\s.*?^version\s*=\s*"([^"]+)"'
@@ -361,6 +621,7 @@ if ($AllowUnsigned -and ($null -ne $resolvedSigningConfig -or $null -ne $normali
     throw '-AllowUnsigned cannot be combined with signing configuration or an expected signer.'
 }
 if (-not $AllowUnsigned) {
+    Assert-NekoSshCompleteProductionToolchainCoverage
     if ($null -eq $resolvedSigningConfig) {
         throw 'A formal release requires -TauriSigningConfig with a local Tauri signing configuration.'
     }
@@ -371,36 +632,156 @@ if (-not $AllowUnsigned) {
 
 $temporaryNoticesPath = $null
 $temporaryTauriTargetRoot = $null
+$temporarySourceSnapshotRoot = $null
+$temporarySourceGateModulePath = $null
+$temporaryReleaseEnvironmentRoot = $null
+$releaseGitConfigLock = $null
+$sourceLocationPushed = $false
+$previousReleasePath = $env:PATH
+$previousReleaseRustc = $env:RUSTC
+$previousReleaseComspec = [Environment]::GetEnvironmentVariable(
+    'COMSPEC',
+    [EnvironmentVariableTarget]::Process
+)
+$releaseEnvironmentBackup = [Collections.Generic.Dictionary[string, string]]::new(
+    [StringComparer]::OrdinalIgnoreCase
+)
+$injectedEnvironmentName = [regex]::new(
+    '^(?:NEKOSSH_RELEASE_CARGO|NODE_OPTIONS|NODE_PATH|NODE_COMPILE_CACHE|NAPI_RS_NATIVE_LIBRARY_PATH|' +
+    'ELECTRON_RUN_AS_NODE|RUST.*|CARGO_.*|PERL5OPT|PERL5LIB|NPM_.*|GIT_.*|' +
+    'GCM_INTERACTIVE|GH_.*|SSH_AUTH_SOCK|CC|CXX|AR|MAKE|OPENSSL_.*|PKG_CONFIG_.*|CL|_CL_|' +
+    'LINK|LIB|INCLUDE|TAURI_.*|VSLANG|SSL_CERT_FILE|SSL_CERT_DIR|CURL_CA_BUNDLE|' +
+    'HTTPS?_PROXY|ALL_PROXY|NO_PROXY)$',
+    [Text.RegularExpressions.RegexOptions]::IgnoreCase -bor
+        [Text.RegularExpressions.RegexOptions]::CultureInvariant
+)
+$processEnvironment = [Environment]::GetEnvironmentVariables(
+    [EnvironmentVariableTarget]::Process
+)
+foreach ($nameObject in @($processEnvironment.Keys)) {
+    $name = [string]$nameObject
+    if ($injectedEnvironmentName.IsMatch($name)) {
+        $releaseEnvironmentBackup[$name] = [string]$processEnvironment[$nameObject]
+        [Environment]::SetEnvironmentVariable(
+            $name,
+            $null,
+            [EnvironmentVariableTarget]::Process
+        )
+    }
+}
+$lockedCommandDirectories = @(
+    $nodeExecutable,
+    $cargoExecutable,
+    $rustcExecutable,
+    $perlExecutable,
+    $nasmExecutable
+) | ForEach-Object { Split-Path -Parent $_ } | Select-Object -Unique
+$env:PATH = (@($lockedCommandDirectories) + @($previousReleasePath)) -join [IO.Path]::PathSeparator
+$env:RUSTC = $rustcExecutable
+$env:NEKOSSH_RELEASE_CARGO = $cargoExecutable
+$env:VSLANG = '1033'
+$env:GIT_TERMINAL_PROMPT = '0'
+$env:GCM_INTERACTIVE = 'Never'
+$env:GIT_CONFIG_NOSYSTEM = '1'
+$env:GIT_CONFIG_GLOBAL = 'NUL'
+$env:GIT_NO_REPLACE_OBJECTS = '1'
+$env:GIT_NO_LAZY_FETCH = '1'
+[Environment]::SetEnvironmentVariable(
+    'COMSPEC',
+    (Join-Path ([Environment]::SystemDirectory) 'cmd.exe'),
+    [EnvironmentVariableTarget]::Process
+)
+$gitDirectoryPath = Join-Path $repositoryRoot '.git'
+$gitConfigPath = Join-Path $gitDirectoryPath 'config'
+Assert-NotReparsePoint -Paths @($gitDirectoryPath, $gitConfigPath)
+if (
+    -not (Test-Path -LiteralPath $gitDirectoryPath -PathType Container) -or
+    -not (Test-Path -LiteralPath $gitConfigPath -PathType Leaf)
+) {
+    throw 'Release packaging requires a regular primary Git worktree with .git/config.'
+}
+[void](Get-SafeTreeEntries -Root $gitDirectoryPath)
+foreach ($forbiddenGitAdministrativePath in @(
+    (Join-Path $gitDirectoryPath 'commondir'),
+    (Join-Path $gitDirectoryPath 'config.worktree'),
+    (Join-Path $gitDirectoryPath 'objects/info/alternates'),
+    (Join-Path $gitDirectoryPath 'objects/info/http-alternates')
+)) {
+    if (Test-Path -LiteralPath $forbiddenGitAdministrativePath) {
+        throw "Release packaging rejects split/external Git administrative data: $forbiddenGitAdministrativePath"
+    }
+}
+$releaseGitConfigLock = [IO.FileStream]::new(
+    $gitConfigPath,
+    [IO.FileMode]::Open,
+    [IO.FileAccess]::Read,
+    [IO.FileShare]::Read
+)
 Push-Location $repositoryRoot
 try {
-    if ($null -ne $resolvedNpmCli) {
-        if (-not (Test-Path -LiteralPath $resolvedNpmCli -PathType Leaf)) {
-            throw "The pinned npm CLI is not a regular file: $resolvedNpmCli"
-        }
-        Assert-NotReparsePoint -Paths @($resolvedNpmCli)
-    }
-
-    $branch = Get-CheckedOutput -FilePath 'git' -ArgumentList @('branch', '--show-current')
-    if ($branch -ne 'main') {
-        throw "Manual releases must be built from main, not '$branch'."
-    }
-    if (Get-CheckedOutput -FilePath 'git' -ArgumentList @('status', '--porcelain', '--untracked-files=all')) {
-        throw 'Manual releases require a clean working tree.'
-    }
-
+    Assert-NoUnsafeLocalGitConfiguration
     Invoke-OriginFetchChecked
-    $commit = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'HEAD')
-    $originCommit = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'origin/main')
-    if ($commit -ne $originCommit) {
-        throw "HEAD ($commit) must exactly match origin/main ($originCommit) before packaging."
-    }
+    New-Item -ItemType Directory -Path $generatedOutputRoot -Force | Out-Null
+    Assert-PathHasNoReparsePoints -Path $generatedOutputRoot -TrustedRoot $repositoryRoot
+    $temporaryReleaseEnvironmentRoot = [IO.Path]::GetFullPath(
+        (Join-Path $generatedOutputRoot ".release-environment-$PID-$([guid]::NewGuid().ToString('N'))")
+    )
+    New-Item -ItemType Directory -Path $temporaryReleaseEnvironmentRoot | Out-Null
+    Assert-PathHasNoReparsePoints `
+        -Path $temporaryReleaseEnvironmentRoot `
+        -TrustedRoot $repositoryRoot
+    $isolatedCargoHome = Join-Path $temporaryReleaseEnvironmentRoot 'cargo-home'
+    $isolatedNpmCache = Join-Path $temporaryReleaseEnvironmentRoot 'npm-cache'
+    New-Item -ItemType Directory -Path $isolatedCargoHome, $isolatedNpmCache | Out-Null
+    $isolatedNpmUserConfig = Join-Path $temporaryReleaseEnvironmentRoot 'npm-user.ini'
+    $isolatedNpmGlobalConfig = Join-Path $temporaryReleaseEnvironmentRoot 'npm-global.ini'
+    [IO.File]::WriteAllText($isolatedNpmUserConfig, '', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($isolatedNpmGlobalConfig, '', [Text.UTF8Encoding]::new($false))
+    $env:CARGO_HOME = $isolatedCargoHome
+    $env:CARGO_INCREMENTAL = '0'
+    $env:CARGO_REGISTRIES_CRATES_IO_PROTOCOL = 'sparse'
+    $env:NPM_CONFIG_USERCONFIG = $isolatedNpmUserConfig
+    $env:NPM_CONFIG_GLOBALCONFIG = $isolatedNpmGlobalConfig
+    $env:NPM_CONFIG_CACHE = $isolatedNpmCache
+    $env:NPM_CONFIG_IGNORE_SCRIPTS = 'true'
+    $env:NPM_CONFIG_AUDIT = 'false'
+    $env:NPM_CONFIG_FUND = 'false'
+    $env:NPM_CONFIG_UPDATE_NOTIFIER = 'false'
+    $env:NPM_CONFIG_REGISTRY = 'https://registry.npmjs.org/'
+    $temporarySourceGateModulePath = Join-Path $generatedOutputRoot (
+        ".git-source-integrity-$PID-$([guid]::NewGuid().ToString('N')).psm1"
+    )
+    Export-CheckedGitHeadBlob `
+        -GitExecutable $gitExecutable `
+        -TrackedPath 'scripts/git-source-integrity.psm1' `
+        -Destination $temporarySourceGateModulePath
+    Import-Module -Name $temporarySourceGateModulePath -Force -ErrorAction Stop
+    $sourceIdentity = Assert-NekoSshGitSourceIntegrity `
+        -RepositoryRoot $repositoryRoot `
+        -GitExecutable $gitExecutable
+    $commit = [string]$sourceIdentity.Commit
+    $shortCommit = $commit.Substring(0, 12)
+    $temporarySourceSnapshotRoot = [IO.Path]::GetFullPath(
+        (Join-Path $generatedOutputRoot ".source-snapshot-$PID-$([guid]::NewGuid().ToString('N'))")
+    )
+    $sourceSnapshot = New-NekoSshGitSourceSnapshot `
+        -RepositoryRoot $repositoryRoot `
+        -DestinationRoot $temporarySourceSnapshotRoot `
+        -TrustedParent $generatedOutputRoot `
+        -Identity $sourceIdentity `
+        -GitExecutable $gitExecutable `
+        -ReadOnlyTrackedFiles
+    Push-Location $sourceSnapshot.Path
+    $sourceLocationPushed = $true
+    $sourceScriptsRoot = Join-Path $sourceSnapshot.Path 'scripts'
+    $signingPolicyPath = Join-Path $sourceSnapshot.Path 'release-signing-policy.json'
+    $signingPolicyModulePath = Join-Path $sourceScriptsRoot 'release-signing-policy.psm1'
 
-    $version = Get-PackageVersion
+    $version = Get-PackageVersion -SourceRoot $sourceSnapshot.Path
     if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[A-Za-z-][0-9A-Za-z-]*))*))?$') {
         throw "Release version is not an allowed SemVer value: '$version'."
     }
     $versionHasPrereleaseSuffix = $version.Contains('-')
-    $shortCommit = $commit.Substring(0, 12)
     Import-Module -Name $signingPolicyModulePath -Force
     $signingPolicy = Import-ReleaseSigningPolicy -Path $signingPolicyPath
     $policySigner = if ($AllowUnsigned) {
@@ -440,11 +821,11 @@ try {
     }
     $requiredRust = $rustMatch.Groups[1].Value
 
-    $actualNode = (Get-CheckedOutput -FilePath 'node' -ArgumentList @('--version')).TrimStart('v')
+    $actualNode = (Get-CheckedOutput -FilePath $nodeExecutable -ArgumentList @('--version')).TrimStart('v')
     $actualNpm = Get-NpmCheckedOutput -ArgumentList @('--version')
-    $actualRust = Get-CheckedOutput -FilePath 'rustc' -ArgumentList @('--version')
-    $actualRustVerbose = Get-CheckedOutput -FilePath 'rustc' -ArgumentList @('-vV')
-    $actualCargo = Get-CheckedOutput -FilePath 'cargo' -ArgumentList @('--version')
+    $actualRust = Get-CheckedOutput -FilePath $rustcExecutable -ArgumentList @('--version')
+    $actualRustVerbose = Get-CheckedOutput -FilePath $rustcExecutable -ArgumentList @('-vV')
+    $actualCargo = Get-CheckedOutput -FilePath $cargoExecutable -ArgumentList @('--version')
     if ($actualNode -ne $requiredNode) { throw "Node.js $requiredNode is required; found $actualNode." }
     if ($actualNpm -ne $requiredNpm) { throw "npm $requiredNpm is required; found $actualNpm." }
     if ($actualRust -notmatch "^rustc $([regex]::Escape($requiredRust)) ") {
@@ -457,11 +838,7 @@ try {
         throw "The Windows x64 MSVC Rust host is required.`n$actualRustVerbose"
     }
 
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-    if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
-        throw 'Visual Studio Installer vswhere.exe was not found.'
-    }
-    $visualStudioPath = Get-CheckedOutput -FilePath $vswhere -ArgumentList @(
+    $visualStudioPath = Get-CheckedOutput -FilePath $vswhereExecutable -ArgumentList @(
         '-latest',
         '-products',
         '*',
@@ -473,38 +850,41 @@ try {
     if ([string]::IsNullOrWhiteSpace($visualStudioPath)) {
         throw 'Visual Studio C++ x64 Build Tools are required.'
     }
-    $windowsSdkBinRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10/bin'
-    $signTool = @(
-        Get-ChildItem -Path (Join-Path $windowsSdkBinRoot '*/x64/signtool.exe') -File -ErrorAction SilentlyContinue |
-            Sort-Object { [version]$_.Directory.Parent.Name } -Descending
-    ) | Select-Object -First 1
-    $signToolPath = if ($null -eq $signTool) { $null } else { $signTool.FullName }
-    if (-not $AllowUnsigned -and $null -eq $signToolPath) {
-        throw 'A formal Windows release requires the x64 Windows SDK SignTool.'
-    }
-
-    Invoke-Checked -FilePath 'perl' -ArgumentList @(
+    Invoke-Checked -FilePath $perlExecutable -ArgumentList @(
         '-MLocale::Maketext::Simple',
         '-e',
         'print qq(Perl modules ready\n)'
     )
-    Invoke-Checked -FilePath 'nasm' -ArgumentList @('-v')
-    $cargoAuditVersion = Get-CheckedOutput -FilePath 'cargo' -ArgumentList @('audit', '--version')
+    Invoke-Checked -FilePath $nasmExecutable -ArgumentList @('-v')
+    $cargoAuditVersion = Get-CheckedOutput -FilePath $cargoAuditExecutable -ArgumentList @('--version')
     if ($cargoAuditVersion -notmatch '\b0\.22\.2\b') {
         throw "cargo-audit 0.22.2 is required; found '$cargoAuditVersion'."
     }
 
+    & (Join-Path $sourceScriptsRoot 'test-git-source-integrity.ps1')
+    & (Join-Path $sourceScriptsRoot 'test-release-manifest-source-security.ps1')
+    & (Join-Path $sourceScriptsRoot 'test-release-toolchain-lock-security.ps1') `
+        -ToolchainLockPath $lockedToolchain.LockPath `
+        -ExpectedToolchainLockSha256 $lockedToolchain.PolicySha256
     Invoke-NpmChecked -ArgumentList @('ci', '--ignore-scripts', '--no-audit', '--no-fund')
-    Invoke-NpmChecked -ArgumentList @('run', 'verify')
+    Invoke-LockedReleaseVerification
     Invoke-NpmChecked -ArgumentList @('audit', '--audit-level=low', '--ignore-scripts')
-    Invoke-Checked -FilePath 'cargo' -ArgumentList @('audit', '--file', 'src-tauri/Cargo.lock')
-    Invoke-Checked -FilePath 'cargo' -ArgumentList @('audit', '--file', 'web-launcher/Cargo.lock')
+    Invoke-Checked -FilePath $cargoAuditExecutable -ArgumentList @(
+        'audit',
+        '--file',
+        'src-tauri/Cargo.lock'
+    )
+    Invoke-Checked -FilePath $cargoAuditExecutable -ArgumentList @(
+        'audit',
+        '--file',
+        'web-launcher/Cargo.lock'
+    )
     New-Item -ItemType Directory -Path $generatedOutputRoot -Force | Out-Null
     Assert-PathHasNoReparsePoints -Path $generatedOutputRoot -TrustedRoot $repositoryRoot
     $temporaryNoticesPath = Join-Path $generatedOutputRoot (
         ".third-party-notices-$PID-$([guid]::NewGuid().ToString('N')).txt"
     )
-    Invoke-Checked -FilePath 'node' -ArgumentList @(
+    Invoke-Checked -FilePath $nodeExecutable -ArgumentList @(
         'scripts/generate-third-party-notices.mjs',
         $temporaryNoticesPath
     )
@@ -538,7 +918,7 @@ try {
     $msiSource = Join-Path $msiDirectory $msiName
 
     foreach ($checkedPath in @(
-        (Join-Path $repositoryRoot 'src-tauri'),
+        (Join-Path $sourceSnapshot.Path 'src-tauri'),
         $tauriTargetRoot,
         $releaseTargetRoot,
         $bundleRoot,
@@ -571,10 +951,9 @@ try {
         }
     }
     $timestampUrlForSigning = $null
-    if ($null -ne $resolvedNpmCli) {
-        $configOverride.build = [ordered]@{
-            beforeBuildCommand = 'node scripts/run-release-frontend-build.mjs'
-        }
+    $quotedLockedNode = '"' + $nodeExecutable.Replace('"', '\"') + '"'
+    $configOverride.build = [ordered]@{
+        beforeBuildCommand = "$quotedLockedNode scripts/run-release-frontend-build.mjs"
     }
     if ($null -ne $resolvedSigningConfig) {
         Assert-NotReparsePoint -Paths @($resolvedSigningConfig)
@@ -674,12 +1053,8 @@ try {
     $previousReleaseNpmCli = $env:NEKOSSH_RELEASE_NPM_CLI
     try {
         $env:CARGO_TARGET_DIR = $tauriTargetRoot
-        if ($null -ne $resolvedNpmCli) {
-            $env:NEKOSSH_RELEASE_NPM_CLI = $resolvedNpmCli
-        } else {
-            Remove-Item Env:NEKOSSH_RELEASE_NPM_CLI -ErrorAction SilentlyContinue
-        }
-        Invoke-Checked -FilePath 'node' -ArgumentList $tauriArguments
+        $env:NEKOSSH_RELEASE_NPM_CLI = $npmCliExecutable
+        Invoke-Checked -FilePath $nodeExecutable -ArgumentList $tauriArguments
     }
     finally {
         if ($null -eq $previousCargoTargetDirectory) {
@@ -753,18 +1128,15 @@ try {
         throw "MSI identity does not match the pinned Windows product policy. Expected=$expectedJson Actual=$actualJson Path=$msiSource"
     }
 
-    if (Get-CheckedOutput -FilePath 'git' -ArgumentList @('status', '--porcelain', '--untracked-files=all')) {
-        throw 'The build changed the working tree; refusing to attribute artifacts to the original commit.'
-    }
-    $postBuildCommit = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'HEAD')
-    if ($postBuildCommit -ne $commit) {
-        throw "HEAD changed during the build ($commit -> $postBuildCommit)."
-    }
     Invoke-OriginFetchChecked
-    $postBuildOriginCommit = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'origin/main')
-    if ($postBuildOriginCommit -ne $commit) {
-        throw "origin/main changed during the build ($commit -> $postBuildOriginCommit)."
-    }
+    [void](Assert-NekoSshGitSourceIntegrity `
+        -RepositoryRoot $repositoryRoot `
+        -GitExecutable $gitExecutable `
+        -Expected $sourceIdentity)
+    [void](Assert-NekoSshGitSourceSnapshotIntegrity `
+        -RepositoryRoot $repositoryRoot `
+        -GitExecutable $gitExecutable `
+        -Snapshot $sourceSnapshot)
 
     $signatureResults = foreach ($artifact in @($appExecutable, $nsisSource, $msiSource)) {
         $signature = Get-AuthenticodeSignature -LiteralPath $artifact
@@ -864,7 +1236,12 @@ try {
             Version = $version
             Commit = $commit
             ThirdPartyNoticesPath = $temporaryNoticesPath
-            NodeExecutable = (Get-Command node -ErrorAction Stop).Source
+            NodeExecutable = $nodeExecutable
+            CargoExecutable = $cargoExecutable
+            RustcExecutable = $rustcExecutable
+            GitExecutable = $gitExecutable
+            SourceRoot = $sourceSnapshot.Path
+            WorkspaceRoot = $repositoryRoot
         }
         if ($isUnsigned) {
             $webBuildArguments.AllowUnsigned = $true
@@ -875,7 +1252,7 @@ try {
             $webBuildArguments.ExpectedSignerSpkiSha256 = $policySigner.SpkiSha256
             $webBuildArguments.TimestampUrl = $timestampUrlForSigning
         }
-        & (Join-Path $PSScriptRoot 'build-windows-web-portable.ps1') @webBuildArguments
+        & (Join-Path $sourceScriptsRoot 'build-windows-web-portable.ps1') @webBuildArguments
         $webVerifyArguments = @{
             ArchivePath = $webPortableDestination
             ExpectedVersion = $version
@@ -889,7 +1266,7 @@ try {
             $webVerifyArguments.ExpectedProjectSignerSpkiSha256 = $policySigner.SpkiSha256
         }
         $webVerification = (
-            & (Join-Path $PSScriptRoot 'verify-windows-web-portable.ps1') @webVerifyArguments |
+            & (Join-Path $sourceScriptsRoot 'verify-windows-web-portable.ps1') @webVerifyArguments |
                 Out-String
         ).Trim() | ConvertFrom-Json
         $expectedWebSelfTest = if ($isUnsigned) { 'skipped-unsigned' } else { 'passed' }
@@ -958,24 +1335,37 @@ $releaseType
 
         $checksumFile = Get-Item -LiteralPath $checksumPath
         $releaseNotesFile = Get-Item -LiteralPath $releaseNotesPath
+        Invoke-OriginFetchChecked
+        $postPackagingIdentity = Assert-NekoSshGitSourceIntegrity `
+            -RepositoryRoot $repositoryRoot `
+            -GitExecutable $gitExecutable `
+            -Expected $sourceIdentity
+        [void](Assert-NekoSshGitSourceSnapshotIntegrity `
+            -RepositoryRoot $repositoryRoot `
+            -GitExecutable $gitExecutable `
+            -Snapshot $sourceSnapshot)
+        $toolchainManifestIdentity = Get-NekoSshReleaseToolchainManifestIdentity `
+            -Toolchain $lockedToolchain
+
         $manifest = [ordered]@{
-            schemaVersion = 3
+            schemaVersion = 4
             repository = 'neko233-com/nekossh'
             version = $version
             tag = "v$version"
             commit = $commit
             shortCommit = $shortCommit
+            source = [ordered]@{
+                branch = [string]$postPackagingIdentity.Branch
+                commit = [string]$postPackagingIdentity.Commit
+                tree = [string]$postPackagingIdentity.Tree
+                snapshotSha256 = [string]$postPackagingIdentity.SnapshotSha256
+                digestFormat = [string]$postPackagingIdentity.DigestFormat
+                trackedFileCount = [int]$postPackagingIdentity.TrackedFileCount
+            }
             prerelease = [bool]$isPrerelease
             publishable = [bool]$isPublishable
             generatedAtUtc = [DateTime]::UtcNow.ToString('o')
-            toolchain = [ordered]@{
-                node = $actualNode
-                npm = $actualNpm
-                rustc = $actualRust
-                cargo = $actualCargo
-                cargoAudit = $cargoAuditVersion
-                target = 'x86_64-pc-windows-msvc'
-            }
+            toolchain = $toolchainManifestIdentity
             signing = [ordered]@{
                 mode = if ($isUnsigned) { 'unsigned-test' } else { 'authenticode' }
                 expectedSignerThumbprint = if ($isUnsigned) { $null } else { $normalizedExpectedSigner }
@@ -1035,19 +1425,104 @@ $releaseType
 }
 finally {
     try {
-        if ($null -ne $temporaryTauriTargetRoot -and (Test-Path -LiteralPath $temporaryTauriTargetRoot)) {
-            Remove-SafeBuildTree -Path $temporaryTauriTargetRoot
+        if ($sourceLocationPushed) {
+            Pop-Location
+            $sourceLocationPushed = $false
         }
-        if ($null -ne $temporaryNoticesPath -and (Test-Path -LiteralPath $temporaryNoticesPath)) {
-            $fullNoticesPath = [IO.Path]::GetFullPath($temporaryNoticesPath)
-            if (-not (Test-ChildPath -Path $fullNoticesPath -Parent $generatedOutputRoot)) {
-                throw "Refusing to clean notices outside output/: $fullNoticesPath"
+        try {
+            if ($null -ne $temporaryTauriTargetRoot -and (Test-Path -LiteralPath $temporaryTauriTargetRoot)) {
+                Remove-SafeBuildTree -Path $temporaryTauriTargetRoot
             }
-            Assert-NotReparsePoint -Paths @($fullNoticesPath)
-            Remove-Item -LiteralPath $fullNoticesPath -Force
+        }
+        finally {
+            try {
+                if ($null -ne $temporaryNoticesPath -and (Test-Path -LiteralPath $temporaryNoticesPath)) {
+                    $fullNoticesPath = [IO.Path]::GetFullPath($temporaryNoticesPath)
+                    if (-not (Test-ChildPath -Path $fullNoticesPath -Parent $generatedOutputRoot)) {
+                        throw "Refusing to clean notices outside output/: $fullNoticesPath"
+                    }
+                    Assert-NotReparsePoint -Paths @($fullNoticesPath)
+                    Remove-Item -LiteralPath $fullNoticesPath -Force
+                }
+            }
+            finally {
+                try {
+                    if (
+                        $null -ne $temporarySourceSnapshotRoot -and
+                        (Test-Path -LiteralPath $temporarySourceSnapshotRoot)
+                    ) {
+                        Remove-SafeBuildTree -Path $temporarySourceSnapshotRoot
+                    }
+                }
+                finally {
+                    if (
+                        $null -ne $temporarySourceGateModulePath -and
+                        (Test-Path -LiteralPath $temporarySourceGateModulePath)
+                    ) {
+                        $fullGateModulePath = [IO.Path]::GetFullPath($temporarySourceGateModulePath)
+                        if (-not (Test-ChildPath -Path $fullGateModulePath -Parent $generatedOutputRoot)) {
+                            throw "Refusing to clean a source gate outside output/: $fullGateModulePath"
+                        }
+                        Assert-NotReparsePoint -Paths @($fullGateModulePath)
+                        Remove-Item -LiteralPath $fullGateModulePath -Force
+                    }
+                }
+            }
         }
     }
     finally {
-        Pop-Location
+        try {
+            if (
+                $null -ne $temporaryReleaseEnvironmentRoot -and
+                (Test-Path -LiteralPath $temporaryReleaseEnvironmentRoot)
+            ) {
+                Remove-SafeBuildTree -Path $temporaryReleaseEnvironmentRoot
+            }
+        }
+        finally {
+            try {
+                if ($null -ne $releaseGitConfigLock) {
+                    $releaseGitConfigLock.Dispose()
+                    $releaseGitConfigLock = $null
+                }
+                Pop-Location
+            }
+            finally {
+                $currentEnvironment = [Environment]::GetEnvironmentVariables(
+                    [EnvironmentVariableTarget]::Process
+                )
+                foreach ($nameObject in @($currentEnvironment.Keys)) {
+                    $name = [string]$nameObject
+                    if (
+                        $injectedEnvironmentName.IsMatch($name) -or
+                        $name -ceq 'NEKOSSH_RELEASE_CARGO'
+                    ) {
+                        [Environment]::SetEnvironmentVariable(
+                            $name,
+                            $null,
+                            [EnvironmentVariableTarget]::Process
+                        )
+                    }
+                }
+                foreach ($entry in $releaseEnvironmentBackup.GetEnumerator()) {
+                    [Environment]::SetEnvironmentVariable(
+                        $entry.Key,
+                        $entry.Value,
+                        [EnvironmentVariableTarget]::Process
+                    )
+                }
+                [Environment]::SetEnvironmentVariable(
+                    'COMSPEC',
+                    $previousReleaseComspec,
+                    [EnvironmentVariableTarget]::Process
+                )
+                $env:PATH = $previousReleasePath
+                if ($null -eq $previousReleaseRustc) {
+                    Remove-Item Env:RUSTC -ErrorAction SilentlyContinue
+                } else {
+                    $env:RUSTC = $previousReleaseRustc
+                }
+            }
+        }
     }
 }

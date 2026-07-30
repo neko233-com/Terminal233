@@ -49,7 +49,6 @@ impl Drop for StoredSecret {
 
 #[derive(Clone, Debug)]
 pub enum StoredAuthentication {
-    Agent,
     Password {
         password: StoredSecret,
     },
@@ -62,7 +61,6 @@ pub enum StoredAuthentication {
 impl StoredAuthentication {
     fn from_input(input: ProfileAuthenticationInput) -> Result<Self> {
         match input {
-            ProfileAuthenticationInput::Agent => Ok(Self::Agent),
             ProfileAuthenticationInput::Password { password } => {
                 validate_secret(&password, "password cannot be empty")?;
                 Ok(Self::Password {
@@ -89,7 +87,6 @@ impl StoredAuthentication {
 #[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProfileAuthenticationInput {
-    Agent,
     Password {
         password: String,
     },
@@ -103,7 +100,6 @@ pub enum ProfileAuthenticationInput {
 impl fmt::Debug for ProfileAuthenticationInput {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Agent => formatter.write_str("ProfileAuthenticationInput::Agent"),
             Self::Password { .. } => {
                 formatter.write_str("ProfileAuthenticationInput::Password([REDACTED])")
             }
@@ -433,6 +429,24 @@ mod tests {
             profile.authentication,
             StoredAuthentication::Password { .. }
         ));
+    }
+
+    #[test]
+    fn profile_json_rejects_process_external_ssh_agent_authentication() {
+        let error = serde_json::from_value::<SshProfileInput>(serde_json::json!({
+            "label": "test",
+            "host": "example.test",
+            "port": 22,
+            "username": "root",
+            "authentication": { "kind": "agent" },
+            "tags": [],
+            "terminal": { "columns": 120, "rows": 32, "command": null }
+        }))
+        .expect_err("SSH Agent must not cross the native IPC boundary");
+        assert!(
+            error.to_string().contains("unknown variant `agent`"),
+            "{error}"
+        );
     }
 
     #[test]

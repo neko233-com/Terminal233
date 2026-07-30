@@ -18,7 +18,6 @@ export interface IdeConnectionInput {
   username: string
   authentication:
     | { kind: 'password'; password: string }
-    | { kind: 'agent' }
     | { kind: 'private_key'; privateKeyPem: string; passphrase: string | null }
   tags: string[]
   terminal: { columns: number; rows: number; command: string | null }

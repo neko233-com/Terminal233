@@ -11,6 +11,7 @@
     "tag",
     "commit",
     "shortCommit",
+    "source",
     "prerelease",
     "publishable",
     "generatedAtUtc",
@@ -25,7 +26,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 3
+      "const": 4
     },
     "repository": {
       "const": "neko233-com/nekossh"
@@ -46,6 +47,39 @@
       "type": "string",
       "pattern": "^[0-9a-f]{12}$"
     },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch",
+        "commit",
+        "tree",
+        "snapshotSha256",
+        "digestFormat",
+        "trackedFileCount"
+      ],
+      "properties": {
+        "branch": { "const": "main" },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "tree": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "snapshotSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "digestFormat": { "const": "git-raw-blobs-sha256-v1" },
+        "trackedFileCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        }
+      }
+    },
     "prerelease": {
       "type": "boolean"
     },
@@ -60,14 +94,88 @@
     "toolchain": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["node", "npm", "rustc", "cargo", "cargoAudit", "target"],
+      "required": ["policySha256", "platform", "target", "tools"],
       "properties": {
-        "node": { "type": "string", "minLength": 1 },
-        "npm": { "type": "string", "minLength": 1 },
-        "rustc": { "type": "string", "minLength": 1 },
-        "cargo": { "type": "string", "minLength": 1 },
-        "cargoAudit": { "type": "string", "minLength": 1 },
-        "target": { "const": "x86_64-pc-windows-msvc" }
+        "policySha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "platform": { "const": "windows-x64" },
+        "target": { "const": "x86_64-pc-windows-msvc" },
+        "tools": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "length", "sha256", "version", "signature"],
+            "properties": {
+              "name": {
+                "enum": [
+                  "powershell",
+                  "git",
+                  "gh",
+                  "node",
+                  "npm",
+                  "rustc",
+                  "cargo",
+                  "cargoAudit",
+                  "perl",
+                  "nasm",
+                  "vswhere",
+                  "signtool"
+                ]
+              },
+              "length": { "type": "integer", "minimum": 1 },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "pattern": "^[^\\r\\n]+$"
+              },
+              "signature": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["status", "subject", "thumbprint", "spkiSha256", "timestamped"],
+                    "properties": {
+                      "status": { "const": "NotSigned" },
+                      "subject": { "type": "null" },
+                      "thumbprint": { "type": "null" },
+                      "spkiSha256": { "type": "null" },
+                      "timestamped": { "const": false }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["status", "subject", "thumbprint", "spkiSha256", "timestamped"],
+                    "properties": {
+                      "status": { "const": "Valid" },
+                      "subject": { "type": "string", "minLength": 1, "maxLength": 2048 },
+                      "thumbprint": {
+                        "type": "string",
+                        "pattern": "^[0-9A-F]{40}$"
+                      },
+                      "spkiSha256": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      "timestamped": { "type": "boolean" }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "signing": {

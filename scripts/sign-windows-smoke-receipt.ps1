@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$ReleaseDirectory,
+    [Parameter(Mandatory)][string]$ToolchainLockPath,
+    [Parameter(Mandatory)][string]$ExpectedToolchainLockSha256,
     [Parameter(Mandatory)][string]$SignerThumbprint,
     [Parameter(Mandatory)][string]$TimestampUrl,
     [Parameter(Mandatory)][string]$ExpectedValidationNonce,
@@ -12,9 +14,20 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$toolchainLockModulePath = Join-Path $PSScriptRoot 'release-toolchain-lock.psm1'
+Import-Module -Name $toolchainLockModulePath -Force -ErrorAction Stop
+$lockedToolchain = Import-NekoSshReleaseToolchainLock `
+    -Path $ToolchainLockPath `
+    -ExpectedSha256 $ExpectedToolchainLockSha256
+Assert-NekoSshToolchainLockOutsideRepository `
+    -LockPath $lockedToolchain.LockPath `
+    -RepositoryRoot $repositoryRoot
+$gitExecutable = [string]$lockedToolchain.Tools.git.Path
+Assert-NekoSshCompleteProductionToolchainCoverage
 $policyPath = Join-Path $repositoryRoot 'release-signing-policy.json'
 $policySchemaPath = Join-Path $repositoryRoot 'release-signing-policy.schema.json'
 $policyModulePath = Join-Path $PSScriptRoot 'release-signing-policy.psm1'
+$sourceIntegrityModulePath = Join-Path $PSScriptRoot 'git-source-integrity.psm1'
 $signingScriptPath = $PSCommandPath
 $validationScriptPath = Join-Path $PSScriptRoot 'test-windows-release-installers.ps1'
 $webVerifierPath = Join-Path $PSScriptRoot 'verify-windows-web-portable.ps1'
@@ -586,32 +599,6 @@ function Remove-PrivateSigningDirectory {
     [IO.Directory]::Delete($Path, $false)
 }
 
-function Get-ResolvedGitExecutable {
-    $commands = @(
-        Get-Command -Name git.exe -CommandType Application -ErrorAction Stop
-    )
-    if ($commands.Count -eq 0) {
-        throw 'A Git application executable is required.'
-    }
-    $gitPath = [IO.Path]::GetFullPath([string]$commands[0].Source)
-    if ($gitPath.StartsWith('\\', [StringComparison]::Ordinal)) {
-        throw 'The Git executable must be installed on a local Windows volume.'
-    }
-    Assert-RegularFile -Path $gitPath
-    Assert-PathHasNoReparsePoints `
-        -Path $gitPath `
-        -TrustedRoot ([IO.Path]::GetPathRoot($gitPath))
-    $gitSignature = Get-AuthenticodeSignature -LiteralPath $gitPath
-    if (
-        $gitSignature.Status.ToString() -cne 'Valid' -or
-        $null -eq $gitSignature.SignerCertificate -or
-        $null -eq $gitSignature.TimeStamperCertificate
-    ) {
-        throw 'The Git executable must have a valid, trusted, timestamped Authenticode signature.'
-    }
-    return $gitPath
-}
-
 function Get-CheckedGitOutput {
     param([Parameter(Mandatory)][string[]]$ArgumentList)
 
@@ -930,6 +917,26 @@ function Assert-ReceiptData {
     }
 }
 
+function Resolve-AuthenticodeTimestampUri {
+    param([Parameter(Mandatory)][string]$Value)
+
+    $uri = $null
+    if (
+        -not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri) -or
+        $uri.Scheme -cne 'http' -or
+        [string]::IsNullOrWhiteSpace($uri.Host) -or
+        -not [string]::IsNullOrWhiteSpace($uri.UserInfo) -or
+        -not [string]::IsNullOrWhiteSpace($uri.Fragment)
+    ) {
+        throw (
+            'TimestampUrl must be an absolute HTTP Authenticode timestamp URI with a host, ' +
+            'without user information or a fragment. Set-AuthenticodeSignature cannot use ' +
+            'an HTTPS timestamp endpoint.'
+        )
+    }
+    return $uri
+}
+
 if ($env:OS -ne 'Windows_NT') {
     throw 'Windows smoke receipt signing requires Windows Authenticode support.'
 }
@@ -939,19 +946,14 @@ if ($ExpectedValidationNonce -cnotmatch '^[0-9a-f]{64}$') {
 if ($ExpectedCleanVmImageId -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._:/@+-]{7,127}$') {
     throw 'ExpectedCleanVmImageId must contain 8-128 safe image-identity characters.'
 }
-$timestampUri = $null
-if (
-    -not [Uri]::TryCreate($TimestampUrl, [UriKind]::Absolute, [ref]$timestampUri) -or
-    $timestampUri.Scheme -notin @('http', 'https') -or
-    -not [string]::IsNullOrWhiteSpace($timestampUri.UserInfo)
-) {
-    throw 'TimestampUrl must be an absolute HTTP or HTTPS URI without user information.'
-}
+$timestampUri = Resolve-AuthenticodeTimestampUri -Value $TimestampUrl
 
 foreach ($path in @(
     $policyPath,
     $policySchemaPath,
     $policyModulePath,
+    $toolchainLockModulePath,
+    $sourceIntegrityModulePath,
     $signingScriptPath,
     $validationScriptPath,
     $webVerifierPath
@@ -959,7 +961,6 @@ foreach ($path in @(
     Assert-RegularFile -Path $path
     Assert-PathHasNoReparsePoints -Path $path -TrustedRoot $repositoryRoot
 }
-$gitExecutable = Get-ResolvedGitExecutable
 $canonicalSignerThumbprint = $SignerThumbprint.ToUpperInvariant()
 if ($canonicalSignerThumbprint -cnotmatch '^[0-9A-F]{40}$') {
     throw 'SignerThumbprint must be exactly 40 hexadecimal characters.'
@@ -981,7 +982,10 @@ $trackedInputs = @(
     'release-signing-policy.json',
     'release-signing-policy.schema.json',
     'release-manifest.schema.json',
+    'release-toolchain-lock.schema.json',
+    'scripts/git-source-integrity.psm1',
     'scripts/release-signing-policy.psm1',
+    'scripts/release-toolchain-lock.psm1',
     'scripts/sign-windows-smoke-receipt.ps1',
     'scripts/test-windows-release-installers.ps1',
     'scripts/verify-windows-web-portable.ps1'
@@ -993,11 +997,11 @@ if (
     throw "Git origin does not match $expectedRepository."
 }
 Invoke-CheckedGit -ArgumentList @('fetch', '--quiet', 'origin', 'main')
-$headCommit = Get-CheckedGitOutput -ArgumentList @('rev-parse', 'HEAD')
-$originCommit = Get-CheckedGitOutput -ArgumentList @('rev-parse', 'refs/remotes/origin/main')
-if ($headCommit -cne $originCommit) {
-    throw "Local main ($headCommit) does not exactly match origin/main ($originCommit)."
-}
+Import-Module $sourceIntegrityModulePath -Force -ErrorAction Stop
+$sourceIdentity = Assert-NekoSshGitSourceIntegrity `
+    -RepositoryRoot $repositoryRoot `
+    -GitExecutable $gitExecutable
+$headCommit = [string]$sourceIdentity.Commit
 Assert-TrackedInputsMatchHead -Paths $trackedInputs
 $worktreeStatus = Get-CheckedGitOutput -ArgumentList @(
     'status',
@@ -1056,9 +1060,12 @@ if (
 }
 
 $manifest = Import-NekoSshReleaseManifest -Path $manifestPath
+[void](Assert-NekoSshReleaseManifestToolchainIdentity `
+    -ManifestToolchain $manifest.toolchain `
+    -Toolchain $lockedToolchain)
 if (
     -not ($manifest.schemaVersion -is [int] -or $manifest.schemaVersion -is [long]) -or
-    [long]$manifest.schemaVersion -ne 3 -or
+    [long]$manifest.schemaVersion -ne 4 -or
     [string]$manifest.repository -cne $expectedRepository -or
     $manifest.prerelease -isnot [bool] -or
     $manifest.prerelease -ne $false -or
@@ -1069,7 +1076,17 @@ if (
     [string]$manifest.version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' -or
     [string]$manifest.tag -cne "v$($manifest.version)"
 ) {
-    throw 'The release manifest is not a publishable stable schema-v3 release for the checked-out commit.'
+    throw 'The release manifest is not a publishable stable schema-v4 release for the checked-out commit.'
+}
+if (
+    [string]$manifest.source.branch -cne [string]$sourceIdentity.Branch -or
+    [string]$manifest.source.commit -cne [string]$sourceIdentity.Commit -or
+    [string]$manifest.source.tree -cne [string]$sourceIdentity.Tree -or
+    [string]$manifest.source.snapshotSha256 -cne [string]$sourceIdentity.SnapshotSha256 -or
+    [string]$manifest.source.digestFormat -cne [string]$sourceIdentity.DigestFormat -or
+    [int]$manifest.source.trackedFileCount -ne [int]$sourceIdentity.TrackedFileCount
+) {
+    throw 'Release manifest source identity does not match the complete checked-out Git source snapshot.'
 }
 $version = [string]$manifest.version
 $shortCommit = $headCommit.Substring(0, 12)
@@ -1334,6 +1351,12 @@ try {
     Assert-PrivateSigningDirectory `
         -Path $privateSigningDirectory `
         -AllowedSids $privateSigningSids
+    # PowerShell script signatures use the platform Authenticode timestamp API rather than
+    # SignTool's RFC 3161 mode. The signed timestamp response remains cryptographically bound
+    # to this exact receipt; the distributed PE/MSI assets use SignTool /tr /td SHA256.
+    [void](Assert-NekoSshReleaseManifestToolchainIdentity `
+        -ManifestToolchain $manifest.toolchain `
+        -Toolchain $lockedToolchain)
     $signedTemporaryReceipt = Set-AuthenticodeSignature `
         -FilePath $protectedSigningReceiptPath `
         -Certificate $certificate `

@@ -6,6 +6,11 @@ param(
     [Parameter(Mandatory)][string]$Commit,
     [Parameter(Mandatory)][string]$ThirdPartyNoticesPath,
     [Parameter(Mandatory)][string]$NodeExecutable,
+    [Parameter(Mandatory)][string]$CargoExecutable,
+    [Parameter(Mandatory)][string]$RustcExecutable,
+    [Parameter(Mandatory)][string]$GitExecutable,
+    [string]$SourceRoot,
+    [string]$WorkspaceRoot,
     [string]$SignToolPath,
     [string]$ExpectedSignerThumbprint,
     [string]$ExpectedSignerSubject,
@@ -18,13 +23,26 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$defaultSourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$repositoryRoot = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+    $defaultSourceRoot
+} else {
+    (Resolve-Path -LiteralPath $WorkspaceRoot).Path
+}
+$resolvedSourceRoot = if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
+    $defaultSourceRoot
+} else {
+    (Resolve-Path -LiteralPath $SourceRoot).Path
+}
 $outputRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'output'))
 $resolvedWorkRoot = [IO.Path]::GetFullPath($WorkRoot)
 $launcherTargetRoot = [IO.Path]::GetFullPath("$resolvedWorkRoot-cargo")
 $resolvedArchive = [IO.Path]::GetFullPath($ArchivePath)
 $resolvedNotices = (Resolve-Path -LiteralPath $ThirdPartyNoticesPath).Path
 $resolvedNode = (Resolve-Path -LiteralPath $NodeExecutable).Path
+$resolvedCargo = (Resolve-Path -LiteralPath $CargoExecutable).Path
+$resolvedRustc = (Resolve-Path -LiteralPath $RustcExecutable).Path
+$resolvedGit = (Resolve-Path -LiteralPath $GitExecutable).Path
 $normalizedSigner = if ([string]::IsNullOrWhiteSpace($ExpectedSignerThumbprint)) {
     $null
 } else {
@@ -264,6 +282,17 @@ function New-DeterministicZip {
     }
 }
 
+if (
+    -not [string]::Equals(
+        $resolvedSourceRoot,
+        $repositoryRoot,
+        [StringComparison]::OrdinalIgnoreCase
+    ) -and
+    -not (Test-ChildPath -Path $resolvedSourceRoot -Parent $repositoryRoot)
+) {
+    throw 'The Web portable source root must stay inside the verified repository.'
+}
+Assert-PathHasNoReparsePoints -Path $resolvedSourceRoot -TrustedRoot $repositoryRoot
 if (-not (Test-ChildPath -Path $resolvedWorkRoot -Parent $outputRoot)) {
     throw 'The Web portable work root must stay below output/.'
 }
@@ -300,6 +329,9 @@ if (-not (Test-Path -LiteralPath $archiveParent -PathType Container)) {
 }
 Assert-RegularFile -Path $resolvedNotices
 Assert-RegularFile -Path $resolvedNode
+Assert-RegularFile -Path $resolvedCargo
+Assert-RegularFile -Path $resolvedRustc
+Assert-RegularFile -Path $resolvedGit
 if ((Get-FileHash -LiteralPath $resolvedNode -Algorithm SHA256).Hash.ToLowerInvariant() -ne $officialNodeSha256) {
     throw 'The build Node executable does not match the pinned official Node.js SHA-256.'
 }
@@ -338,11 +370,11 @@ $archiveCompleted = $false
 try {
     New-Item -ItemType Directory -Path $resolvedWorkRoot | Out-Null
     New-Item -ItemType Directory -Path $launcherTargetRoot | Out-Null
-    Copy-PayloadFile -Source (Join-Path $repositoryRoot 'LICENSE') -RelativeDestination 'LICENSE'
+    Copy-PayloadFile -Source (Join-Path $resolvedSourceRoot 'LICENSE') -RelativeDestination 'LICENSE'
     Copy-PayloadFile -Source $resolvedNotices -RelativeDestination 'THIRD_PARTY_NOTICES.txt'
     Copy-PayloadFile -Source $resolvedNode -RelativeDestination 'runtime/node.exe'
     Copy-PayloadFile -Source (Join-Path (Split-Path -Parent $resolvedNode) 'LICENSE') -RelativeDestination 'runtime/LICENSE'
-    Copy-CompleteTree -SourceRoot (Join-Path $repositoryRoot 'dist') -RelativeDestination 'app/dist'
+    Copy-CompleteTree -SourceRoot (Join-Path $resolvedSourceRoot 'dist') -RelativeDestination 'app/dist'
     foreach ($serverFile in @(
         'ssh2js-server.mjs',
         'ssh-algorithms.mjs',
@@ -352,21 +384,21 @@ try {
         'operation-admission.mjs',
         'terminal-admission.mjs'
     )) {
-        Copy-PayloadFile -Source (Join-Path $repositoryRoot "server/$serverFile") -RelativeDestination "app/server/$serverFile"
+        Copy-PayloadFile -Source (Join-Path $resolvedSourceRoot "server/$serverFile") -RelativeDestination "app/server/$serverFile"
     }
 
     foreach ($moduleName in @('ssh2', 'asn1', 'bcrypt-pbkdf', 'safer-buffer', 'tweetnacl')) {
         foreach ($metadataFile in @('package.json', 'LICENSE')) {
             Copy-PayloadFile `
-                -Source (Join-Path $repositoryRoot "node_modules/$moduleName/$metadataFile") `
+                -Source (Join-Path $resolvedSourceRoot "node_modules/$moduleName/$metadataFile") `
                 -RelativeDestination "app/node_modules/$moduleName/$metadataFile"
         }
     }
     Copy-JavaScriptTree `
-        -SourceRoot (Join-Path $repositoryRoot 'node_modules/ssh2/lib') `
+        -SourceRoot (Join-Path $resolvedSourceRoot 'node_modules/ssh2/lib') `
         -RelativeDestination 'app/node_modules/ssh2/lib'
     Copy-JavaScriptTree `
-        -SourceRoot (Join-Path $repositoryRoot 'node_modules/asn1/lib') `
+        -SourceRoot (Join-Path $resolvedSourceRoot 'node_modules/asn1/lib') `
         -RelativeDestination 'app/node_modules/asn1/lib'
     foreach ($moduleFile in @(
         'bcrypt-pbkdf/index.js',
@@ -375,7 +407,7 @@ try {
         'tweetnacl/nacl-fast.js'
     )) {
         Copy-PayloadFile `
-            -Source (Join-Path $repositoryRoot "node_modules/$moduleFile") `
+            -Source (Join-Path $resolvedSourceRoot "node_modules/$moduleFile") `
             -RelativeDestination "app/node_modules/$moduleFile"
     }
     if (Get-ChildItem -LiteralPath $resolvedWorkRoot -Recurse -File |
@@ -408,13 +440,15 @@ try {
 
     $previousPayloadHash = $env:NEKOSSH_WEB_PAYLOAD_SHA256
     $previousCargoTargetDirectory = $env:CARGO_TARGET_DIR
+    $previousRustc = $env:RUSTC
     try {
         $env:NEKOSSH_WEB_PAYLOAD_SHA256 = $payloadManifestHash
         $env:CARGO_TARGET_DIR = $launcherTargetRoot
-        Invoke-Checked -FilePath 'cargo' -ArgumentList @(
+        $env:RUSTC = $resolvedRustc
+        Invoke-Checked -FilePath $resolvedCargo -ArgumentList @(
             'build',
             '--manifest-path',
-            'web-launcher/Cargo.toml',
+            (Join-Path $resolvedSourceRoot 'web-launcher/Cargo.toml'),
             '--locked',
             '--release'
         )
@@ -429,6 +463,11 @@ try {
             Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
         } else {
             $env:CARGO_TARGET_DIR = $previousCargoTargetDirectory
+        }
+        if ($null -eq $previousRustc) {
+            Remove-Item Env:RUSTC -ErrorAction SilentlyContinue
+        } else {
+            $env:RUSTC = $previousRustc
         }
     }
     $builtLauncher = Join-Path $launcherTargetRoot 'release/nekossh-web.exe'
@@ -455,7 +494,10 @@ try {
         Invoke-Checked -FilePath $SignToolPath -ArgumentList @('verify', '/pa', '/all', '/v', $stagedLauncher)
     }
 
-    $commitTimeText = (& git show -s --format=%cI $Commit 2>&1 | Out-String).Trim()
+    $commitTimeText = (
+        & $resolvedGit -C $repositoryRoot show -s --format=%cI $Commit 2>&1 |
+            Out-String
+    ).Trim()
     if ($LASTEXITCODE -ne 0) {
         throw 'Unable to read the release commit timestamp.'
     }
@@ -484,7 +526,9 @@ try {
         $verifyArguments.ExpectedProjectSignerSubject = $ExpectedSignerSubject
         $verifyArguments.ExpectedProjectSignerSpkiSha256 = $ExpectedSignerSpkiSha256
     }
-    $verificationJson = & (Join-Path $PSScriptRoot 'verify-windows-web-portable.ps1') @verifyArguments
+    $verificationJson = & (
+        Join-Path $resolvedSourceRoot 'scripts/verify-windows-web-portable.ps1'
+    ) @verifyArguments
     if ($LASTEXITCODE -ne 0) {
         throw 'Web portable archive verification failed.'
     }

@@ -504,6 +504,7 @@ function Import-NekoSshReleaseManifest {
         'tag',
         'commit',
         'shortCommit',
+        'source',
         'prerelease',
         'publishable',
         'generatedAtUtc',
@@ -527,7 +528,7 @@ function Import-NekoSshReleaseManifest {
         -Context 'Release manifest'
     if (
         -not ($manifest.schemaVersion -is [int] -or $manifest.schemaVersion -is [long]) -or
-        [long]$manifest.schemaVersion -ne 3 -or
+        [long]$manifest.schemaVersion -ne 4 -or
         $manifest.prerelease -isnot [bool] -or
         $manifest.publishable -isnot [bool]
     ) {
@@ -559,7 +560,42 @@ function Import-NekoSshReleaseManifest {
         throw 'Release manifest identity, commit, prerelease, or generatedAtUtc is invalid.'
     }
 
-    $toolchainFields = @('node', 'npm', 'rustc', 'cargo', 'cargoAudit', 'target')
+    $sourceFields = @(
+        'branch',
+        'commit',
+        'tree',
+        'snapshotSha256',
+        'digestFormat',
+        'trackedFileCount'
+    )
+    Assert-ExactJsonFields `
+        -Object $manifest.source `
+        -Allowed $sourceFields `
+        -Required $sourceFields `
+        -Context 'Release manifest source'
+    Assert-ReleaseManifestNonEmptyStringFields `
+        -Object $manifest.source `
+        -Fields @('branch', 'commit', 'tree', 'snapshotSha256', 'digestFormat') `
+        -Context 'Release manifest source'
+    Assert-LowercaseSha256 `
+        -Value $manifest.source.snapshotSha256 `
+        -Context 'Release manifest source.snapshotSha256'
+    if (
+        $manifest.source.branch -cne 'main' -or
+        $manifest.source.commit -cne $manifest.commit -or
+        $manifest.source.tree -cnotmatch '^[0-9a-f]{40}$' -or
+        $manifest.source.digestFormat -cne 'git-raw-blobs-sha256-v1' -or
+        -not (
+            $manifest.source.trackedFileCount -is [int] -or
+            $manifest.source.trackedFileCount -is [long]
+        ) -or
+        [long]$manifest.source.trackedFileCount -lt 1 -or
+        [long]$manifest.source.trackedFileCount -gt 100000
+    ) {
+        throw 'Release manifest source identity, tree, digest format, or file count is invalid.'
+    }
+
+    $toolchainFields = @('policySha256', 'platform', 'target', 'tools')
     Assert-ExactJsonFields `
         -Object $manifest.toolchain `
         -Allowed $toolchainFields `
@@ -567,10 +603,108 @@ function Import-NekoSshReleaseManifest {
         -Context 'Release manifest toolchain'
     Assert-ReleaseManifestNonEmptyStringFields `
         -Object $manifest.toolchain `
-        -Fields $toolchainFields `
+        -Fields @('policySha256', 'platform', 'target') `
         -Context 'Release manifest toolchain'
-    if ($manifest.toolchain.target -cne 'x86_64-pc-windows-msvc') {
-        throw 'Release manifest toolchain.target is unsupported.'
+    Assert-LowercaseSha256 `
+        -Value $manifest.toolchain.policySha256 `
+        -Context 'Release manifest toolchain.policySha256'
+    if (
+        $manifest.toolchain.platform -cne 'windows-x64' -or
+        $manifest.toolchain.target -cne 'x86_64-pc-windows-msvc' -or
+        $manifest.toolchain.tools -isnot [Array] -or
+        $manifest.toolchain.tools.Count -ne 12
+    ) {
+        throw 'Release manifest toolchain platform, target, or tool count is unsupported.'
+    }
+    $requiredToolNames = @(
+        'powershell',
+        'git',
+        'gh',
+        'node',
+        'npm',
+        'rustc',
+        'cargo',
+        'cargoAudit',
+        'perl',
+        'nasm',
+        'vswhere',
+        'signtool'
+    )
+    $observedToolNames = New-Object 'Collections.Generic.HashSet[string]' (
+        [StringComparer]::Ordinal
+    )
+    for ($toolIndex = 0; $toolIndex -lt $manifest.toolchain.tools.Count; $toolIndex += 1) {
+        $tool = $manifest.toolchain.tools[$toolIndex]
+        Assert-ExactJsonFields `
+            -Object $tool `
+            -Allowed @('name', 'length', 'sha256', 'version', 'signature') `
+            -Required @('name', 'length', 'sha256', 'version', 'signature') `
+            -Context "Release manifest toolchain.tools[$toolIndex]"
+        Assert-ReleaseManifestNonEmptyStringFields `
+            -Object $tool `
+            -Fields @('name', 'sha256', 'version') `
+            -Context "Release manifest toolchain.tools[$toolIndex]"
+        Assert-LowercaseSha256 `
+            -Value $tool.sha256 `
+            -Context "Release manifest toolchain.tools[$toolIndex].sha256"
+        if (
+            $tool.name -cnotin $requiredToolNames -or
+            -not $observedToolNames.Add($tool.name) -or
+            -not ($tool.length -is [int] -or $tool.length -is [long]) -or
+            [long]$tool.length -le 0 -or
+            $tool.version.Length -gt 512 -or
+            $tool.version -match '[\r\n]'
+        ) {
+            throw "Release manifest toolchain.tools[$toolIndex] identity is invalid."
+        }
+        Assert-ExactJsonFields `
+            -Object $tool.signature `
+            -Allowed @('status', 'subject', 'thumbprint', 'spkiSha256', 'timestamped') `
+            -Required @('status', 'subject', 'thumbprint', 'spkiSha256', 'timestamped') `
+            -Context "Release manifest toolchain.tools[$toolIndex].signature"
+        if ($tool.signature.timestamped -isnot [bool]) {
+            throw "Release manifest toolchain.tools[$toolIndex].signature.timestamped must be boolean."
+        }
+        if ($tool.signature.status -ceq 'NotSigned') {
+            if (
+                $null -ne $tool.signature.subject -or
+                $null -ne $tool.signature.thumbprint -or
+                $null -ne $tool.signature.spkiSha256 -or
+                $tool.signature.timestamped
+            ) {
+                throw "Unsigned release toolchain.tools[$toolIndex] signer fields are invalid."
+            }
+        } elseif ($tool.signature.status -ceq 'Valid') {
+            if (
+                $null -eq $tool.signature.subject -or
+                $null -eq $tool.signature.thumbprint -or
+                $null -eq $tool.signature.spkiSha256
+            ) {
+                throw "Signed release toolchain.tools[$toolIndex] signer fields must not be null."
+            }
+            Assert-OptionalManifestString `
+                -Value $tool.signature.subject `
+                -Context "Release manifest toolchain.tools[$toolIndex].signature.subject" `
+                -NonEmpty
+            Assert-OptionalManifestString `
+                -Value $tool.signature.thumbprint `
+                -Context "Release manifest toolchain.tools[$toolIndex].signature.thumbprint" `
+                -Pattern '^[0-9A-F]{40}$' `
+                -NonEmpty
+            Assert-OptionalManifestString `
+                -Value $tool.signature.spkiSha256 `
+                -Context "Release manifest toolchain.tools[$toolIndex].signature.spkiSha256" `
+                -Pattern '^[0-9a-f]{64}$' `
+                -NonEmpty
+        } else {
+            throw "Release manifest toolchain.tools[$toolIndex].signature.status is unsupported."
+        }
+    }
+    if (
+        (@($observedToolNames | Sort-Object -CaseSensitive) -join "`n") -cne
+        (@($requiredToolNames | Sort-Object -CaseSensitive) -join "`n")
+    ) {
+        throw 'Release manifest does not contain the exact required release tool identities.'
     }
 
     $signingFields = @(
@@ -808,8 +942,13 @@ function Import-NekoSshReleaseManifest {
     Assert-LowercaseSha256 `
         -Value $manifest.webRuntime.node.sha256 `
         -Context 'Release manifest webRuntime.node.sha256'
+    $manifestNodeTool = @(
+        $manifest.toolchain.tools |
+            Where-Object { $_.name -ceq 'node' }
+    )
     if (
-        $manifest.webRuntime.node.version -cne $manifest.toolchain.node.TrimStart('v') -or
+        $manifestNodeTool.Count -ne 1 -or
+        $manifest.webRuntime.node.version -cne $manifestNodeTool[0].version.TrimStart('v') -or
         $manifest.webRuntime.node.status -cne 'Valid' -or
         $manifest.webRuntime.node.timestamped -ne $true
     ) {

@@ -34,6 +34,7 @@ const MAX_REMOTE_PATH_BYTES: usize = 4 * 1024;
 const MAX_DIRECTORY_ENTRIES: usize = 10_000;
 const MAX_DIRECTORY_ENTRY_NAME_BYTES: usize = 4 * 1024;
 const MAX_DIRECTORY_METADATA_BYTES: usize = 4 * 1024 * 1024;
+const MIN_RSA_HOST_KEY_BITS: usize = 2048;
 // libssh2 uses LIBSSH2_ERROR_FILE when a raw SFTP directory handle reaches EOF.
 const LIBSSH2_ERROR_FILE: i32 = -16;
 const MODERN_KEX_ALGORITHMS: &[&str] = &[
@@ -42,8 +43,6 @@ const MODERN_KEX_ALGORITHMS: &[&str] = &[
     "ecdh-sha2-nistp521",
     "ecdh-sha2-nistp384",
     "ecdh-sha2-nistp256",
-    "diffie-hellman-group18-sha512",
-    "diffie-hellman-group16-sha512",
     "diffie-hellman-group14-sha256",
 ];
 const MODERN_HOST_KEY_ALGORITHMS: &[&str] = &[
@@ -55,13 +54,14 @@ const MODERN_HOST_KEY_ALGORITHMS: &[&str] = &[
     "rsa-sha2-256",
 ];
 const MODERN_CIPHER_ALGORITHMS: &[&str] = &[
-    "chacha20-poly1305@openssh.com",
     "aes256-gcm@openssh.com",
     "aes128-gcm@openssh.com",
     "aes256-ctr",
     "aes192-ctr",
     "aes128-ctr",
 ];
+const MODERN_AEAD_CIPHER_ALGORITHMS: &[&str] =
+    &["aes256-gcm@openssh.com", "aes128-gcm@openssh.com"];
 const MODERN_MAC_ALGORITHMS: &[&str] = &[
     "hmac-sha2-512-etm@openssh.com",
     "hmac-sha2-256-etm@openssh.com",
@@ -531,15 +531,63 @@ fn configure_modern_algorithm_policy(session: &Session) -> Result<()> {
 }
 
 fn validate_negotiated_algorithm_policy(session: &Session) -> Result<()> {
-    for (method_type, policy) in algorithm_policies() {
-        let negotiated = session
-            .methods(method_type)
-            .ok_or(NekoError::SshHandshakeFailed)?;
-        if !policy.contains(&negotiated) {
-            return Err(NekoError::SshHandshakeFailed);
-        }
-    }
+    validate_negotiated_method(session, MethodType::Kex, MODERN_KEX_ALGORITHMS)?;
+    validate_negotiated_method(session, MethodType::HostKey, MODERN_HOST_KEY_ALGORITHMS)?;
+    validate_negotiated_transport_direction(session, MethodType::CryptCs, MethodType::MacCs)?;
+    validate_negotiated_transport_direction(session, MethodType::CryptSc, MethodType::MacSc)?;
     Ok(())
+}
+
+fn validate_negotiated_method(
+    session: &Session,
+    method_type: MethodType,
+    policy: &[&str],
+) -> Result<()> {
+    let negotiated = session
+        .methods(method_type)
+        .ok_or(NekoError::SshHandshakeFailed)?;
+    if policy.contains(&negotiated) {
+        Ok(())
+    } else {
+        Err(NekoError::SshHandshakeFailed)
+    }
+}
+
+fn validate_negotiated_transport_direction(
+    session: &Session,
+    cipher_type: MethodType,
+    mac_type: MethodType,
+) -> Result<()> {
+    let cipher = session
+        .methods(cipher_type)
+        .ok_or(NekoError::SshHandshakeFailed)?;
+    // AES-GCM is an AEAD construction, so libssh2 replaces the separately negotiated MAC with
+    // an internal display-only marker. Do not couple policy enforcement to that private marker.
+    let mac = if MODERN_AEAD_CIPHER_ALGORITHMS.contains(&cipher) {
+        None
+    } else {
+        Some(
+            session
+                .methods(mac_type)
+                .ok_or(NekoError::SshHandshakeFailed)?,
+        )
+    };
+    if negotiated_transport_algorithms_are_allowed(cipher, mac) {
+        Ok(())
+    } else {
+        Err(NekoError::SshHandshakeFailed)
+    }
+}
+
+fn negotiated_transport_algorithms_are_allowed(cipher: &str, mac: Option<&str>) -> bool {
+    if !MODERN_CIPHER_ALGORITHMS.contains(&cipher) {
+        return false;
+    }
+    if MODERN_AEAD_CIPHER_ALGORITHMS.contains(&cipher) {
+        true
+    } else {
+        mac.is_some_and(|mac| MODERN_MAC_ALGORITHMS.contains(&mac))
+    }
 }
 
 fn algorithm_policies() -> [(MethodType, &'static [&'static str]); 6] {
@@ -574,6 +622,7 @@ fn presented_host_key(session: &Session) -> Result<PresentedHostKey> {
         .methods(MethodType::HostKey)
         .ok_or(NekoError::SshHostKeyUnavailable)?;
     let key_algorithm = validated_host_key_algorithm(key_type, negotiated)?;
+    validate_host_key_strength(key_type, public_key)?;
     Ok(PresentedHostKey {
         key_algorithm: key_algorithm.to_owned(),
         public_key: public_key.to_vec(),
@@ -600,11 +649,50 @@ fn validated_host_key_algorithm(key_type: HostKeyType, negotiated_algorithm: &st
     }
 }
 
+fn validate_host_key_strength(key_type: HostKeyType, public_key: &[u8]) -> Result<()> {
+    if !matches!(key_type, HostKeyType::Rsa) {
+        return Ok(());
+    }
+    let mut cursor = public_key;
+    let algorithm = read_ssh_field(&mut cursor)?;
+    let exponent = read_ssh_field(&mut cursor)?;
+    let modulus = read_ssh_field(&mut cursor)?;
+    if algorithm != b"ssh-rsa" || !cursor.is_empty() {
+        return Err(NekoError::SshHostKeyUnavailable);
+    }
+    if exponent.strip_prefix(&[0]).unwrap_or(exponent) != [0x01, 0x00, 0x01] {
+        return Err(NekoError::SshHostKeyAlgorithmRejected);
+    }
+    let modulus = modulus.strip_prefix(&[0]).unwrap_or(modulus);
+    let Some(first) = modulus.first().copied() else {
+        return Err(NekoError::SshHostKeyAlgorithmRejected);
+    };
+    let modulus_bits =
+        (modulus.len() - 1) * 8 + (u8::BITS as usize - first.leading_zeros() as usize);
+    if modulus_bits < MIN_RSA_HOST_KEY_BITS {
+        Err(NekoError::SshHostKeyAlgorithmRejected)
+    } else {
+        Ok(())
+    }
+}
+
+fn read_ssh_field<'a>(input: &mut &'a [u8]) -> Result<&'a [u8]> {
+    let length_bytes = input.get(..4).ok_or(NekoError::SshHostKeyUnavailable)?;
+    let length = u32::from_be_bytes(
+        length_bytes
+            .try_into()
+            .map_err(|_| NekoError::SshHostKeyUnavailable)?,
+    ) as usize;
+    let end = 4_usize
+        .checked_add(length)
+        .ok_or(NekoError::SshHostKeyUnavailable)?;
+    let value = input.get(4..end).ok_or(NekoError::SshHostKeyUnavailable)?;
+    *input = input.get(end..).ok_or(NekoError::SshHostKeyUnavailable)?;
+    Ok(value)
+}
+
 fn authenticate(session: &Session, profile: &SshProfile) -> Result<()> {
     match &profile.authentication {
-        StoredAuthentication::Agent => session
-            .userauth_agent(&profile.username)
-            .map_err(|_| NekoError::SshAuthenticationFailed)?,
         StoredAuthentication::Password { password } => password
             .with_exposed(|password| session.userauth_password(&profile.username, password))
             .map_err(|_| NekoError::SshAuthenticationFailed)?,
@@ -725,6 +813,459 @@ fn shell_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        domain::{ProfileAuthenticationInput, SshProfileInput, TerminalPreferences},
+        ephemeral::EphemeralConnectionStore,
+        operation_admission::OperationAdmission,
+        sftp_transfer::{SftpTransferService, SshSftpDownloadInput, SshSftpUploadInput},
+    };
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use serde_json::Value;
+    use std::sync::mpsc::{self, Receiver};
+    use tauri::ipc::Channel as IpcChannel;
+
+    fn interoperability_profile(
+        host: String,
+        port: u16,
+        username: String,
+        authentication: ProfileAuthenticationInput,
+        label: &str,
+    ) -> SshProfileInput {
+        SshProfileInput {
+            label: label.to_owned(),
+            host,
+            port,
+            username,
+            authentication,
+            tags: vec!["interoperability".to_owned()],
+            terminal: TerminalPreferences::default(),
+        }
+    }
+
+    fn trust_fixture_host(ssh: &SshService, profile_id: Uuid) {
+        let trace = |message: &str| {
+            if std::env::var("NEKOSSH_INTEROP_PROGRESS").as_deref() == Ok("1") {
+                eprintln!("native-interop trust: {message}");
+            }
+        };
+        trace("prepare start");
+        let confirmation_id = match ssh.prepare(profile_id).expect("prepare fixture host") {
+            SshHostKeyStatus::ConfirmationRequired {
+                confirmation_id, ..
+            } => confirmation_id,
+            unexpected => panic!("fixture host must require confirmation: {unexpected:?}"),
+        };
+        trace("prepare complete");
+        trace("trust/authenticate start");
+        assert!(matches!(
+            ssh.trust_host_key(profile_id, confirmation_id)
+                .expect("trust and authenticate fixture host"),
+            SshHostKeyStatus::Trusted { .. }
+        ));
+        trace("trust/authenticate complete");
+    }
+
+    fn execute_fixture_command(
+        ssh: &SshService,
+        admission: &OperationAdmission,
+        profile_id: Uuid,
+        command: &str,
+    ) -> SshCommandResult {
+        let permit = admission
+            .try_acquire(profile_id)
+            .expect("admit fixture command");
+        ssh.execute(
+            profile_id,
+            command.to_owned(),
+            Some("/workspace".to_owned()),
+            permit.close_signal(),
+        )
+        .expect("execute fixture command")
+    }
+
+    fn receive_transfer_events(receiver: &Receiver<Value>) -> Vec<Value> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut events = Vec::new();
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .expect("transfer must finish before the integration-test deadline");
+            let event = receiver
+                .recv_timeout(remaining)
+                .expect("receive transfer IPC event");
+            let completed = event["kind"] == "completed";
+            events.push(event);
+            if completed {
+                return events;
+            }
+        }
+    }
+
+    /// Runs only through `scripts/test-native-ssh-interoperability.mjs`. The Node process is a
+    /// loopback SSH/SFTP fixture server; this side remains the production in-process libssh2
+    /// implementation and never invokes an external SSH client.
+    #[test]
+    fn native_ssh_interoperability() {
+        if std::env::var("NEKOSSH_NATIVE_INTEROP").as_deref() != Ok("1") {
+            return;
+        }
+        let progress = |message: &str| {
+            if std::env::var("NEKOSSH_INTEROP_PROGRESS").as_deref() == Ok("1") {
+                eprintln!("native-interop: {message}");
+            }
+        };
+
+        let host = std::env::var("NEKOSSH_NATIVE_INTEROP_HOST").expect("fixture host");
+        let port = std::env::var("NEKOSSH_NATIVE_INTEROP_PORT")
+            .expect("fixture port")
+            .parse::<u16>()
+            .expect("valid fixture port");
+        let username = std::env::var("NEKOSSH_NATIVE_INTEROP_USERNAME").expect("fixture username");
+        let password = std::env::var("NEKOSSH_NATIVE_INTEROP_PASSWORD").expect("fixture password");
+        let private_key_path =
+            std::env::var("NEKOSSH_NATIVE_INTEROP_PRIVATE_KEY_PATH").expect("fixture key path");
+        let private_key_passphrase = std::env::var("NEKOSSH_NATIVE_INTEROP_PRIVATE_KEY_PASSPHRASE")
+            .expect("fixture key passphrase");
+        let private_key_pem =
+            std::fs::read_to_string(private_key_path).expect("read fixture private key");
+
+        let probe_stream =
+            TcpStream::connect((host.as_str(), port)).expect("connect to loopback SSH fixture");
+        let mut probe_session = Session::new().expect("create loopback libssh2 session");
+        if std::env::var("NEKOSSH_INTEROP_DEBUG").as_deref() == Ok("1") {
+            for (index, (method_type, policy)) in algorithm_policies().into_iter().enumerate() {
+                eprintln!(
+                    "algorithm-policy-{index}: policy={policy:?} supported={:?}",
+                    probe_session
+                        .supported_algs(method_type)
+                        .expect("read supported algorithms")
+                );
+            }
+        }
+        configure_modern_algorithm_policy(&probe_session)
+            .expect("configure loopback modern algorithms");
+        probe_session.set_timeout(SSH_OPERATION_TIMEOUT_MS);
+        probe_session.set_tcp_stream(probe_stream);
+        probe_session
+            .handshake()
+            .expect("complete loopback SSH handshake");
+        validate_negotiated_algorithm_policy(&probe_session)
+            .expect("validate loopback negotiated algorithms");
+        drop(probe_session);
+        progress("algorithm handshake");
+
+        let owner = Uuid::new_v4();
+        let store = Arc::new(EphemeralConnectionStore::new());
+        let password_profile = store
+            .create(
+                owner,
+                interoperability_profile(
+                    host.clone(),
+                    port,
+                    username.clone(),
+                    ProfileAuthenticationInput::Password { password },
+                    "password-interoperability",
+                ),
+            )
+            .expect("create password profile");
+        let ssh = Arc::new(SshService::new(Arc::clone(&store)));
+        let admission = OperationAdmission::new();
+
+        trust_fixture_host(&ssh, password_profile.id);
+        progress("password trust and authentication");
+        let password_result = execute_fixture_command(
+            &ssh,
+            &admission,
+            password_profile.id,
+            "printf native-password-ok",
+        );
+        assert_eq!(password_result.output, "native-password-ok\n");
+        assert_eq!(password_result.exit_status, 0);
+        assert_eq!(password_result.working_directory, "/workspace");
+        assert!(!password_result.truncated);
+        progress("password command");
+
+        let initial_listing = ssh
+            .list_directory(password_profile.id, "/workspace".to_owned())
+            .expect("list fixture directory");
+        assert!(!initial_listing.truncated);
+        assert_eq!(initial_listing.entries.len(), 1);
+        assert_eq!(initial_listing.entries[0].name, "hello.txt");
+        assert!(!initial_listing.entries[0].is_directory);
+        assert_eq!(
+            initial_listing.entries[0].size,
+            Some("NekoSSH native SFTP fixture\n".len() as u64)
+        );
+        progress("initial SFTP listing");
+
+        let sftp = Arc::new(SftpTransferService::new(Arc::clone(&ssh)));
+        {
+            let permit = admission
+                .try_acquire(password_profile.id)
+                .expect("admit mkdir");
+            sftp.create_directory(
+                password_profile.id,
+                "/workspace/new-directory".to_owned(),
+                permit.close_signal(),
+            )
+            .expect("create remote directory");
+        }
+        progress("SFTP mkdir");
+        {
+            let permit = admission
+                .try_acquire(password_profile.id)
+                .expect("admit rename");
+            sftp.rename_remote(
+                password_profile.id,
+                "/workspace/hello.txt".to_owned(),
+                "/workspace/renamed.txt".to_owned(),
+                false,
+                permit.close_signal(),
+            )
+            .expect("rename remote file");
+        }
+        progress("SFTP rename");
+        {
+            let permit = admission
+                .try_acquire(password_profile.id)
+                .expect("admit file deletion");
+            sftp.delete_remote(
+                password_profile.id,
+                "/workspace/renamed.txt".to_owned(),
+                permit.close_signal(),
+            )
+            .expect("delete remote file");
+        }
+        progress("SFTP file delete");
+        {
+            let permit = admission
+                .try_acquire(password_profile.id)
+                .expect("admit directory deletion");
+            sftp.delete_remote(
+                password_profile.id,
+                "/workspace/new-directory".to_owned(),
+                permit.close_signal(),
+            )
+            .expect("delete remote directory");
+        }
+        progress("SFTP directory delete");
+        let final_listing = ssh
+            .list_directory(password_profile.id, "/workspace".to_owned())
+            .expect("list mutated fixture directory");
+        assert!(final_listing.entries.is_empty());
+        progress("final SFTP listing");
+
+        // Exercise the production transfer supervisor and workers without creating a WebView.
+        // The payload spans multiple 64 KiB chunks, contains every byte value (including NUL),
+        // and uses a Unicode remote name.
+        let upload_bytes = (0..150_123_usize)
+            .map(|index| ((index * 31 + 7) % 256) as u8)
+            .collect::<Vec<_>>();
+        let transfer_file_name = "猫咪-数据.bin";
+        let transfer_remote_path = format!("/workspace/{transfer_file_name}");
+        let (upload_sender, upload_receiver) = mpsc::channel();
+        let upload_events = IpcChannel::new(move |body| {
+            let event = body
+                .deserialize::<Value>()
+                .expect("deserialize upload IPC event");
+            upload_sender.send(event).expect("capture upload IPC event");
+            Ok(())
+        });
+        let upload_permit = admission
+            .try_acquire(password_profile.id)
+            .expect("admit upload transfer");
+        let upload_started = sftp
+            .start_upload_headless(
+                password_profile.id,
+                "/workspace".to_owned(),
+                vec![SshSftpUploadInput {
+                    name: transfer_file_name.to_owned(),
+                    data_base64: STANDARD.encode(&upload_bytes),
+                    overwrite: false,
+                }],
+                upload_events,
+                upload_permit,
+            )
+            .expect("start production upload worker");
+        assert_eq!(upload_started.total_files, 1);
+        assert_eq!(upload_started.total_bytes, Some(upload_bytes.len() as u64));
+        assert_eq!(upload_started.items[0].name, transfer_file_name);
+        let upload_event_values = receive_transfer_events(&upload_receiver);
+        assert_eq!(upload_event_values[0]["kind"], "started");
+        assert_eq!(
+            upload_event_values.last().expect("upload completion")["status"],
+            "completed"
+        );
+        let upload_progress = upload_event_values
+            .iter()
+            .filter(|event| event["kind"] == "progress")
+            .collect::<Vec<_>>();
+        assert!(
+            upload_progress.len() >= 3,
+            "multi-chunk binary upload must report bounded progress"
+        );
+        let mut previous_uploaded = 0_u64;
+        for event in &upload_progress {
+            assert_eq!(event["jobId"], upload_started.job_id.to_string());
+            assert_eq!(event["name"], transfer_file_name);
+            let uploaded = event["fileBytesTransferred"]
+                .as_u64()
+                .expect("numeric upload progress");
+            assert!(uploaded > previous_uploaded);
+            assert!(uploaded <= upload_bytes.len() as u64);
+            previous_uploaded = uploaded;
+        }
+        assert_eq!(previous_uploaded, upload_bytes.len() as u64);
+        let upload_completed = upload_event_values.last().expect("upload completion");
+        assert_eq!(upload_completed["completedFiles"], 1);
+        assert_eq!(upload_completed["failedFiles"], 0);
+        assert_eq!(upload_completed["cancelledFiles"], 0);
+        assert_eq!(
+            upload_completed["bytesTransferred"],
+            upload_bytes.len() as u64
+        );
+        progress("production SFTP upload worker");
+
+        let download_service = Arc::clone(&sftp);
+        let (download_sender, download_receiver) = mpsc::channel();
+        let download_events = IpcChannel::new(move |body| {
+            let event = body
+                .deserialize::<Value>()
+                .expect("deserialize download IPC event");
+            if event["kind"] == "chunk" {
+                let job_id = event["jobId"]
+                    .as_str()
+                    .expect("download chunk job id")
+                    .parse::<Uuid>()
+                    .expect("valid download chunk job id");
+                let sequence = event["sequence"].as_u64().expect("download chunk sequence");
+                download_service
+                    .acknowledge_download(job_id, sequence)
+                    .expect("acknowledge production download chunk");
+            }
+            download_sender
+                .send(event)
+                .expect("capture download IPC event");
+            Ok(())
+        });
+        let download_permit = admission
+            .try_acquire(password_profile.id)
+            .expect("admit download transfer");
+        let download_started = sftp
+            .start_download_headless(
+                password_profile.id,
+                vec![SshSftpDownloadInput {
+                    remote_path: transfer_remote_path,
+                    save_as: "下载-猫咪.bin".to_owned(),
+                }],
+                download_events,
+                download_permit,
+            )
+            .expect("start production download worker");
+        let download_event_values = receive_transfer_events(&download_receiver);
+        assert_eq!(download_event_values[0]["kind"], "started");
+        assert_eq!(
+            download_event_values.last().expect("download completion")["status"],
+            "completed"
+        );
+        let mut downloaded = Vec::new();
+        let mut expected_sequence = 1_u64;
+        let mut expected_offset = 0_u64;
+        for event in download_event_values
+            .iter()
+            .filter(|event| event["kind"] == "chunk")
+        {
+            assert_eq!(event["jobId"], download_started.job_id.to_string());
+            assert_eq!(event["name"], "下载-猫咪.bin");
+            assert_eq!(event["sequence"], expected_sequence);
+            assert_eq!(event["offset"], expected_offset);
+            let chunk = STANDARD
+                .decode(event["dataBase64"].as_str().expect("base64 download chunk"))
+                .expect("decode download IPC chunk");
+            assert!(!chunk.is_empty());
+            assert!(chunk.len() <= 64 * 1024);
+            downloaded.extend_from_slice(&chunk);
+            expected_offset += chunk.len() as u64;
+            expected_sequence += 1;
+        }
+        assert!(
+            expected_sequence >= 4,
+            "download must cross at least three acknowledged IPC chunks"
+        );
+        assert_eq!(downloaded, upload_bytes);
+        let download_completed = download_event_values.last().expect("download completion");
+        assert_eq!(download_completed["completedFiles"], 1);
+        assert_eq!(download_completed["failedFiles"], 0);
+        assert_eq!(download_completed["cancelledFiles"], 0);
+        assert_eq!(
+            download_completed["bytesTransferred"],
+            downloaded.len() as u64
+        );
+        progress("production SFTP download worker");
+
+        let private_key_profile = store
+            .create(
+                owner,
+                interoperability_profile(
+                    host,
+                    port,
+                    username,
+                    ProfileAuthenticationInput::PrivateKey {
+                        private_key_pem: private_key_pem.clone(),
+                        passphrase: Some(private_key_passphrase.clone()),
+                    },
+                    "private-key-interoperability",
+                ),
+            )
+            .expect("create private-key profile");
+        trust_fixture_host(&ssh, private_key_profile.id);
+        progress("private-key trust and authentication");
+        let private_key_result = execute_fixture_command(
+            &ssh,
+            &admission,
+            private_key_profile.id,
+            "printf native-key-ok",
+        );
+        assert_eq!(private_key_result.output, "native-key-ok\n");
+        assert_eq!(private_key_result.exit_status, 0);
+        assert!(!private_key_result.truncated);
+        progress("private-key command");
+
+        let wrong_passphrase_profile = store
+            .create(
+                owner,
+                interoperability_profile(
+                    std::env::var("NEKOSSH_NATIVE_INTEROP_HOST").expect("fixture host"),
+                    port,
+                    std::env::var("NEKOSSH_NATIVE_INTEROP_USERNAME").expect("fixture username"),
+                    ProfileAuthenticationInput::PrivateKey {
+                        private_key_pem,
+                        passphrase: Some(format!("{private_key_passphrase}-wrong")),
+                    },
+                    "wrong-private-key-passphrase-interoperability",
+                ),
+            )
+            .expect("create wrong-passphrase profile");
+        let confirmation_id = match ssh
+            .prepare(wrong_passphrase_profile.id)
+            .expect("prepare wrong-passphrase fixture host")
+        {
+            SshHostKeyStatus::ConfirmationRequired {
+                confirmation_id, ..
+            } => confirmation_id,
+            unexpected => panic!("fixture host must require confirmation: {unexpected:?}"),
+        };
+        let authentication_started = Instant::now();
+        assert!(matches!(
+            ssh.trust_host_key(wrong_passphrase_profile.id, confirmation_id),
+            Err(NekoError::SshAuthenticationFailed)
+        ));
+        assert!(
+            authentication_started.elapsed() < Duration::from_secs(5),
+            "wrong encrypted private-key passphrase must fail without an unbounded native prompt"
+        );
+        progress("wrong private-key passphrase rejected");
+    }
 
     #[test]
     fn modern_algorithm_policy_excludes_sha1_ssh_rsa_cbc_and_md5() {
@@ -763,6 +1304,51 @@ mod tests {
     }
 
     #[test]
+    fn rsa_host_keys_must_be_at_least_2048_bits() {
+        fn append_field(blob: &mut Vec<u8>, value: &[u8]) {
+            blob.extend_from_slice(&(value.len() as u32).to_be_bytes());
+            blob.extend_from_slice(value);
+        }
+
+        fn rsa_blob(exponent: &[u8], modulus: &[u8]) -> Vec<u8> {
+            let mut blob = Vec::new();
+            append_field(&mut blob, b"ssh-rsa");
+            append_field(&mut blob, exponent);
+            append_field(&mut blob, modulus);
+            blob
+        }
+
+        let mut strong_modulus = vec![0_u8; 257];
+        strong_modulus[1] = 0x80;
+        assert!(
+            validate_host_key_strength(
+                HostKeyType::Rsa,
+                &rsa_blob(&[0x01, 0x00, 0x01], &strong_modulus)
+            )
+            .is_ok()
+        );
+
+        let mut weak_modulus = vec![0_u8; 256];
+        weak_modulus[1] = 0x40;
+        assert!(matches!(
+            validate_host_key_strength(
+                HostKeyType::Rsa,
+                &rsa_blob(&[0x01, 0x00, 0x01], &weak_modulus)
+            ),
+            Err(NekoError::SshHostKeyAlgorithmRejected)
+        ));
+        assert!(matches!(
+            validate_host_key_strength(HostKeyType::Rsa, &rsa_blob(&[0x03], &strong_modulus)),
+            Err(NekoError::SshHostKeyAlgorithmRejected)
+        ));
+        assert!(matches!(
+            validate_host_key_strength(HostKeyType::Rsa, b"malformed"),
+            Err(NekoError::SshHostKeyUnavailable)
+        ));
+        assert!(validate_host_key_strength(HostKeyType::Ed25519, b"").is_ok());
+    }
+
+    #[test]
     fn bundled_libssh2_has_at_least_one_supported_algorithm_per_modern_policy() {
         let session = Session::new().expect("libssh2 session");
         configure_modern_algorithm_policy(&session).expect("modern policy is supported");
@@ -775,6 +1361,30 @@ mod tests {
             Some("preferred,fallback")
         );
         assert!(supported_policy_preferences(&["modern"], &["legacy"]).is_none());
+    }
+
+    #[test]
+    fn negotiated_mac_policy_distinguishes_aead_from_ctr() {
+        assert!(negotiated_transport_algorithms_are_allowed(
+            "aes256-gcm@openssh.com",
+            None
+        ));
+        assert!(negotiated_transport_algorithms_are_allowed(
+            "aes256-ctr",
+            Some("hmac-sha2-256-etm@openssh.com")
+        ));
+        assert!(!negotiated_transport_algorithms_are_allowed(
+            "aes256-ctr",
+            Some("INTEGRATED-AES-GCM")
+        ));
+        assert!(!negotiated_transport_algorithms_are_allowed(
+            "aes256-ctr",
+            None
+        ));
+        assert!(!negotiated_transport_algorithms_are_allowed(
+            "3des-cbc",
+            Some("hmac-sha2-256")
+        ));
     }
 
     #[test]

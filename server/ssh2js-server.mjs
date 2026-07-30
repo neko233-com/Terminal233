@@ -14,7 +14,7 @@ import {
 import { OperationAdmission, OperationAdmissionError } from './operation-admission.mjs'
 import { TerminalAdmission, TerminalAdmissionError } from './terminal-admission.mjs'
 import { createStaticWebHandler } from './static-web.mjs'
-import { connectModernSshClient } from './ssh-algorithms.mjs'
+import { connectModernSshClient, validatePresentedHostKey } from './ssh-algorithms.mjs'
 import { attachmentContentDisposition } from './content-disposition.mjs'
 
 const { Client } = ssh2
@@ -568,8 +568,21 @@ function holdHostKeyOnce(connection, generation) {
             reject(apiError(410, 'connection_closed', 'SSH 连接已关闭。'))
             return false
           }
-          settled = true
           const key = Buffer.from(publicKey)
+          try {
+            validatePresentedHostKey(key)
+          } catch {
+            settled = true
+            key.fill(0)
+            client.end()
+            reject(apiError(
+              502,
+              'weak_or_invalid_host_key',
+              '服务器主机密钥无效或强度不足（RSA 至少需要 2048 位且指数为 65537）。',
+            ))
+            return false
+          }
+          settled = true
           resolve({
             publicKey: key,
             fingerprint: fingerprint(key),
@@ -683,7 +696,15 @@ function openClientOnce(connection, generation) {
         keepaliveInterval: 10_000,
         keepaliveCountMax: 3,
         hostVerifier(publicKey) {
-          return safeEqual(connection.trustedFingerprint, fingerprint(Buffer.from(publicKey)))
+          const key = Buffer.from(publicKey)
+          try {
+            validatePresentedHostKey(key)
+            return safeEqual(connection.trustedFingerprint, fingerprint(key))
+          } catch {
+            return false
+          } finally {
+            key.fill(0)
+          }
         },
       })
     } catch (error) {
@@ -1240,7 +1261,11 @@ async function uploadFiles(connection, input, signal) {
         const temporary = joinRemote(remoteDirectory, `.${name}.nekossh-${randomUUID()}.part`)
         try {
           await sftpCall(sftp, 'writeFile', temporary, data, { mode: 0o600, flag: 'wx' })
-          await sftpCall(sftp, 'rename', temporary, destination)
+          if (item.overwrite) {
+            await atomicOverwriteRename(sftp, temporary, destination)
+          } else {
+            await sftpCall(sftp, 'rename', temporary, destination)
+          }
         } catch (error) {
           await sftpCall(sftp, 'unlink', temporary).catch(() => undefined)
           throw error
@@ -1289,7 +1314,11 @@ async function renameRemote(connection, fromPath, toPath, overwrite, signal) {
   toPath = validateDeletablePath(toPath)
   await withSftp(connection, async (sftp) => {
     if (!overwrite && await sftpExists(sftp, toPath)) throw apiError(409, 'destination_exists', '目标已存在。')
-    await sftpCall(sftp, 'rename', fromPath, toPath)
+    if (overwrite) {
+      await atomicOverwriteRename(sftp, fromPath, toPath)
+    } else {
+      await sftpCall(sftp, 'rename', fromPath, toPath)
+    }
   }, signal)
 }
 
@@ -1332,7 +1361,34 @@ function sftpCall(sftp, method, ...arguments_) {
 }
 
 async function sftpExists(sftp, remotePath) {
-  try { await sftpCall(sftp, 'lstat', remotePath); return true } catch { return false }
+  try {
+    await sftpCall(sftp, 'lstat', remotePath)
+    return true
+  } catch (error) {
+    // SFTP v3 status 2 is the only authoritative "does not exist" result. Treating permission,
+    // transport, or protocol failures as absence could make an overwrite=false request destructive.
+    if (Number(error?.code) === 2) return false
+    throw error
+  }
+}
+
+async function atomicOverwriteRename(sftp, fromPath, toPath) {
+  try {
+    // ssh2 validates the server's advertised extension version before sending this request.
+    // Unlike SSH_FXP_RENAME v3, this OpenSSH extension guarantees rename(2)-style replacement.
+    await sftpCall(sftp, 'ext_openssh_rename', fromPath, toPath)
+  } catch (error) {
+    const unsupported = Number(error?.code) === 8
+      || error?.message === 'Server does not support this extended request'
+    if (unsupported) {
+      throw apiError(
+        409,
+        'sftp_atomic_overwrite_unsupported',
+        '服务器不支持安全原子覆盖（posix-rename@openssh.com），原文件已保留。',
+      )
+    }
+    throw error
+  }
 }
 
 function decodeBase64Strict(value) {

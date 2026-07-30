@@ -20,6 +20,7 @@ $releaseRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'output/release
 $resolvedReleaseDirectory = (Resolve-Path -LiteralPath $ReleaseDirectory).Path
 $policyPath = Join-Path $repositoryRoot 'release-signing-policy.json'
 $policyModulePath = Join-Path $PSScriptRoot 'release-signing-policy.psm1'
+$sourceIntegrityModulePath = Join-Path $PSScriptRoot 'git-source-integrity.psm1'
 $validationScriptPath = $PSCommandPath
 $expectedRepository = 'neko233-com/nekossh'
 $expectedUpgradeCode = '{44F1588E-BCFD-5973-A955-237DAF92726D}'
@@ -557,10 +558,11 @@ if (
 $manifestPath = Join-Path $resolvedReleaseDirectory 'release-manifest.json'
 Assert-RegularFile -Path $manifestPath
 Import-Module -Name $policyModulePath -Force
+Import-Module -Name $sourceIntegrityModulePath -Force -ErrorAction Stop
 $manifest = Import-NekoSshReleaseManifest -Path $manifestPath
 if (
     -not ($manifest.schemaVersion -is [int] -or $manifest.schemaVersion -is [long]) -or
-    [long]$manifest.schemaVersion -ne 3 -or
+    [long]$manifest.schemaVersion -ne 4 -or
     [string]$manifest.repository -cne $expectedRepository -or
     $manifest.prerelease -isnot [bool] -or
     $manifest.prerelease -ne $false -or
@@ -569,7 +571,7 @@ if (
     [string]$manifest.version -cnotmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' -or
     [string]$manifest.commit -cnotmatch '^[0-9a-f]{40}$'
 ) {
-    throw 'A production Windows smoke receipt requires a publishable stable schema-v3 manifest.'
+    throw 'A production Windows smoke receipt requires a publishable stable schema-v4 manifest.'
 }
 $version = [string]$manifest.version
 $commit = [string]$manifest.commit
@@ -577,17 +579,20 @@ if ([string]$manifest.shortCommit -cne $commit.Substring(0, 12)) {
     throw 'Release manifest shortCommit does not match its commit.'
 }
 
-if ((Get-CheckedOutput -FilePath 'git' -ArgumentList @('branch', '--show-current')) -cne 'main') {
-    throw 'Windows release acceptance must run from main.'
-}
-if (Get-CheckedOutput -FilePath 'git' -ArgumentList @('status', '--porcelain', '--untracked-files=all')) {
-    throw 'Windows release acceptance requires a clean working tree.'
-}
 Invoke-Checked -FilePath 'git' -ArgumentList @('fetch', '--prune', 'origin')
-$headCommit = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'HEAD')
-$originCommit = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'origin/main')
-if ($headCommit -cne $commit -or $originCommit -cne $commit) {
+$sourceIdentity = Assert-NekoSshGitSourceIntegrity -RepositoryRoot $repositoryRoot
+if ([string]$sourceIdentity.Commit -cne $commit) {
     throw 'Smoke manifest, HEAD and origin/main must identify the same commit.'
+}
+if (
+    [string]$manifest.source.branch -cne [string]$sourceIdentity.Branch -or
+    [string]$manifest.source.commit -cne [string]$sourceIdentity.Commit -or
+    [string]$manifest.source.tree -cne [string]$sourceIdentity.Tree -or
+    [string]$manifest.source.snapshotSha256 -cne [string]$sourceIdentity.SnapshotSha256 -or
+    [string]$manifest.source.digestFormat -cne [string]$sourceIdentity.DigestFormat -or
+    [int]$manifest.source.trackedFileCount -ne [int]$sourceIdentity.TrackedFileCount
+) {
+    throw 'Smoke manifest source identity does not match the complete checked-out Git source snapshot.'
 }
 $originUrl = Get-CheckedOutput -FilePath 'git' -ArgumentList @('remote', 'get-url', 'origin')
 if (
@@ -1029,7 +1034,10 @@ Write-Host "Clean VM image ID: $CleanVmImageId"
 Write-Host 'Copy the unchanged receipt back to the controlled signing machine, then run:'
 Write-Host (
     "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-windows-smoke-receipt.ps1 " +
-    "-ReleaseDirectory `"$resolvedReleaseDirectory`" -SignerThumbprint $normalizedSigner " +
-    "-TimestampUrl <RFC3161-or-Authenticode-timestamp-url> " +
+    "-ReleaseDirectory `"$resolvedReleaseDirectory`" " +
+    "-ToolchainLockPath <controlled-builder-toolchain-lock-path> " +
+    "-ExpectedToolchainLockSha256 <independently-recorded-64-hex-sha256> " +
+    "-SignerThumbprint $normalizedSigner " +
+    "-TimestampUrl <http-Authenticode-timestamp-url> " +
     "-ExpectedValidationNonce $ValidationNonce -ExpectedCleanVmImageId `"$CleanVmImageId`""
 )

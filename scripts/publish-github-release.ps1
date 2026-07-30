@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$ReleaseDirectory,
+    [Parameter(Mandatory)][string]$ToolchainLockPath,
+    [Parameter(Mandatory)][string]$ExpectedToolchainLockSha256,
+    [Parameter(Mandatory)][string]$ExpectedTagSignerFingerprint,
     [string]$Repository = 'neko233-com/nekossh',
     [string]$WindowsSmokeReceiptPath
 )
@@ -10,12 +13,49 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$toolchainLockModulePath = Join-Path $PSScriptRoot 'release-toolchain-lock.psm1'
+Import-Module -Name $toolchainLockModulePath -Force -ErrorAction Stop
+$lockedToolchain = Import-NekoSshReleaseToolchainLock `
+    -Path $ToolchainLockPath `
+    -ExpectedSha256 $ExpectedToolchainLockSha256
+Assert-NekoSshToolchainLockOutsideRepository `
+    -LockPath $lockedToolchain.LockPath `
+    -RepositoryRoot $repositoryRoot
+$gitExecutable = [string]$lockedToolchain.Tools.git.Path
+$ghExecutable = [string]$lockedToolchain.Tools.gh.Path
+if (
+    $Repository -cnotmatch '^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})/[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})$' -or
+    $Repository.Contains('..')
+) {
+    throw 'Repository must be one canonical GitHub owner/name pair.'
+}
+$canonicalRepositoryUrl = "https://github.com/$Repository.git"
+$normalizedExpectedTagSignerFingerprint = if (
+    $ExpectedTagSignerFingerprint -cmatch '^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$'
+) {
+    $ExpectedTagSignerFingerprint.ToUpperInvariant()
+} elseif (
+    $ExpectedTagSignerFingerprint -cmatch '^SHA256:[A-Za-z0-9+/]{43}$'
+) {
+    $ExpectedTagSignerFingerprint
+} else {
+    throw (
+        'ExpectedTagSignerFingerprint must be an exact 40- or 64-digit hexadecimal OpenPGP ' +
+        'fingerprint or an SHA256: SSH key fingerprint.'
+    )
+}
+Assert-NekoSshCompleteProductionToolchainCoverage
 $signingPolicyPath = Join-Path $repositoryRoot 'release-signing-policy.json'
 $signingPolicyModulePath = Join-Path $PSScriptRoot 'release-signing-policy.psm1'
+$sourceIntegrityModulePath = Join-Path $PSScriptRoot 'git-source-integrity.psm1'
 $validationScriptPath = Join-Path $PSScriptRoot 'test-windows-release-installers.ps1'
 $generatedOutputRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'output'))
 $releaseRoot = [IO.Path]::GetFullPath((Join-Path $generatedOutputRoot 'release'))
 $resolvedReleaseDirectory = (Resolve-Path -LiteralPath $ReleaseDirectory).Path
+$releaseInputLocks = [Collections.Generic.List[IO.FileStream]]::new()
+$lockedReleaseInputPaths = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::OrdinalIgnoreCase
+)
 
 function Test-ChildPath {
     param(
@@ -82,6 +122,31 @@ function Assert-PathHasNoReparsePoints {
     }
 }
 
+function Assert-TreeHasNoReparsePoints {
+    param([Parameter(Mandatory)][string]$Root)
+
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($Root)
+    while ($pending.Count -gt 0) {
+        $directory = $pending.Pop()
+        $directoryItem = Get-Item -LiteralPath $directory -Force
+        if (
+            -not $directoryItem.PSIsContainer -or
+            ($directoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+        ) {
+            throw "Git administrative path is not a regular directory: $directory"
+        }
+        foreach ($entry in @(Get-ChildItem -LiteralPath $directory -Force)) {
+            if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Git administrative data contains a reparse point: $($entry.FullName)"
+            }
+            if ($entry.PSIsContainer) {
+                $pending.Push($entry.FullName)
+            }
+        }
+    }
+}
+
 function Invoke-Checked {
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -105,6 +170,304 @@ function Get-CheckedOutput {
         throw "'$FilePath $($ArgumentList -join ' ')' failed with exit code $LASTEXITCODE."
     }
     return $output
+}
+
+function ConvertTo-PublishNativeArgument {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') {
+        return $Value
+    }
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashes += 1
+            continue
+        }
+        if ($character -eq '"') {
+            [void]$builder.Append(('\' * (($backslashes * 2) + 1)))
+            [void]$builder.Append('"')
+            $backslashes = 0
+            continue
+        }
+        if ($backslashes -gt 0) {
+            [void]$builder.Append(('\' * $backslashes))
+            $backslashes = 0
+        }
+        [void]$builder.Append($character)
+    }
+    if ($backslashes -gt 0) {
+        [void]$builder.Append(('\' * ($backslashes * 2)))
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function Invoke-HardenedPublishGit {
+    param(
+        [Parameter(Mandatory)][string[]]$ArgumentList,
+        [int[]]$AllowedExitCodes = @(0)
+    )
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $gitExecutable
+    $startInfo.WorkingDirectory = $repositoryRoot
+    $hardenedArgumentList = @(
+        '--no-optional-locks',
+        '--no-replace-objects',
+        '-c', 'core.fsmonitor=false',
+        '-c', 'core.hooksPath=NUL',
+        '-c', 'core.attributesFile=NUL',
+        '-c', 'core.unsetenvvars=',
+        '-c', 'credential.helper=',
+        '-c', 'fetch.fsckObjects=true',
+        '-c', 'transfer.fsckObjects=true'
+    ) + $ArgumentList
+    $startInfo.Arguments = (
+        $hardenedArgumentList |
+            ForEach-Object { ConvertTo-PublishNativeArgument -Value ([string]$_) }
+    ) -join ' '
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [Text.UTF8Encoding]::new($false, $true)
+    $startInfo.StandardErrorEncoding = [Text.UTF8Encoding]::new($false, $true)
+    $environment = $startInfo.EnvironmentVariables
+    if ($null -eq $environment) {
+        $environment = $startInfo.EnvironmentVariables
+    }
+    if ($null -eq $environment) {
+        throw 'Unable to materialize the locked Git process environment.'
+    }
+    foreach ($key in @($environment.Keys)) {
+        if (
+            [string]$key -cmatch '^(?i:GIT_)' -or
+            [string]$key -cmatch '^(?i:SSL_CERT_(?:FILE|DIR)|CURL_CA_BUNDLE|HTTPS?_PROXY|ALL_PROXY|NO_PROXY)$'
+        ) {
+            $environment.Remove([string]$key)
+        }
+    }
+    $environment['GIT_CONFIG_NOSYSTEM'] = '1'
+    $environment['GIT_CONFIG_GLOBAL'] = 'NUL'
+    $environment['GIT_CONFIG_COUNT'] = '0'
+    $environment['GIT_NO_LAZY_FETCH'] = '1'
+    $environment['GIT_NO_REPLACE_OBJECTS'] = '1'
+    $environment['GIT_TERMINAL_PROMPT'] = '0'
+    $environment['GCM_INTERACTIVE'] = 'Never'
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw 'The locked Git process did not start.'
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -notin $AllowedExitCodes) {
+            $summary = if ([string]::IsNullOrWhiteSpace($stderr)) {
+                $stdout.Trim()
+            } else {
+                $stderr.Trim()
+            }
+            throw (
+                "Locked Git command failed with exit code $($process.ExitCode): " +
+                "git $($hardenedArgumentList -join ' ')`n$summary"
+            )
+        }
+        return [pscustomobject]@{
+            ExitCode = [int]$process.ExitCode
+            StdOut = [string]$stdout
+            StdErr = [string]$stderr
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Assert-NoUnsafePublishGitConfiguration {
+    $result = Invoke-HardenedPublishGit `
+        -ArgumentList @(
+            'config',
+            '--local',
+            '--no-includes',
+            '--name-only',
+            '--list'
+        )
+    foreach ($name in @($result.StdOut -split "`r?`n" | Where-Object { $_ })) {
+        if (
+            $name -match '^(?i:(?:include|includeif)\.)' -or
+            $name -match '^(?i:url\..*\.(?:push)?insteadof)$' -or
+            $name -match '^(?i:credential\.)' -or
+            $name -match '^(?i:hook\.)' -or
+            $name -match '^(?i:http\.)' -or
+            $name -match '^(?i:protocol\.)' -or
+            $name -match '^(?i:fetch\.bundleURI)$' -or
+            $name -match '^(?i:gc\.recentObjectsHook)$' -or
+            $name -match '^(?i:extensions\.(?:partialClone|worktreeConfig))$' -or
+            $name -match '^(?i:core\.(?:alternateRefsCommand|askPass|excludesFile|hooksPath|fsmonitor|sshCommand|gitProxy|unsetenvvars))$' -or
+            $name -match '^(?i:remote\..*\.(?:partialCloneFilter|promisor|proxy|proxyAuthMethod|uploadpack|receivepack|vcs))$'
+        ) {
+            throw "Release publication rejects unsafe local Git configuration: $name"
+        }
+    }
+}
+
+function Protect-ReleaseInput {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $fullPath = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $Path).Path)
+    if ($lockedReleaseInputPaths.Contains($fullPath)) {
+        return
+    }
+    Assert-PathHasNoReparsePoints -Path $fullPath -TrustedRoot $repositoryRoot
+    $stream = [IO.FileStream]::new(
+        $fullPath,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read
+    )
+    try {
+        if (-not $lockedReleaseInputPaths.Add($fullPath)) {
+            throw "Release input lock bookkeeping rejected a duplicate path: $fullPath"
+        }
+        $releaseInputLocks.Add($stream)
+    }
+    catch {
+        $stream.Dispose()
+        throw
+    }
+}
+
+function Invoke-HardenedMainFetch {
+    Assert-NoUnsafePublishGitConfiguration
+    [void](Invoke-HardenedPublishGit -ArgumentList @(
+        'fetch',
+        '--no-tags',
+        '--no-recurse-submodules',
+        '--no-auto-maintenance',
+        '--no-write-commit-graph',
+        '--prune',
+        '--force',
+        $canonicalRepositoryUrl,
+        '+refs/heads/main:refs/remotes/origin/main'
+    ))
+}
+
+function Get-HardenedPublishGitOutput {
+    param(
+        [Parameter(Mandatory)][string[]]$ArgumentList,
+        [switch]$IncludeStandardError
+    )
+
+    $result = Invoke-HardenedPublishGit -ArgumentList $ArgumentList
+    if ($IncludeStandardError) {
+        return "$($result.StdOut)`n$($result.StdErr)".Trim()
+    }
+    return $result.StdOut.Trim()
+}
+
+function Assert-NoConfiguredGitVerifierProgram {
+    $result = Invoke-HardenedPublishGit `
+        -ArgumentList @(
+            'config',
+            '--show-origin',
+            '--get-regexp',
+            '^gpg\..*program$'
+        ) `
+        -AllowedExitCodes @(0, 1)
+    if (
+        $result.ExitCode -eq 0 -or
+        -not [string]::IsNullOrWhiteSpace($result.StdOut) -or
+        -not [string]::IsNullOrWhiteSpace($result.StdErr)
+    ) {
+        throw (
+            'Git system, global, or repository configuration must not select a GPG/SSH ' +
+            'verification program for production tag verification.'
+        )
+    }
+}
+
+function Assert-LocalSignedTagIdentity {
+    param(
+        [Parameter(Mandatory)][string]$TagName,
+        [Parameter(Mandatory)][string]$CommitSha,
+        [Parameter(Mandatory)][string]$ExpectedTagObjectSha,
+        [Parameter(Mandatory)][string]$ExpectedSignerFingerprint
+    )
+
+    if ($ExpectedTagObjectSha -cnotmatch '^[0-9a-f]{40}$') {
+        throw 'Expected local tag object must be a full lowercase SHA-1 object identifier.'
+    }
+    Assert-NoConfiguredGitVerifierProgram
+    $tagType = Get-HardenedPublishGitOutput -ArgumentList @(
+        'cat-file',
+        '-t',
+        $ExpectedTagObjectSha
+    )
+    if ($tagType -cne 'tag') {
+        throw "Expected object $ExpectedTagObjectSha is not an annotated Git tag object."
+    }
+    $tagRefBefore = Get-HardenedPublishGitOutput -ArgumentList @(
+        'rev-parse',
+        "refs/tags/$TagName"
+    )
+    if ($tagRefBefore -cne $ExpectedTagObjectSha) {
+        throw "Local tag $TagName no longer identifies the expected signed tag object."
+    }
+    $tagCommit = Get-HardenedPublishGitOutput -ArgumentList @(
+        'rev-parse',
+        "$ExpectedTagObjectSha`^{commit}"
+    )
+    if ($tagCommit -cne $CommitSha) {
+        throw "Signed tag object $ExpectedTagObjectSha does not identify commit $CommitSha."
+    }
+
+    $verificationConfig = if (
+        $ExpectedSignerFingerprint.StartsWith('SHA256:', [StringComparison]::Ordinal)
+    ) {
+        @(
+            '-c', 'gpg.format=ssh',
+            '-c', 'gpg.ssh.program=ssh-keygen.exe'
+        )
+    } else {
+        @(
+            '-c', 'gpg.format=openpgp',
+            '-c', 'gpg.program=gpg.exe',
+            '-c', 'gpg.openpgp.program=gpg.exe'
+        )
+    }
+    $tagVerification = Get-HardenedPublishGitOutput `
+        -ArgumentList ($verificationConfig + @(
+            'verify-tag',
+            '--raw',
+            $ExpectedTagObjectSha
+        )) `
+        -IncludeStandardError
+    $escapedSigner = [regex]::Escape($ExpectedSignerFingerprint)
+    $signerMatches = if (
+        $ExpectedSignerFingerprint.StartsWith('SHA256:', [StringComparison]::Ordinal)
+    ) {
+        $tagVerification -cmatch "(?:key\s+)?$escapedSigner(?:\s|$)"
+    } else {
+        $tagVerification -cmatch "(?m)VALIDSIG\s+$escapedSigner(?:\s|$)"
+    }
+    if (-not $signerMatches) {
+        throw 'Signed release tag identity does not match the independently expected fingerprint.'
+    }
+    $tagRefAfter = Get-HardenedPublishGitOutput -ArgumentList @(
+        'rev-parse',
+        "refs/tags/$TagName"
+    )
+    if ($tagRefAfter -cne $ExpectedTagObjectSha) {
+        throw "Local tag $TagName changed while its signature was being verified."
+    }
 }
 
 function ConvertTo-NormalizedReleaseText {
@@ -246,55 +609,109 @@ function Assert-GitHubTagTarget {
     param(
         [Parameter(Mandatory)][string]$RepositoryName,
         [Parameter(Mandatory)][string]$TagName,
-        [Parameter(Mandatory)][string]$CommitSha
+        [Parameter(Mandatory)][string]$CommitSha,
+        [Parameter(Mandatory)][string]$ExpectedTagObjectSha
     )
 
-    $githubRefJson = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+    $githubRefJson = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
         'api',
         "repos/$RepositoryName/git/ref/tags/$TagName"
     )
     $githubRef = $githubRefJson | ConvertFrom-Json
-    if ($githubRef.object.type -ne 'tag') {
-        throw "GitHub tag $TagName is not an annotated tag object."
+    if (
+        $githubRef.object.type -cne 'tag' -or
+        [string]$githubRef.object.sha -cne $ExpectedTagObjectSha
+    ) {
+        throw (
+            "GitHub tag $TagName does not identify the exact locally verified tag object " +
+            "$ExpectedTagObjectSha."
+        )
     }
-    $githubTagJson = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+    $githubTagJson = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
         'api',
-        "repos/$RepositoryName/git/tags/$($githubRef.object.sha)"
+        "repos/$RepositoryName/git/tags/$ExpectedTagObjectSha"
     )
     $githubTag = $githubTagJson | ConvertFrom-Json
-    if ($githubTag.object.type -ne 'commit' -or $githubTag.object.sha -ne $CommitSha) {
+    if ($githubTag.object.type -cne 'commit' -or $githubTag.object.sha -cne $CommitSha) {
         throw "GitHub repository tag $TagName is not bound to manifest commit $CommitSha."
     }
 }
 
-function Assert-ManualPublishState {
+function Assert-GitHubReleaseTagRuleset {
     param(
         [Parameter(Mandatory)][string]$RepositoryName,
-        [Parameter(Mandatory)][string]$TagName,
-        [Parameter(Mandatory)][string]$CommitSha
+        [Parameter(Mandatory)][string]$TagName
     )
 
-    if ((Get-CheckedOutput -FilePath 'git' -ArgumentList @('branch', '--show-current')) -ne 'main') {
-        throw 'GitHub Releases must remain on main.'
+    if ($TagName -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+        throw 'The protected release tag must be a stable v-prefixed SemVer tag.'
     }
-    if (Get-CheckedOutput -FilePath 'git' -ArgumentList @('status', '--porcelain', '--untracked-files=all')) {
-        throw 'GitHub Releases require a clean working tree.'
+    $rulesetsJson = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
+        'api',
+        '-H',
+        'Accept: application/vnd.github+json',
+        '-H',
+        'X-GitHub-Api-Version: 2026-03-10',
+        "repos/$RepositoryName/rulesets?includes_parents=true&targets=tag&per_page=100"
+    )
+    $rulesets = @($rulesetsJson | ConvertFrom-Json)
+    $matchingRulesets = [Collections.Generic.List[object]]::new()
+    foreach ($summary in $rulesets) {
+        if ($summary.PSObject.Properties.Name -cnotcontains 'id') {
+            continue
+        }
+        $detailJson = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
+            'api',
+            '-H',
+            'Accept: application/vnd.github+json',
+            '-H',
+            'X-GitHub-Api-Version: 2026-03-10',
+            "repos/$RepositoryName/rulesets/$($summary.id)?includes_parents=true"
+        )
+        $detail = $detailJson | ConvertFrom-Json
+        if (
+            [string]$detail.target -cne 'tag' -or
+            [string]$detail.enforcement -cne 'active' -or
+            $detail.PSObject.Properties.Name -cnotcontains 'conditions' -or
+            $detail.conditions.PSObject.Properties.Name -cnotcontains 'ref_name' -or
+            $detail.conditions.ref_name.PSObject.Properties.Name -cnotcontains 'include' -or
+            $detail.conditions.ref_name.PSObject.Properties.Name -cnotcontains 'exclude' -or
+            $detail.PSObject.Properties.Name -cnotcontains 'rules' -or
+            $detail.PSObject.Properties.Name -cnotcontains 'bypass_actors'
+        ) {
+            continue
+        }
+        $includes = @($detail.conditions.ref_name.include)
+        $excludes = @($detail.conditions.ref_name.exclude)
+        $ruleTypes = @($detail.rules | ForEach-Object { [string]$_.type })
+        if (
+            $includes -cnotcontains 'refs/tags/v*' -or
+            $excludes.Count -ne 0 -or
+            @($detail.bypass_actors).Count -ne 0 -or
+            $ruleTypes -cnotcontains 'deletion' -or
+            $ruleTypes -cnotcontains 'update' -or
+            $ruleTypes -cnotcontains 'non_fast_forward'
+        ) {
+            continue
+        }
+        $matchingRulesets.Add($detail)
     }
-    Invoke-Checked -FilePath 'git' -ArgumentList @('fetch', '--prune', 'origin')
-    if (
-        (Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'HEAD')) -ne $CommitSha -or
-        (Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'origin/main')) -ne $CommitSha
-    ) {
-        throw 'HEAD or origin/main changed during release publication.'
+    if ($matchingRulesets.Count -eq 0) {
+        throw (
+            'GitHub must expose an active, no-bypass tag ruleset for refs/tags/v* that ' +
+            'blocks update, deletion, and non-fast-forward changes. Missing permissions, ' +
+            'unsupported API responses, or weaker rules fail closed.'
+        )
     }
-    $originUrl = Get-CheckedOutput -FilePath 'git' -ArgumentList @('remote', 'get-url', 'origin')
-    $escapedRepository = [regex]::Escape($RepositoryName)
-    if (
-        $originUrl -notmatch "(?i)^(https://github\.com/$escapedRepository(?:\.git)?/?|git@github\.com:$escapedRepository(?:\.git)?)$"
-    ) {
-        throw "Git origin '$originUrl' does not match GitHub repository '$RepositoryName'."
-    }
-    $actionsEnabled = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+}
+
+function Assert-GitHubManualReleaseControls {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryName,
+        [Parameter(Mandatory)][string]$TagName
+    )
+
+    $actionsEnabled = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
         'api',
         "repos/$RepositoryName/actions/permissions",
         '--jq',
@@ -303,7 +720,7 @@ function Assert-ManualPublishState {
     if ($actionsEnabled -ne 'false') {
         throw 'GitHub Actions must remain disabled during manual release publication.'
     }
-    $immutablePolicy = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+    $immutablePolicy = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
         'api',
         '-H',
         'Accept: application/vnd.github+json',
@@ -314,7 +731,126 @@ function Assert-ManualPublishState {
     if ($immutablePolicy.enabled -isnot [bool] -or $immutablePolicy.enabled -ne $true) {
         throw 'GitHub immutable releases must remain enabled during publication.'
     }
-    Assert-GitHubTagTarget -RepositoryName $RepositoryName -TagName $TagName -CommitSha $CommitSha
+    Assert-GitHubReleaseTagRuleset -RepositoryName $RepositoryName -TagName $TagName
+}
+
+function Assert-ManualPublishState {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryName,
+        [Parameter(Mandatory)][string]$TagName,
+        [Parameter(Mandatory)][string]$CommitSha,
+        [Parameter(Mandatory)][string]$ExpectedTagObjectSha,
+        [Parameter(Mandatory)][string]$ExpectedTagSignerFingerprint
+    )
+
+    Invoke-HardenedMainFetch
+    $currentSource = Assert-NekoSshGitSourceIntegrity `
+        -RepositoryRoot $repositoryRoot `
+        -GitExecutable $gitExecutable
+    if ([string]$currentSource.Commit -cne $CommitSha) {
+        throw 'HEAD or origin/main changed during release publication.'
+    }
+    $originUrl = Get-HardenedPublishGitOutput -ArgumentList @('remote', 'get-url', 'origin')
+    $escapedRepository = [regex]::Escape($RepositoryName)
+    if (
+        $originUrl -notmatch "(?i)^(https://github\.com/$escapedRepository(?:\.git)?/?|git@github\.com:$escapedRepository(?:\.git)?)$"
+    ) {
+        throw "Git origin '$originUrl' does not match GitHub repository '$RepositoryName'."
+    }
+    Assert-LocalSignedTagIdentity `
+        -TagName $TagName `
+        -CommitSha $CommitSha `
+        -ExpectedTagObjectSha $ExpectedTagObjectSha `
+        -ExpectedSignerFingerprint $ExpectedTagSignerFingerprint
+    Assert-GitHubManualReleaseControls `
+        -RepositoryName $RepositoryName `
+        -TagName $TagName
+    Assert-GitHubTagTarget `
+        -RepositoryName $RepositoryName `
+        -TagName $TagName `
+        -CommitSha $CommitSha `
+        -ExpectedTagObjectSha $ExpectedTagObjectSha
+}
+
+function Invoke-CheckedGitHubReleaseMutation {
+    param(
+        [Parameter(Mandatory)][string[]]$ArgumentList,
+        [Parameter(Mandatory)][string]$RepositoryName,
+        [Parameter(Mandatory)][string]$TagName,
+        [Parameter(Mandatory)][string]$CommitSha,
+        [Parameter(Mandatory)][string]$ExpectedTagObjectSha,
+        [Parameter(Mandatory)][string]$ExpectedTagSignerFingerprint
+    )
+
+    if (
+        $ArgumentList.Count -lt 2 -or
+        $ArgumentList[0] -cne 'release' -or
+        $ArgumentList[1] -cnotin @('create', 'upload', 'edit')
+    ) {
+        throw 'The guarded GitHub mutation wrapper only accepts release create/upload/edit.'
+    }
+    Assert-ManualPublishState `
+        -RepositoryName $RepositoryName `
+        -TagName $TagName `
+        -CommitSha $CommitSha `
+        -ExpectedTagObjectSha $ExpectedTagObjectSha `
+        -ExpectedTagSignerFingerprint $ExpectedTagSignerFingerprint
+    Invoke-Checked -FilePath $ghExecutable -ArgumentList $ArgumentList
+    Assert-ManualPublishState `
+        -RepositoryName $RepositoryName `
+        -TagName $TagName `
+        -CommitSha $CommitSha `
+        -ExpectedTagObjectSha $ExpectedTagObjectSha `
+        -ExpectedTagSignerFingerprint $ExpectedTagSignerFingerprint
+}
+
+function Invoke-CheckedTagPushMutation {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryName,
+        [Parameter(Mandatory)][string]$TagName,
+        [Parameter(Mandatory)][string]$CommitSha,
+        [Parameter(Mandatory)][string]$ExpectedTagObjectSha,
+        [Parameter(Mandatory)][string]$ExpectedTagSignerFingerprint
+    )
+
+    Invoke-HardenedMainFetch
+    $currentSource = Assert-NekoSshGitSourceIntegrity `
+        -RepositoryRoot $repositoryRoot `
+        -GitExecutable $gitExecutable
+    if ([string]$currentSource.Commit -cne $CommitSha) {
+        throw 'HEAD or origin/main changed immediately before tag publication.'
+    }
+    Assert-LocalSignedTagIdentity `
+        -TagName $TagName `
+        -CommitSha $CommitSha `
+        -ExpectedTagObjectSha $ExpectedTagObjectSha `
+        -ExpectedSignerFingerprint $ExpectedTagSignerFingerprint
+    Assert-GitHubManualReleaseControls `
+        -RepositoryName $RepositoryName `
+        -TagName $TagName
+    $remoteBefore = Get-HardenedPublishGitOutput -ArgumentList @(
+        'ls-remote',
+        $canonicalRepositoryUrl,
+        "refs/tags/$TagName"
+    )
+    if (-not [string]::IsNullOrWhiteSpace($remoteBefore)) {
+        throw "Remote tag $TagName appeared before its guarded push."
+    }
+    [void](Invoke-HardenedPublishGit -ArgumentList @(
+        'push',
+        '--no-verify',
+        '--no-follow-tags',
+        '--no-signed',
+        '--no-push-option',
+        $canonicalRepositoryUrl,
+        "refs/tags/$TagName"
+    ))
+    Assert-ManualPublishState `
+        -RepositoryName $RepositoryName `
+        -TagName $TagName `
+        -CommitSha $CommitSha `
+        -ExpectedTagObjectSha $ExpectedTagObjectSha `
+        -ExpectedTagSignerFingerprint $ExpectedTagSignerFingerprint
 }
 
 function Remove-OwnedFlatDirectory {
@@ -354,13 +890,17 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
 }
 Assert-PathHasNoReparsePoints -Path $manifestPath -TrustedRoot $repositoryRoot
 Import-Module -Name $signingPolicyModulePath -Force
+Import-Module -Name $sourceIntegrityModulePath -Force -ErrorAction Stop
 $manifest = Import-NekoSshReleaseManifest -Path $manifestPath
 if (
     -not ($manifest.schemaVersion -is [int] -or $manifest.schemaVersion -is [long]) -or
-    [long]$manifest.schemaVersion -ne 3
+    [long]$manifest.schemaVersion -ne 4
 ) {
     throw 'Unsupported release manifest schema.'
 }
+[void](Assert-NekoSshReleaseManifestToolchainIdentity `
+    -ManifestToolchain $manifest.toolchain `
+    -Toolchain $lockedToolchain)
 if ([string]$manifest.repository -ne $Repository) { throw 'Release manifest repository does not match.' }
 $isPrerelease = if ($manifest.prerelease -is [bool]) {
     $manifest.prerelease
@@ -414,13 +954,17 @@ $sourcePackage = Get-Content -LiteralPath (Join-Path $repositoryRoot 'package.js
 $requiredNpm = ([string]$sourcePackage.packageManager).Split('@')[-1]
 $toolchainFile = Get-Content -LiteralPath (Join-Path $repositoryRoot 'rust-toolchain.toml') -Raw
 $requiredRustMatch = [regex]::Match($toolchainFile, '(?m)^channel\s*=\s*"([^"]+)"')
+$manifestToolsByName = @{}
+foreach ($tool in $manifest.toolchain.tools) {
+    $manifestToolsByName[[string]$tool.name] = $tool
+}
 if (
     -not $requiredRustMatch.Success -or
-    [string]$manifest.toolchain.node -cne $requiredNode -or
-    [string]$manifest.toolchain.npm -cne $requiredNpm -or
-    [string]$manifest.toolchain.rustc -cnotmatch "^rustc $([regex]::Escape($requiredRustMatch.Groups[1].Value)) " -or
-    [string]$manifest.toolchain.cargo -cnotmatch "^cargo $([regex]::Escape($requiredRustMatch.Groups[1].Value)) " -or
-    [string]$manifest.toolchain.cargoAudit -cnotmatch '\b0\.22\.2\b' -or
+    ([string]$manifestToolsByName['node'].version).TrimStart('v') -cne $requiredNode -or
+    [string]$manifestToolsByName['npm'].version -cne $requiredNpm -or
+    [string]$manifestToolsByName['rustc'].version -cnotmatch "^rustc $([regex]::Escape($requiredRustMatch.Groups[1].Value)) " -or
+    [string]$manifestToolsByName['cargo'].version -cnotmatch "^cargo $([regex]::Escape($requiredRustMatch.Groups[1].Value)) " -or
+    [string]$manifestToolsByName['cargoAudit'].version -cnotmatch '\b0\.22\.2\b' -or
     [string]$manifest.toolchain.target -cne 'x86_64-pc-windows-msvc'
 ) {
     throw 'Release manifest toolchain identity does not match the pinned Windows build environment.'
@@ -655,6 +1199,7 @@ if (-not $isPrerelease) {
         throw "A stable release requires $smokeReceiptName inside its release directory."
     }
     Assert-PathHasNoReparsePoints -Path $resolvedSmokeReceipt -TrustedRoot $repositoryRoot
+    Protect-ReleaseInput -Path $resolvedSmokeReceipt
     $smokeSignature = Get-AuthenticodeSignature -LiteralPath $resolvedSmokeReceipt
     if (
         $smokeSignature.Status.ToString() -ne 'Valid' -or
@@ -861,22 +1406,54 @@ if (
 ) {
     throw 'Release notes are not the deterministic notes for this source and signing manifest.'
 }
+foreach ($protectedReleaseInput in @($localFiles.Values) + @($notesPath)) {
+    Protect-ReleaseInput -Path ([string]$protectedReleaseInput)
+}
+$gitDirectoryPath = Join-Path $repositoryRoot '.git'
+$gitConfigPath = Join-Path $gitDirectoryPath 'config'
+if (
+    -not (Test-Path -LiteralPath $gitDirectoryPath -PathType Container) -or
+    -not (Test-Path -LiteralPath $gitConfigPath -PathType Leaf)
+) {
+    throw 'Release publication requires a regular primary Git worktree with .git/config.'
+}
+Assert-TreeHasNoReparsePoints -Root $gitDirectoryPath
+foreach ($forbiddenGitAdministrativePath in @(
+    (Join-Path $gitDirectoryPath 'commondir'),
+    (Join-Path $gitDirectoryPath 'config.worktree'),
+    (Join-Path $gitDirectoryPath 'objects/info/alternates'),
+    (Join-Path $gitDirectoryPath 'objects/info/http-alternates')
+)) {
+    if (Test-Path -LiteralPath $forbiddenGitAdministrativePath) {
+        throw "Release publication rejects split/external Git administrative data: $forbiddenGitAdministrativePath"
+    }
+}
+Protect-ReleaseInput -Path $gitConfigPath
+Assert-NoUnsafePublishGitConfiguration
 
 Push-Location $repositoryRoot
 try {
-    if ((Get-CheckedOutput -FilePath 'git' -ArgumentList @('branch', '--show-current')) -ne 'main') {
-        throw 'GitHub Releases must be published from main.'
-    }
-    if (Get-CheckedOutput -FilePath 'git' -ArgumentList @('status', '--porcelain', '--untracked-files=all')) {
-        throw 'GitHub Releases require a clean working tree.'
-    }
-    Invoke-Checked -FilePath 'git' -ArgumentList @('fetch', '--prune', 'origin')
-    $head = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'HEAD')
-    $originHead = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', 'origin/main')
-    if ($head -ne $commit -or $originHead -ne $commit) {
+    [void](Assert-NekoSshReleaseManifestToolchainIdentity `
+        -ManifestToolchain $manifest.toolchain `
+        -Toolchain $lockedToolchain)
+    Invoke-HardenedMainFetch
+    $publishSourceIdentity = Assert-NekoSshGitSourceIntegrity `
+        -RepositoryRoot $repositoryRoot `
+        -GitExecutable $gitExecutable
+    if ([string]$publishSourceIdentity.Commit -cne $commit) {
         throw "Manifest, HEAD and origin/main must all point to $commit."
     }
-    $originUrl = Get-CheckedOutput -FilePath 'git' -ArgumentList @('remote', 'get-url', 'origin')
+    if (
+        [string]$manifest.source.branch -cne [string]$publishSourceIdentity.Branch -or
+        [string]$manifest.source.commit -cne [string]$publishSourceIdentity.Commit -or
+        [string]$manifest.source.tree -cne [string]$publishSourceIdentity.Tree -or
+        [string]$manifest.source.snapshotSha256 -cne [string]$publishSourceIdentity.SnapshotSha256 -or
+        [string]$manifest.source.digestFormat -cne [string]$publishSourceIdentity.DigestFormat -or
+        [int]$manifest.source.trackedFileCount -ne [int]$publishSourceIdentity.TrackedFileCount
+    ) {
+        throw 'Release manifest source identity does not match the complete checked-out Git source snapshot.'
+    }
+    $originUrl = Get-HardenedPublishGitOutput -ArgumentList @('remote', 'get-url', 'origin')
     $escapedRepository = [regex]::Escape($Repository)
     if (
         $originUrl -notmatch "(?i)^(https://github\.com/$escapedRepository(?:\.git)?/?|git@github\.com:$escapedRepository(?:\.git)?)$"
@@ -884,10 +1461,10 @@ try {
         throw "Git origin '$originUrl' does not match GitHub repository '$Repository'."
     }
 
-    Invoke-Checked -FilePath 'gh' -ArgumentList @('auth', 'status', '--hostname', 'github.com')
-    [void](Get-CheckedOutput -FilePath 'gh' -ArgumentList @('release', 'verify', '--help'))
-    [void](Get-CheckedOutput -FilePath 'gh' -ArgumentList @('release', 'verify-asset', '--help'))
-    $actionsEnabled = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+    Invoke-Checked -FilePath $ghExecutable -ArgumentList @('auth', 'status', '--hostname', 'github.com')
+    [void](Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @('release', 'verify', '--help'))
+    [void](Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @('release', 'verify-asset', '--help'))
+    $actionsEnabled = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
         'api',
         "repos/$Repository/actions/permissions",
         '--jq',
@@ -896,7 +1473,8 @@ try {
     if ($actionsEnabled -ne 'false') {
         throw 'GitHub Actions must remain disabled before publishing a manual release.'
     }
-    Invoke-Checked -FilePath 'gh' -ArgumentList @(
+    Assert-GitHubReleaseTagRuleset -RepositoryName $Repository -TagName $tag
+    Invoke-Checked -FilePath $ghExecutable -ArgumentList @(
         'api',
         '--method',
         'PUT',
@@ -906,7 +1484,7 @@ try {
         'X-GitHub-Api-Version: 2026-03-10',
         "repos/$Repository/immutable-releases"
     )
-    $immutablePolicy = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+    $immutablePolicy = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
         'api',
         '-H',
         'Accept: application/vnd.github+json',
@@ -917,8 +1495,9 @@ try {
     if ($immutablePolicy.enabled -isnot [bool] -or $immutablePolicy.enabled -ne $true) {
         throw 'GitHub immutable releases must be enabled before creating the draft.'
     }
+    Assert-GitHubManualReleaseControls -RepositoryName $Repository -TagName $tag
     if (-not $isPrerelease) {
-        $stableTagOutput = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+        $stableTagOutput = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
             'api',
             '--paginate',
             "repos/$Repository/releases?per_page=100",
@@ -947,7 +1526,7 @@ try {
             }
             $priorStableTag = "v$($smokeReceipt.UpgradeFromVersion)"
             $priorRelease = (
-                Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+                Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
                     'release',
                     'view',
                     $priorStableTag,
@@ -993,46 +1572,48 @@ try {
         }
     }
 
-    & gh release view $tag --repo $Repository --json tagName *> $null
+    & $ghExecutable release view $tag --repo $Repository --json tagName *> $null
     $releaseAlreadyExists = $LASTEXITCODE -eq 0
 
-    & git show-ref --verify --quiet "refs/tags/$tag"
-    if ($LASTEXITCODE -eq 0) {
-        $localTagType = Get-CheckedOutput -FilePath 'git' -ArgumentList @(
-            'cat-file',
-            '-t',
-            "refs/tags/$tag"
+    $localTagResult = Invoke-HardenedPublishGit `
+        -ArgumentList @('show-ref', '--verify', '--quiet', "refs/tags/$tag") `
+        -AllowedExitCodes @(0, 1)
+    if ($localTagResult.ExitCode -eq 1) {
+        throw (
+            "Local tag $tag is missing. Production publishing never creates tags; " +
+            'create and verify a cryptographically signed annotated tag in the controlled signing ceremony.'
         )
-        if ($localTagType -ne 'tag') {
-            throw "Local tag $tag must be an annotated tag before it can be pushed."
-        }
-        $localTagCommit = Get-CheckedOutput -FilePath 'git' -ArgumentList @('rev-parse', "$tag`^{commit}")
-        if ($localTagCommit -ne $commit) {
-            throw "Local tag $tag points to $localTagCommit instead of $commit."
-        }
-    } elseif ($LASTEXITCODE -eq 1) {
-        Invoke-Checked -FilePath 'git' -ArgumentList @('tag', '-a', $tag, $commit, '-m', "NekoSSH $tag")
-    } else {
-        throw "Unable to inspect local tag $tag."
     }
-
-    $remoteTag = Get-CheckedOutput -FilePath 'git' -ArgumentList @('ls-remote', 'origin', "refs/tags/$tag")
-    if ([string]::IsNullOrWhiteSpace($remoteTag)) {
-        Invoke-Checked -FilePath 'git' -ArgumentList @('push', 'origin', "refs/tags/$tag")
-    }
-    $peeledRemoteTag = Get-CheckedOutput -FilePath 'git' -ArgumentList @(
-        'ls-remote',
-        'origin',
-        "refs/tags/$tag`^{}"
+    $localTagObject = Get-HardenedPublishGitOutput -ArgumentList @(
+        'rev-parse',
+        "refs/tags/$tag"
     )
-    if ([string]::IsNullOrWhiteSpace($peeledRemoteTag)) {
-        throw "Remote tag $tag is not an annotated tag."
+    Assert-LocalSignedTagIdentity `
+        -TagName $tag `
+        -CommitSha $commit `
+        -ExpectedTagObjectSha $localTagObject `
+        -ExpectedSignerFingerprint $normalizedExpectedTagSignerFingerprint
+
+    $remoteTag = Get-HardenedPublishGitOutput -ArgumentList @(
+        'ls-remote',
+        $canonicalRepositoryUrl,
+        "refs/tags/$tag"
+    )
+    if ([string]::IsNullOrWhiteSpace($remoteTag)) {
+        Invoke-CheckedTagPushMutation `
+            -RepositoryName $Repository `
+            -TagName $tag `
+            -CommitSha $commit `
+            -ExpectedTagObjectSha $localTagObject `
+            -ExpectedTagSignerFingerprint $normalizedExpectedTagSignerFingerprint
+    } else {
+        Assert-ManualPublishState `
+            -RepositoryName $Repository `
+            -TagName $tag `
+            -CommitSha $commit `
+            -ExpectedTagObjectSha $localTagObject `
+            -ExpectedTagSignerFingerprint $normalizedExpectedTagSignerFingerprint
     }
-    $remoteTagCommit = ($peeledRemoteTag -split '\s+')[0]
-    if ($remoteTagCommit -ne $commit) {
-        throw "Remote tag $tag points to $remoteTagCommit instead of $commit."
-    }
-    Assert-GitHubTagTarget -RepositoryName $Repository -TagName $tag -CommitSha $commit
 
     $publishedNameInputs = @($expectedAssetNames) + @($checksumName, $manifestName)
     $publishedNameInputs += $smokeReceiptName
@@ -1077,10 +1658,16 @@ try {
             '--notes-file',
             $notesPath
         )
-        Invoke-Checked -FilePath 'gh' -ArgumentList $createArguments
+        Invoke-CheckedGitHubReleaseMutation `
+            -ArgumentList $createArguments `
+            -RepositoryName $Repository `
+            -TagName $tag `
+            -CommitSha $commit `
+            -ExpectedTagObjectSha $localTagObject `
+            -ExpectedTagSignerFingerprint $normalizedExpectedTagSignerFingerprint
     }
 
-    $releaseJson = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+    $releaseJson = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
         'release',
         'view',
         $tag,
@@ -1138,7 +1725,7 @@ try {
             if ($file.Length -ne [long]$record.bytes -or $hash -ne [string]$record.sha256) {
                 throw "Release input changed before draft repair: $name"
             }
-            Invoke-Checked -FilePath 'gh' -ArgumentList @(
+            $uploadArguments = @(
                 'release',
                 'upload',
                 $tag,
@@ -1146,8 +1733,15 @@ try {
                 '--repo',
                 $Repository
             )
+            Invoke-CheckedGitHubReleaseMutation `
+                -ArgumentList $uploadArguments `
+                -RepositoryName $Repository `
+                -TagName $tag `
+                -CommitSha $commit `
+                -ExpectedTagObjectSha $localTagObject `
+                -ExpectedTagSignerFingerprint $normalizedExpectedTagSignerFingerprint
         }
-        $releaseJson = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+        $releaseJson = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
             'release',
             'view',
             $tag,
@@ -1181,7 +1775,7 @@ try {
     New-Item -ItemType Directory -Path $verificationDirectory | Out-Null
     Assert-PathHasNoReparsePoints -Path $verificationDirectory -TrustedRoot $repositoryRoot
     try {
-        Invoke-Checked -FilePath 'gh' -ArgumentList @(
+        Invoke-Checked -FilePath $ghExecutable -ArgumentList @(
             'release',
             'download',
             $tag,
@@ -1221,7 +1815,7 @@ try {
         Remove-OwnedFlatDirectory -Path $verificationDirectory -Parent $resolvedReleaseDirectory
     }
 
-    $prePublishJson = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+    $prePublishJson = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
         'release',
         'view',
         $tag,
@@ -1252,10 +1846,15 @@ try {
             throw "Draft asset metadata changed after download verification: $($asset.name)"
         }
     }
-    Assert-ManualPublishState -RepositoryName $Repository -TagName $tag -CommitSha $commit
+    Assert-ManualPublishState `
+        -RepositoryName $Repository `
+        -TagName $tag `
+        -CommitSha $commit `
+        -ExpectedTagObjectSha $localTagObject `
+        -ExpectedTagSignerFingerprint $normalizedExpectedTagSignerFingerprint
 
     if ($prePublishRelease.isDraft -eq $true) {
-        $publicationGateJson = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+        $publicationGateJson = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
             'release',
             'view',
             $tag,
@@ -1297,10 +1896,19 @@ try {
             '--draft=false'
         )
         $publishArguments += @('--prerelease=false', '--latest')
-        Invoke-Checked -FilePath 'gh' -ArgumentList $publishArguments
+        [void](Assert-NekoSshReleaseManifestToolchainIdentity `
+            -ManifestToolchain $manifest.toolchain `
+            -Toolchain $lockedToolchain)
+        Invoke-CheckedGitHubReleaseMutation `
+            -ArgumentList $publishArguments `
+            -RepositoryName $Repository `
+            -TagName $tag `
+            -CommitSha $commit `
+            -ExpectedTagObjectSha $localTagObject `
+            -ExpectedTagSignerFingerprint $normalizedExpectedTagSignerFingerprint
     }
 
-    $finalReleaseJson = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+    $finalReleaseJson = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
         'release',
         'view',
         $tag,
@@ -1342,7 +1950,7 @@ try {
     New-Item -ItemType Directory -Path $publishedVerificationDirectory | Out-Null
     Assert-PathHasNoReparsePoints -Path $publishedVerificationDirectory -TrustedRoot $repositoryRoot
     try {
-        Invoke-Checked -FilePath 'gh' -ArgumentList @(
+        Invoke-Checked -FilePath $ghExecutable -ArgumentList @(
             'release',
             'download',
             $tag,
@@ -1381,8 +1989,13 @@ try {
     finally {
         Remove-OwnedFlatDirectory -Path $publishedVerificationDirectory -Parent $resolvedReleaseDirectory
     }
-    Assert-ManualPublishState -RepositoryName $Repository -TagName $tag -CommitSha $commit
-    $postPublishStateJson = Get-CheckedOutput -FilePath 'gh' -ArgumentList @(
+    Assert-ManualPublishState `
+        -RepositoryName $Repository `
+        -TagName $tag `
+        -CommitSha $commit `
+        -ExpectedTagObjectSha $localTagObject `
+        -ExpectedTagSignerFingerprint $normalizedExpectedTagSignerFingerprint
+    $postPublishStateJson = Get-CheckedOutput -FilePath $ghExecutable -ArgumentList @(
         'release',
         'view',
         $tag,
@@ -1416,7 +2029,7 @@ try {
     }
     $releaseAttestationVerified = $false
     for ($attempt = 1; $attempt -le 30; $attempt += 1) {
-        & gh release verify $tag --repo $Repository --format json *> $null
+        & $ghExecutable release verify $tag --repo $Repository --format json *> $null
         if ($LASTEXITCODE -eq 0) {
             $releaseAttestationVerified = $true
             break
@@ -1438,7 +2051,7 @@ try {
         ) {
             throw "Local release asset changed before attestation verification: $name"
         }
-        Invoke-Checked -FilePath 'gh' -ArgumentList @(
+        Invoke-Checked -FilePath $ghExecutable -ArgumentList @(
             'release',
             'verify-asset',
             $tag,
@@ -1451,5 +2064,14 @@ try {
     Write-Host "GitHub Release verified: $($finalRelease.url)"
 }
 finally {
-    Pop-Location
+    try {
+        for ($lockIndex = $releaseInputLocks.Count - 1; $lockIndex -ge 0; $lockIndex -= 1) {
+            $releaseInputLocks[$lockIndex].Dispose()
+        }
+        $releaseInputLocks.Clear()
+        $lockedReleaseInputPaths.Clear()
+    }
+    finally {
+        Pop-Location
+    }
 }

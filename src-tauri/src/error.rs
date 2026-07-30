@@ -48,6 +48,8 @@ pub enum NekoError {
     SshTransferTotalTooLarge,
     #[error("the SFTP transfer job was not found")]
     SshTransferJobNotFound,
+    #[error("the SSH server does not support atomic SFTP overwrite")]
+    SshAtomicOverwriteUnsupported,
     #[error("the SFTP transfer could not complete")]
     SshTransferFailed,
     #[error("the SSH terminal could not be started")]
@@ -92,6 +94,7 @@ impl NekoError {
             Self::SshTransferFileTooLarge => "ssh_transfer_file_too_large",
             Self::SshTransferTotalTooLarge => "ssh_transfer_total_too_large",
             Self::SshTransferJobNotFound => "ssh_transfer_job_not_found",
+            Self::SshAtomicOverwriteUnsupported => "ssh_sftp_atomic_overwrite_unsupported",
             Self::SshTransferFailed => "ssh_transfer_failed",
             Self::SshTerminalStartFailed => "ssh_terminal_start_failed",
             Self::SshTerminalResizeInvalid => "ssh_terminal_resize_invalid",
@@ -128,6 +131,9 @@ impl NekoError {
             Self::SshTransferFileTooLarge => "传输文件超过支持的大小。",
             Self::SshTransferTotalTooLarge => "本次传输总大小超过限制。",
             Self::SshTransferJobNotFound => "未找到该 SFTP 传输任务。",
+            Self::SshAtomicOverwriteUnsupported => {
+                "服务器不支持安全原子覆盖（posix-rename@openssh.com），原文件已保留。"
+            }
             Self::SshTransferFailed => "SFTP 传输失败，请检查连接和远端权限。",
             Self::SshTerminalStartFailed => "无法启动 SSH 终端。",
             Self::SshTerminalResizeInvalid => "终端尺寸无效。",
@@ -158,6 +164,14 @@ mod tests {
         assert_eq!(
             NekoError::SshHostKeyAlgorithmRejected.public_message(),
             "服务器使用了已禁用的旧主机密钥算法。"
+        );
+        assert_eq!(
+            NekoError::SshAtomicOverwriteUnsupported.public_message(),
+            "服务器不支持安全原子覆盖（posix-rename@openssh.com），原文件已保留。"
+        );
+        assert_eq!(
+            NekoError::SshAtomicOverwriteUnsupported.code(),
+            "ssh_sftp_atomic_overwrite_unsupported"
         );
     }
 }

@@ -59,10 +59,33 @@ Import-SigningFunctions -Names @(
     'Copy-RegularFileToNewPath',
     'Restore-UnsignedReceiptFromPrivateBackup',
     'Remove-PrivateSigningDirectory',
-    'Get-ResolvedGitExecutable',
     'Get-CheckedGitOutput',
-    'Assert-TrackedInputsMatchHead'
+    'Assert-TrackedInputsMatchHead',
+    'Resolve-AuthenticodeTimestampUri'
 )
+
+$validTimestampUri = Resolve-AuthenticodeTimestampUri `
+    -Value 'http://timestamp.example.test/authenticode'
+if ($validTimestampUri.AbsoluteUri -cne 'http://timestamp.example.test/authenticode') {
+    throw 'The Authenticode timestamp URI validator changed a valid endpoint.'
+}
+foreach ($invalidTimestampUri in @(
+    'https://timestamp.example.test/authenticode',
+    'http://user:secret@timestamp.example.test/authenticode',
+    'http://timestamp.example.test/authenticode#fragment',
+    'not-a-uri'
+)) {
+    $invalidTimestampRejected = $false
+    try {
+        Resolve-AuthenticodeTimestampUri -Value $invalidTimestampUri | Out-Null
+    }
+    catch {
+        $invalidTimestampRejected = $_.Exception.Message -like '*Set-AuthenticodeSignature cannot use an HTTPS*'
+    }
+    if (-not $invalidTimestampRejected) {
+        throw "The receipt timestamp gate accepted an unsafe endpoint: $invalidTimestampUri"
+    }
+}
 
 $privateSigningDirectory = New-PrivateSigningDirectory
 $privateSigningSids = @(Get-SigningAclSids)
@@ -86,7 +109,10 @@ finally {
     }
 }
 
-$gitExecutable = Get-ResolvedGitExecutable
+$gitExecutable = (
+    Get-Command -Name git.exe -CommandType Application -ErrorAction Stop |
+        Select-Object -First 1
+).Source
 Assert-TrackedInputsMatchHead -Paths @('.gitattributes')
 
 function Get-CheckedGitOutput {
@@ -235,4 +261,5 @@ if ($LASTEXITCODE -ne 0 -or $policy.SourceGitBlobId -cne $headPolicyBlob) {
     ExistingReceiptRecovery = 'passed'
     MissingReceiptRecovery = 'passed'
     PolicySingleReadHash = 'passed'
+    AuthenticodeTimestampUri = 'passed'
 } | ConvertTo-Json -Compress
