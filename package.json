@@ -8,10 +8,10 @@
     "type": "git",
     "url": "git+https://github.com/neko233-com/nekossh.git"
   },
-  "packageManager": "npm@12.0.1",
+  "packageManager": "npm@12.0.2",
   "engines": {
-    "node": ">=24.18.0 <25",
-    "npm": ">=12.0.1 <13"
+    "node": ">=24.18.1 <25",
+    "npm": ">=12.0.2 <13"
   },
   "type": "module",
   "scripts": {
@@ -32,15 +32,20 @@
     "tauri:icon": "tauri icon src-tauri/icons/nekossh-icon.svg --output src-tauri/icons",
     "tauri:build": "tauri build --ci -- --locked",
     "tauri:bundle": "tauri build --ci --bundles nsis,msi -- --locked",
-    "audit:rust": "cargo audit --file src-tauri/Cargo.lock",
+    "release:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows-release.ps1",
+    "release:smoke-windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-windows-release-installers.ps1",
+    "release:sign-smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-windows-smoke-receipt.ps1",
+    "release:publish": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-github-release.ps1",
+    "verify:web-launcher": "cargo fmt --manifest-path web-launcher/Cargo.toml --all -- --check && cargo clippy --manifest-path web-launcher/Cargo.toml --locked --all-targets -- -D warnings && cargo test --manifest-path web-launcher/Cargo.toml --locked",
+    "audit:rust": "cargo audit --file src-tauri/Cargo.lock && cargo audit --file web-launcher/Cargo.lock",
     "audit:deps": "npm audit --audit-level=low && npm run audit:rust",
-    "verify": "npm run build && npm run web:build && npm test && cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --locked --all-features"
+    "verify": "npm run build && npm run web:build && npm test && cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --locked --all-features && npm run verify:web-launcher"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "lucide-react": "^1.27.0",
+    "lucide-react": "1.28.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "ssh2": "^1.17.0"

@@ -770,6 +770,9 @@ function AgentPane({ connection }: { connection: ConnectionSummary }) {
   const [grant, setGrant] = useState<AgentGrant | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const payload = useMemo(() => grant ? JSON.stringify({ name: 'ssh_connection_attach', arguments: { grant: grant.grant } }, null, 2) : '', [grant])
+  const mcpEndpoint = import.meta.env.DEV
+    ? 'http://127.0.0.1:7331/mcp'
+    : new URL('/mcp', window.location.origin).toString()
 
   async function enable() {
     try {
@@ -788,5 +791,5 @@ function AgentPane({ connection }: { connection: ConnectionSummary }) {
     }
   }
 
-  return <div className="web-agent-pane"><div className="web-agent-hero"><span><Bot size={24} /></span><div><p>本机 MCP</p><h3>把当前会话交给 Agent</h3></div></div><p>Agent 只能使用你在浏览器中已建立的临时连接，不会收到 SSH 密码或私钥。</p>{grant ? <><div className="web-agent-code"><code>{payload}</code><button onClick={() => void copyGrant()} type="button"><Copy size={14} />复制授权调用</button></div><small>有效期约 {Math.max(1, Math.floor(grant.expiresInSeconds / 60))} 分钟；只能使用一次。</small></> : <button className="web-primary-button" onClick={() => void enable()} type="button"><Bot size={16} />生成 Agent 授权</button>}<div className="web-agent-endpoint"><span>MCP 地址</span><code>http://127.0.0.1:7331/mcp</code><small>认证 Token 在启动本地 Web 服务的终端中显示。</small></div>{message ? <p aria-live="polite" className="web-agent-message">{message}</p> : null}</div>
+  return <div className="web-agent-pane"><div className="web-agent-hero"><span><Bot size={24} /></span><div><p>本机 MCP</p><h3>把当前会话交给 Agent</h3></div></div><p>Agent 只能使用你在浏览器中已建立的临时连接，不会收到 SSH 密码或私钥。</p>{grant ? <><div className="web-agent-code"><code>{payload}</code><button onClick={() => void copyGrant()} type="button"><Copy size={14} />复制授权调用</button></div><small>有效期约 {Math.max(1, Math.floor(grant.expiresInSeconds / 60))} 分钟；只能使用一次。</small></> : <button className="web-primary-button" onClick={() => void enable()} type="button"><Bot size={16} />生成 Agent 授权</button>}<div className="web-agent-endpoint"><span>MCP 地址</span><code>{mcpEndpoint}</code><small>认证 Token 在启动本地 Web 服务的终端中显示。</small></div>{message ? <p aria-live="polite" className="web-agent-message">{message}</p> : null}</div>
 }

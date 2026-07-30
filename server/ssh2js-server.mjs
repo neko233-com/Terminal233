@@ -13,6 +13,7 @@ import {
 } from './session-lifecycle.mjs'
 import { OperationAdmission, OperationAdmissionError } from './operation-admission.mjs'
 import { TerminalAdmission, TerminalAdmissionError } from './terminal-admission.mjs'
+import { createStaticWebHandler } from './static-web.mjs'
 
 const { Client } = ssh2
 const HOST = '127.0.0.1'
@@ -62,6 +63,9 @@ const SUPPORTED_MCP_VERSION = '2025-11-25'
 const MCP_TOKEN = validToken(process.env.NEKOSSH_MCP_TOKEN)
   ? process.env.NEKOSSH_MCP_TOKEN
   : randomBytes(32).toString('base64url')
+const serveStaticWeb = process.env.NEKOSSH_WEB_ROOT
+  ? createStaticWebHandler(process.env.NEKOSSH_WEB_ROOT)
+  : null
 
 const browserSessions = new Map()
 const connections = new Map()
@@ -130,6 +134,7 @@ async function route(request, response) {
     return sendJson(response, 200, { status: 'ok', sshEngine: 'ssh2js', runtime: 'node', persistence: 'memory_only' })
   }
   if (url.pathname === '/mcp') return routeMcp(request, response)
+  if (serveStaticWeb && await serveStaticWeb(request, response, url)) return
   if (!url.pathname.startsWith('/api/')) throw apiError(404, 'not_found', '接口不存在。')
   requireBrowserOrigin(request)
 

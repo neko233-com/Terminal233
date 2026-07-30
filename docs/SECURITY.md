@@ -64,10 +64,13 @@ JavaScript 引擎和垃圾回收器可能产生无法显式覆盖的短时字符
 
 ## 发布前检查
 
-- 使用锁定的 Node.js 24.18.0、npm 12.0.1 与 Rust 1.97.1 执行 `npm run verify`、`npm audit --audit-level=low` 与 `cargo audit --file src-tauri/Cargo.lock`。
-- 执行 `powershell -ExecutionPolicy Bypass -File scripts/validate-github-actions.ps1`；工作流只使用完整提交 SHA 固定的 GitHub Actions，且默认权限仅为 `contents: read`。
-- Windows 安装包使用 `npm run tauri:icon` 与 `npm run tauri:bundle` 生成，发布前记录产物 SHA-256 并在隔离环境完成安装/卸载回归。
+- 使用锁定的 Node.js 24.18.1、npm 12.0.2 与 Rust 1.97.1 执行 `npm run verify`、`npm audit --audit-level=low`，并审计 Tauri 与 Web 启动器两份 Cargo lockfile。
+- 仓库级 GitHub Actions 保持禁用，版本库不保留自动 workflow；所有发布验证和打包都从干净且已推送的 `main` 手工执行。
+- Windows 资产使用 `npm run release:windows` 生成；脚本只删除当前版本的精确旧产物、拒绝 reparse point、精确选择新产物、记录 SHA-256，并在发布前检查 Authenticode、时间戳和预期证书指纹。
+- 独立 Web ZIP 只包含签名项目启动器、固定且经官方哈希与 OpenJS 签名验证的 Node.js、Web 构建和最小纯 JavaScript `ssh2` 依赖。启动器清除 `NODE_OPTIONS`、`NODE_PATH`、外部 MCP token 等注入环境，在 Node 权限模式下运行，不授予子进程或原生扩展能力，并以嵌入启动器的 manifest 哈希验证全部 payload 及额外文件。无签名 ZIP 只做静态本机校验，验证器不会执行其中的 EXE。
 - 在隔离 SSHD 上覆盖 host-key 变化、错误密码、网络中断、PTY resize 与 SFTP 限额。
-- 检查 Tauri capability、CSP、更新链与依赖清单；CI 的无签名验证包不得直接作为正式下载发布，正式 EXE、NSIS 与 MSI 必须完成 Authenticode 签名、时间戳和签名状态校验。
+- 检查 Tauri capability、CSP、降级策略与依赖清单；正式分发的 Tauri 主程序、NSIS、MSI 与 Web 启动器必须完成 Authenticode 签名、RFC 3161 时间戳，以及签名策略中的 Thumbprint、Subject、SPKI 和版本窗口校验。无签名输出一律 `publishable=false`。
+- 稳定版由受控签名机在 VM 启动前预发 256-bit challenge；一次性干净 Windows x64 VM 验证 NSIS/MSI 安装、同格式升级或重装、降级阻止、ARP 卸载命令、卸载残留、全部实际安装 PE 签名以及两条内置 SSH 运行时自检。VM 不持有生产私钥，未签回执返回受控机器复验后再签名。
+- GitHub 发布器必须确认严格 manifest、验收回执、`HEAD`、`origin/main` 与 annotated tag 指向同一提交；Actions 必须禁用，immutable releases 必须启用。草稿与公开发布后都会重新下载全部 Release 资产、逐一核对哈希并重跑签名 Web 自检，最终还验证 release 与逐资产 GitHub attestation。
 - 确认 Node 服务只监听 loopback，Origin/token/version 拒绝路径均有测试。
 - 定期轮换真实测试主机密码；不要把生产凭据提交到代码、日志或测试快照。

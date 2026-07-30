@@ -14,6 +14,20 @@ mod ssh_terminal;
 
 use tauri::Manager;
 
+pub fn production_self_test_receipt() -> Result<String, String> {
+    let _session =
+        ssh2::Session::new().map_err(|error| format!("无法初始化进程内 libssh2：{error}"))?;
+    let state = ide_commands::IdeState::new();
+    drop(state);
+    Ok(serde_json::json!({
+        "ok": true,
+        "version": env!("CARGO_PKG_VERSION"),
+        "runtime": "rust-libssh2",
+        "persistence": "memory_only",
+    })
+    .to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -49,6 +63,16 @@ pub fn run() {
 #[cfg(test)]
 mod configuration_tests {
     #[test]
+    fn production_self_test_initializes_the_native_runtime() {
+        let receipt: serde_json::Value =
+            serde_json::from_str(&super::production_self_test_receipt().expect("self-test"))
+                .expect("JSON receipt");
+        assert_eq!(receipt["ok"].as_bool(), Some(true));
+        assert_eq!(receipt["runtime"].as_str(), Some("rust-libssh2"));
+        assert_eq!(receipt["persistence"].as_str(), Some("memory_only"));
+    }
+
+    #[test]
     fn tauri_configuration_uses_loopback_dev_server_and_a_restrictive_csp() {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid Tauri JSON");
@@ -74,6 +98,19 @@ mod configuration_tests {
         assert_eq!(
             config["app"]["security"]["capabilities"],
             serde_json::json!(["main-capability"])
+        );
+        assert_eq!(
+            config["app"]["windows"][0]["incognito"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            config["bundle"]["windows"]["allowDowngrades"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(config["bundle"]["licenseFile"].as_str(), Some("../LICENSE"));
+        assert_eq!(
+            config["bundle"]["windows"]["wix"]["upgradeCode"].as_str(),
+            Some("44f1588e-bcfd-5973-a955-237daf92726d")
         );
     }
 

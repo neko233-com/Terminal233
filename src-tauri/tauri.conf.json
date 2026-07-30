@@ -18,7 +18,8 @@
         "height": 800,
         "minWidth": 960,
         "minHeight": 640,
-        "resizable": true
+        "resizable": true,
+        "incognito": true
       }
     ],
     "security": {
@@ -32,10 +33,12 @@
     "targets": ["nsis", "msi"],
     "publisher": "NekoSSH contributors",
     "homepage": "https://github.com/neko233-com/nekossh",
+    "licenseFile": "../LICENSE",
     "icon": [
       "icons/icon.ico"
     ],
     "windows": {
+      "allowDowngrades": false,
       "nsis": {
         "displayLanguageSelector": false,
         "installMode": "currentUser",
@@ -43,7 +46,8 @@
         "languages": ["SimpChinese", "English"]
       },
       "wix": {
-        "language": "zh-CN"
+        "language": "zh-CN",
+        "upgradeCode": "44f1588e-bcfd-5973-a955-237daf92726d"
       }
     }
   }

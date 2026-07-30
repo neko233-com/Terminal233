@@ -1,0 +1,5 @@
+/release-signing-policy.json text eol=lf
+/release-signing-policy.schema.json text eol=lf
+/release-manifest.schema.json text eol=lf
+/scripts/*.ps1 text eol=lf
+/scripts/*.psm1 text eol=lf

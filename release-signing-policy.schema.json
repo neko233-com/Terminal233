@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/neko233-com/nekossh/blob/main/release-signing-policy.schema.json",
+  "title": "NekoSSH release signing policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "repository",
+    "windowsAuthenticode"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "./release-signing-policy.schema.json"
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "repository": {
+      "const": "neko233-com/nekossh"
+    },
+    "windowsAuthenticode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowedSigners"
+      ],
+      "properties": {
+        "allowedSigners": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "thumbprint",
+              "subject",
+              "spkiSha256",
+              "validFromVersion",
+              "validThroughVersion"
+            ],
+            "properties": {
+              "thumbprint": {
+                "type": "string",
+                "pattern": "^[0-9A-F]{40}$"
+              },
+              "subject": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "spkiSha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "validFromVersion": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+              },
+              "validThroughVersion": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

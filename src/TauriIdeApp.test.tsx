@@ -152,6 +152,23 @@ beforeEach(() => {
 })
 
 describe('Tauri SSH IDE', () => {
+  it('prevents the WebView from persisting connection credentials through autofill', async () => {
+    const user = userEvent.setup()
+    render(<TauriIdeApp />)
+    const dialog = await openCreateDialog(user)
+
+    expect(dialog).toHaveAttribute('autocomplete', 'off')
+    expect(within(dialog).getByLabelText('用户')).toHaveAttribute('autocomplete', 'off')
+    expect(within(dialog).getByLabelText('密码')).toHaveAttribute('autocomplete', 'new-password')
+
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: '认证方式' }), 'private_key')
+    expect(within(dialog).getByLabelText('私钥')).toHaveAttribute('autocomplete', 'off')
+    expect(within(dialog).getByLabelText('私钥口令（可选）')).toHaveAttribute(
+      'autocomplete',
+      'new-password',
+    )
+  })
+
   it('rejects an out-of-range port without creating a connection', async () => {
     const user = userEvent.setup()
     render(<TauriIdeApp />)
