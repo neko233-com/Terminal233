@@ -1,6 +1,6 @@
-# NekoSSH 手工发布
+# Terminal233 发布策略
 
-NekoSSH 禁用 GitHub Actions。Windows 构建、验收、签名和 GitHub Release 发布全部由维护者在锁定环境中手工完成。发行文件上传为 GitHub Release assets，不进入 GitHub Packages Registry、npm 或 NuGet。
+当前开发阶段不创建 workflow、不产出 Windows ARM64 桌面包，也不让普通提交或推送触发 GitHub Actions。未来正式发布改由只监听 `vMAJOR.MINOR.PATCH` tag 的 GitHub Actions CI 负责；只有用户明确口头主动说“发布”后，才允许创建或推送发布 tag。发行文件上传为 GitHub Release assets，不进入 GitHub Packages Registry、npm 或 NuGet。
 
 ## 强制门禁
 
@@ -9,7 +9,7 @@ NekoSSH 禁用 GitHub Actions。Windows 构建、验收、签名和 GitHub Relea
 - 正式打包和发布入口只能直接调用 `powershell.exe -File ...`，不能先经过 npm。运行任何 Git、GitHub CLI、Node.js 或 npm 命令前，脚本都必须以命令行单独提供的 SHA-256 锚定仓库外的 builder toolchain lock。
 - 正式发布只接受稳定 SemVer、可信 Authenticode 签名和 RFC 3161 时间戳。`-AllowUnsigned` 永远生成 `publishable=false` 的本机验证产物，发布器会拒绝它。
 - `release-signing-policy.json` 必须预先提交真实 signer 的精确 Thumbprint、Subject、SPKI SHA-256 和版本窗口。空 allowlist 会按设计 fail-closed。
-- 仓库级 GitHub Actions 必须保持禁用。发布器会在创建草稿前启用 GitHub immutable releases；公开后 tag、标题、说明和 assets 均不可修改。
+- 普通 `main` push、`pull_request` 和其他分支 push 不得触发 GitHub Actions；正式发布 tag、标题、说明和 assets 均必须在明确发布授权后由 CI/发布门禁生成并保持不可变。
 - 稳定版必须有七天内生成的 Windows 验收回执。验收 VM 不持有生产私钥；回执复制回受控签名机后再签名。
 
 NSIS 是面向个人用户的当前用户安装通道，MSI 是面向管理员部署的机器级通道。两者各自支持同格式升级；不支持跨格式直接覆盖，切换前必须先卸载。

@@ -8,11 +8,19 @@
 
 ## 平台与发布范围
 
-- 桌面端正式支持 Windows `x86_64-pc-windows-msvc` 与 `aarch64-pc-windows-msvc`，安装目录默认为 `C:\App\Terminal233`。
+- 桌面端目标规划包含 Windows `x86_64-pc-windows-msvc` 与 `aarch64-pc-windows-msvc`，安装目录默认为 `C:\App\Terminal233`；当前阶段只产出和安装 Windows x86_64，Windows ARM64 桌面包暂停产出。
 - 32 位 Windows、`i686`、`i386` 及其他 32 位桌面目标明确不在范围内。产品文档中的“Windows x86”一律指 x86_64，不得新增 32 位构建、安装包、测试或发布资产。
 - 服务端只考虑 Linux `amd64` 与 `arm64`；不发布 Windows 服务端。
-- 发布、更新清单和平台资产必须使用 `scripts/package-terminal233-release.ps1` 及其配套脚本生成。缺少目标工具链时必须失败并报告，不得伪造或改名为其他架构的资产。
+- 当前本地发布候选和更新清单不得包含 Windows ARM64 桌面资产；ARM64 桌面资产只允许由未来的 GitHub Actions 发布 CI 生成。
 - 桌面端自动检查更新只信任项目发布的更新清单和对应校验值；版本比较、平台筛选和安装包命名必须保持 x86_64/arm64 一致。
+
+## 发布与 GitHub Actions 授权（永久项目规则）
+
+- 普通开发、测试、提交和推送不得触发 GitHub Actions。未来新增的 workflow 必须只监听正式发布 tag（`vMAJOR.MINOR.PATCH`），禁止 `push` 到 `main`、`pull_request` 或其他普通分支触发；除非用户明确授权，也不得提供会产生发布资产的手动 workflow 入口。
+- 创建或推送正式发布 tag 是受限操作。只有用户明确口头主动说“发布”（或同等明确的发布指令）时，才允许创建/推送发布 tag 并触发 GitHub Actions；“打包”“测试”“提交”“推送”“准备发布”均不等于发布授权。
+- 未获得上述明确授权时，禁止执行 `git tag`、`git push origin v*`、GitHub Release 创建或任何会触发发布 workflow 的操作。不得根据上下文自行推断发布授权。
+- 当前阶段不创建 `.github/workflows`、不触发 GitHub Actions、不产出 Windows ARM64 桌面包。后续若用户明确说“发布”，才按 tag-only CI 方案生成并验证发布资产。
+- 这组规则是本项目的长期协作记忆；任何后续任务都必须先遵守它，再执行构建、提交或发布动作。
 
 ## rdesktop 集成边界
 
@@ -46,4 +54,4 @@
 
 - 只要 Windows 版本通过本轮验证，就必须使用命令行构建并静默安装最新的 Terminal233 到 `C:\App\Terminal233`，再核验已安装版本；禁止依赖 GUI 或电脑操控完成安装。
 - 开发机安装以当前 `main` 的最新已验证提交为准。若缺少可信 Authenticode 证书，可以安装明确标记为本机验证用途的 unsigned 构建，但禁止把它上传为正式 GitHub Release。
-- GitHub Actions 必须保持禁用，仓库不得新增 `.github/workflows`；Windows 安装包与 GitHub Release 资产均走文档约定的手工流程。
+- 普通提交禁止触发 GitHub Actions；当前仓库不新增 `.github/workflows`。Windows x86_64 本机验证包仍走命令行手工流程；正式 GitHub Release 只有在用户明确说“发布”后，才允许通过正式 tag 触发未来的 GitHub Actions 发布 CI。

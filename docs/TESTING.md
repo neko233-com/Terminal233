@@ -11,7 +11,7 @@ corepack npm run terminal233:package:server:linux
 corepack npm run terminal233:package:server:linux:arm64
 ```
 
-完整发布包使用 `corepack npm run terminal233:package:release`，发布前由 `scripts/publish-terminal233-release.ps1` 手工上传；客户端更新清单必须覆盖 Windows x86_64/ARM64 和 Linux amd64/arm64 四个资产。
+完整发布包由未来的 tag-only GitHub Actions 发布 CI 生成；当前本地只验证 Windows x86_64 桌面包与 Linux server amd64/arm64 包，不产出 Windows ARM64 桌面资产。只有用户明确口头授权“发布”后，才允许创建发布 tag 触发 CI。
 
 ## 自动验证
 
@@ -61,10 +61,9 @@ corepack npm run verify
 corepack npm run terminal233:package:windows
 corepack npm run terminal233:package:server:linux
 corepack npm run terminal233:package:server:linux:arm64
-corepack npm run terminal233:package:windows:arm64
 ```
 
-Windows x86_64 包应解压并静默安装到 `C:\App\Terminal233`，然后检查 `Terminal233.exe --version`、`Terminal233.exe --self-test` 和 `dist\index.html` 标题。Windows ARM64 构建需要本机安装对应的 Visual C++ Build Tools/Windows SDK；缺少 `link.exe` 时必须明确记录为环境阻塞，不得伪造 ARM64 包。Linux server 包只发布 amd64 与 arm64 两种架构。
+Windows x86_64 包应解压并静默安装到 `C:\App\Terminal233`，然后检查 `Terminal233.exe --version`、`Terminal233.exe --self-test` 和 `dist\index.html` 标题。Windows ARM64 桌面包当前不在本地验收范围，未来只由获得明确发布授权后触发的 GitHub Actions 生成。Linux server 包只发布 amd64 与 arm64 两种架构。
 
 `scripts/package-windows-release.ps1` 从全新的 Cargo target 构建并精确收集当前版本 NSIS/MSI，同时生成独立 Web macOS Windows 便携 ZIP、第三方许可、`SHA256SUMS.txt` 与提交绑定 manifest。正式打包与发布禁止以 npm script 作为入口；必须直接调用 PowerShell，并在任何 Git/gh/Node/npm 调用前以独立 SHA-256 锚定仓库外的 builder toolchain lock。正式构建还必须传入本机 Tauri 签名配置和策略允许的证书指纹，并要求真正分发的 Tauri 主程序、NSIS、MSI 与 Web 启动器均为有效时间戳签名。`-AllowUnsigned` 仅允许本机静态打包验证，manifest 固定为 `publishable=false`，且验证器不会执行未签名 EXE。详见 [手工发布说明](RELEASING.md)。
 
