@@ -55,3 +55,5 @@
 - 只要 Windows 版本通过本轮验证，就必须使用命令行构建并静默安装最新的 Terminal233 到 `C:\App\Terminal233`，再核验已安装版本；禁止依赖 GUI 或电脑操控完成安装。
 - 开发机安装以当前 `main` 的最新已验证提交为准。若缺少可信 Authenticode 证书，可以安装明确标记为本机验证用途的 unsigned 构建，但禁止把它上传为正式 GitHub Release。
 - 普通提交禁止触发 GitHub Actions；当前仓库不新增 `.github/workflows`。Windows x86_64 本机验证包仍走命令行手工流程；正式 GitHub Release 只有在用户明确说“发布”后，才允许通过正式 tag 触发未来的 GitHub Actions 发布 CI。
+- Windows 安装脚本必须同时验证 `Terminal233.exe --version`、Start Menu 快捷方式和当前用户卸载注册项；默认安装目录固定为 `C:\App\Terminal233`。
+- 真实 SSH 验证只能使用用户明确提供的测试目标，并通过幂等、固定目录、自动清理的测试脚本完成；不得把密码写入仓库、日志或远端持久目录。

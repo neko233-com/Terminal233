@@ -245,20 +245,8 @@ export async function uploadFiles(id: string, remoteDirectory: string, files: Fi
 }
 
 export async function downloadRemote(id: string, path: string): Promise<void> {
-  const expectedSession = browserSessionPromise
-  const response = await fetch(`/api/connections/${id}/files/download?path=${encodeURIComponent(path)}`, { credentials: 'include' })
-  if (!response.ok) {
-    throw await apiErrorFromResponse(
-      response,
-      'download_failed',
-      '下载远端文件失败。',
-      expectedSession,
-    )
-  }
-  const blob = await response.blob()
-  const disposition = response.headers.get('content-disposition') ?? ''
-  const pathParts = path.split('/').filter(Boolean)
-  const name = downloadFileName(disposition, pathParts[pathParts.length - 1] ?? 'download')
+  const { name, data } = await downloadRemoteBytes(id, path)
+  const blob = new Blob([data as BlobPart])
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -271,6 +259,27 @@ export async function downloadRemote(id: string, path: string): Promise<void> {
     link.remove()
     window.setTimeout(() => URL.revokeObjectURL(url), 0)
   }
+}
+
+export async function downloadRemoteBytes(id: string, path: string): Promise<{ name: string; data: Uint8Array }> {
+  const expectedSession = browserSessionPromise
+  const response = await fetch(`/api/connections/${id}/files/download?path=${encodeURIComponent(path)}`, { credentials: 'include' })
+  if (!response.ok) {
+    throw await apiErrorFromResponse(
+      response,
+      'download_failed',
+      '下载远端文件失败。',
+      expectedSession,
+    )
+  }
+  const data = new Uint8Array(
+    typeof response.arrayBuffer === 'function'
+      ? await response.arrayBuffer()
+      : await (await response.blob()).arrayBuffer(),
+  )
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const pathParts = path.split('/').filter(Boolean)
+  return { name: downloadFileName(disposition, pathParts[pathParts.length - 1] ?? 'download'), data }
 }
 
 function downloadFileName(disposition: string, fallback: string): string {

@@ -14,7 +14,7 @@ Terminal233 是面向 SSH/SFTP/PTY 的桌面客户端与自部署凭据同步服
 
 ## 本地运行客户端
 
-本机开发要求：Windows x86_64、Node.js 24.18.1、npm 12.0.2、Rust 1.97.1、MSVC Build Tools、Windows SDK 和 WebView2 Runtime。正式桌面发布目标为 Windows x86_64 与 ARM64；服务端发布目标为 Linux amd64 与 arm64。
+本机开发要求：Windows x86_64、Node.js 24.18.1、npm 12.0.2、Rust 1.97.1、MSVC Build Tools、Windows SDK 和 WebView2 Runtime。当前本机只验证 Windows x86_64；Windows ARM64 暂不产出，后续只允许在用户明确说“发布”后由 tag-only GitHub Actions 生成。服务端只发布 Linux amd64 与 arm64。
 
 corepack npm ci
 corepack npm run build
@@ -25,19 +25,27 @@ corepack npm run terminal233:build
 
 corepack npm run terminal233:package:windows
 
-产物位于 terminal233/target/release/bundle/windows/，包含 Terminal233.exe、dist/、安装脚本和 ZIP。Windows 静默安装默认使用 C:\App\Terminal233：
+产物位于 terminal233/target/release/bundle/windows/，包含 Terminal233.exe、dist/、安装/卸载脚本和 ZIP。Windows 静默安装默认使用 C:\App\Terminal233，并注册当前用户 Start Menu 快捷方式及“应用和功能”卸载项：
 
 corepack npm run terminal233:install:windows
 
-也可以从解压后的桌面包目录执行 .\install-terminal233-windows.ps1。桌面客户端使用系统 WebView2 Runtime，不将 WebView2 安装程序重复打进包内。
+也可以从解压后的桌面包目录执行 .\install-terminal233-windows.ps1；卸载使用安装目录中的 .\uninstall-terminal233-windows.ps1。桌面客户端使用系统 WebView2 Runtime，不将 WebView2 安装程序重复打进包内。
 
 客户端默认从 Terminal233.exe 同目录的 dist/ 加载前端；如需指定前端目录，可设置 TERMINAL233_FRONTEND_ROOT。
 
+浏览器调试入口与桌面端共享同一个 Terminal233 SSH IDE：
+
+```powershell
+corepack npm run browser:dev
+```
+
+它会启动同源 localhost Node `ssh2js` 后端和 `http://127.0.0.1:1420/` 浏览器 IDE；浏览器入口只使用 Web 后端，桌面入口只使用进程内纯 Rust `puressh`，二者共享界面、连接流程、终端与 SFTP 数据约定。
+
 ## 发布与自动更新
 
-发布流程不使用 GitHub Actions，由发布机手工执行。一次完整发布会生成：
+普通开发流程不使用 GitHub Actions。只有用户明确说“发布”后，才允许创建正式 tag 并触发未来的 tag-only GitHub Actions；当前仓库不新增 workflow。手工发布流程一次完整发布会生成：
 
-- Windows 桌面端：`x86_64`、`ARM64`
+- Windows 桌面端：`x86_64`；ARM64 仅保留为未来发布 CI 目标
 - Linux 同步服务端：`amd64`、`arm64`
 
 ```powershell

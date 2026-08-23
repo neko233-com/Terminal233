@@ -18,6 +18,8 @@
     "dev": "vite",
     "web:dev": "vite --mode web",
     "web:build": "tsc -b && vite build --mode web && node scripts/validate-runtime-bundle.mjs web",
+    "browser:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-terminal233-browser.ps1",
+    "browser:build": "tsc -b && vite build --mode browser && node scripts/validate-runtime-bundle.mjs browser",
     "web:server": "node server/ssh2js-server.mjs",
     "web": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-web.ps1",
     "build": "tsc -b && vite build && node scripts/validate-runtime-bundle.mjs terminal233",
@@ -26,13 +28,14 @@
     "test:ui": "vitest run",
     "test:server": "node --test server/*.node-test.mjs",
     "test:native-ssh": "node scripts/test-native-ssh-interoperability.mjs",
+    "test:remote-ssh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-terminal233-remote-ssh.ps1",
+    "test:windows-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-terminal233-windows-install.ps1",
     "test:pure-rust-ssh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-pure-rust-ssh-dependencies.ps1",
     "test:watch": "vitest",
     "preview": "vite preview",
     "terminal233:dev": "npm run build && cargo run --manifest-path terminal233/Cargo.toml",
     "terminal233:build": "cargo build --manifest-path terminal233/Cargo.toml --release --locked",
     "terminal233:package:windows": "npm run build && npm run terminal233:build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-windows.ps1",
-    "terminal233:package:windows:arm64": "npm run build && rustup target add aarch64-pc-windows-msvc && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-terminal233-windows.ps1 -Target aarch64-pc-windows-msvc && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-windows.ps1 -Target aarch64-pc-windows-msvc",
     "terminal233:package:server:linux": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-server-linux.ps1 -Architecture amd64",
     "terminal233:package:server:linux:arm64": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-server-linux.ps1 -Architecture arm64",
     "terminal233:package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-release.ps1",
@@ -44,7 +47,7 @@
     "verify:web-launcher": "cargo fmt --manifest-path web-launcher/Cargo.toml --all -- --check && cargo clippy --manifest-path web-launcher/Cargo.toml --locked --all-targets -- -D warnings && cargo test --manifest-path web-launcher/Cargo.toml --locked",
     "audit:rust": "cargo audit --file terminal233/Cargo.lock && cargo audit --file web-launcher/Cargo.lock",
     "audit:deps": "npm audit --audit-level=low && npm run audit:rust",
-    "verify": "npm run build && npm run web:build && npm test && npm run server:go:test && npm run test:pure-rust-ssh && cargo fmt --manifest-path terminal233/Cargo.toml --all -- --check && cargo clippy --manifest-path terminal233/Cargo.toml --locked --all-targets --all-features -- -D warnings && cargo test --manifest-path terminal233/Cargo.toml --locked --all-features && npm run test:native-ssh && npm run verify:web-launcher"
+    "verify": "npm run build && npm run web:build && npm run browser:build && npm test && npm run server:go:test && npm run test:pure-rust-ssh && cargo fmt --manifest-path terminal233/Cargo.toml --all -- --check && cargo clippy --manifest-path terminal233/Cargo.toml --locked --all-targets --all-features -- -D warnings && cargo test --manifest-path terminal233/Cargo.toml --locked --all-features && npm run test:native-ssh && npm run verify:web-launcher"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

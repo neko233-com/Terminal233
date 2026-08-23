@@ -129,9 +129,9 @@ impl TerminalService {
         let session = self.ssh.open_authenticated_for_terminal(profile_id)?;
         let (client, shutdown_stream) = session.into_parts();
         let shared = SharedClient::from(client);
-        shared
-            .set_read_timeout(Some(SSH_PUMP_TIMEOUT))
-            .map_err(|_| NekoError::SshTerminalStartFailed)?;
+        // Keep the normal operation timeout during channel open: real servers may take longer
+        // than the interactive pump interval to answer `pty-req`/`shell`. The short timeout is
+        // only for the already-open shell's concurrent reader/writer pump below.
         // A shell can execute remote startup scripts. Recheck after the handshake/PTY request and
         // linearize immediately before starting it so a closing profile cannot launch a late PTY.
         if !close_signal.try_begin_remote_effect() {
@@ -139,6 +139,9 @@ impl TerminalService {
         }
         let channel = shared
             .shell_stream("xterm-256color", columns, rows, 0, 0, Vec::new())
+            .map_err(|_| NekoError::SshTerminalStartFailed)?;
+        shared
+            .set_read_timeout(Some(SSH_PUMP_TIMEOUT))
             .map_err(|_| NekoError::SshTerminalStartFailed)?;
 
         let session_id = Uuid::new_v4();
@@ -236,11 +239,17 @@ impl TerminalService {
 
     /// Acknowledges one output chunk only after xterm has parsed it. A future or stale sequence is
     /// ignored instead of advancing the watermark, so an untrusted renderer cannot disable output
-    /// flow control by acknowledging data that Rust has not sent.
+    /// flow control by acknowledging data that Rust has not sent. A late acknowledgement is
+    /// idempotent after close because renderers can finish parsing an output event while the
+    /// close event is already in flight.
     pub fn acknowledge_output(&self, session_id: Uuid, sequence: u64) -> Result<()> {
-        let session = self.session(session_id)?;
+        let session = match self.session(session_id) {
+            Ok(session) => session,
+            Err(NekoError::SshTerminalSessionNotFound) => return Ok(()),
+            Err(error) => return Err(error),
+        };
         if session.close_requested.load(Ordering::Acquire) {
-            return Err(NekoError::SshTerminalSessionNotFound);
+            return Ok(());
         }
         if sequence != 0 && session.last_output_sequence.load(Ordering::Acquire) == sequence {
             session

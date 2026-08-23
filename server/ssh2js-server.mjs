@@ -19,8 +19,8 @@ import { attachmentContentDisposition } from './content-disposition.mjs'
 
 const { Client } = ssh2
 const HOST = '127.0.0.1'
-const PORT = parsePort(process.env.NEKOSSH_BACKEND_PORT ?? '7331', 'NEKOSSH_BACKEND_PORT')
-const FRONTEND_PORT = parsePort(process.env.NEKOSSH_FRONTEND_PORT ?? '5173', 'NEKOSSH_FRONTEND_PORT')
+const PORT = parsePort(process.env.TERMINAL233_BACKEND_PORT ?? process.env.NEKOSSH_BACKEND_PORT ?? '7331', 'TERMINAL233_BACKEND_PORT')
+const FRONTEND_PORT = parsePort(process.env.TERMINAL233_FRONTEND_PORT ?? process.env.TERMINAL233_BROWSER_FRONTEND_PORT ?? process.env.NEKOSSH_FRONTEND_PORT ?? '5173', 'TERMINAL233_FRONTEND_PORT')
 const SESSION_TTL_MS = 30 * 60_000
 const GRANT_TTL_MS = 5 * 60_000
 const ATTACHMENT_TTL_MS = 30 * 60_000
@@ -111,7 +111,7 @@ server.headersTimeout = 10_000
 server.keepAliveTimeout = 5_000
 server.maxConnections = 64
 server.listen(PORT, HOST, () => {
-  console.log(`NekoSSH Web backend: http://${HOST}:${PORT}`)
+  console.log(`Terminal233 browser SSH backend: http://${HOST}:${PORT}`)
   console.log('SSH engine: bundled Node.js ssh2 (ssh2js)')
   console.log(`MCP endpoint: http://${HOST}:${PORT}/mcp`)
   if (!process.env.NEKOSSH_MCP_TOKEN) console.log(`MCP bearer token: ${MCP_TOKEN}`)

@@ -9,6 +9,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if ($Target -eq 'aarch64-pc-windows-msvc') {
+    throw 'ARM64 desktop packaging is disabled in the local workflow; enable it only from an explicit publish CI workflow.'
+}
 $architecture = if ($Target -eq 'aarch64-pc-windows-msvc') { 'arm64' } else { 'x86_64' }
 $defaultExecutable = if ($Target -eq 'x86_64-pc-windows-msvc') {
     $nativePath = Join-Path $repositoryRoot 'terminal233\target\release\terminal233.exe'
@@ -73,7 +76,9 @@ $packageFrontend = Join-Path $packageDirectory 'dist'
 New-Item -ItemType Directory -Force -Path $packageDirectory, $packageFrontend | Out-Null
 Copy-Item -LiteralPath $resolvedExecutable -Destination (Join-Path $packageDirectory 'Terminal233.exe') -Force
 Get-ChildItem -LiteralPath $resolvedFrontend -Force | Copy-Item -Destination $packageFrontend -Recurse -Force
-Copy-Item -LiteralPath (Join-Path $repositoryRoot 'scripts\install-terminal233-windows.ps1') -Destination $packageDirectory -Force
+foreach ($scriptName in @('install-terminal233-windows.ps1', 'uninstall-terminal233-windows.ps1')) {
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot "scripts\$scriptName") -Destination $packageDirectory -Force
+}
 foreach ($document in @('README.md', 'LICENSE')) {
     $documentPath = Join-Path $repositoryRoot $document
     if (Test-Path -LiteralPath $documentPath -PathType Leaf) {

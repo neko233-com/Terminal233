@@ -791,10 +791,136 @@ mod tests {
         ephemeral::EphemeralConnectionStore,
         operation_admission::OperationAdmission,
         sftp_transfer::{SftpTransferService, SshSftpDownloadInput, SshSftpUploadInput},
+        ssh_terminal::TerminalService,
     };
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use serde_json::Value;
     use std::sync::mpsc::{self, Receiver};
+
+    const REMOTE_INTEROP_DIRECTORY: &str = "/tmp/terminal233-remote-interop-v1";
+    const REMOTE_INTEROP_FILE: &str = "payload.bin";
+    const REMOTE_INTEROP_RENAMED_FILE: &str = "renamed.bin";
+
+    fn remote_interop_enabled() -> bool {
+        std::env::var("TERMINAL233_REMOTE_SSH_INTEROP").as_deref() == Ok("1")
+    }
+
+    fn remote_interop_env(name: &str) -> String {
+        std::env::var(name).unwrap_or_else(|_| panic!("missing remote SSH test variable: {name}"))
+    }
+
+    fn remote_interop_profile() -> SshProfileInput {
+        let port = remote_interop_env("TERMINAL233_REMOTE_SSH_PORT")
+            .parse::<u16>()
+            .expect("remote SSH test port must be a valid u16");
+        SshProfileInput {
+            label: "aliyun-sg-remote-interoperability".to_owned(),
+            host: remote_interop_env("TERMINAL233_REMOTE_SSH_HOST"),
+            port,
+            username: remote_interop_env("TERMINAL233_REMOTE_SSH_USERNAME"),
+            authentication: ProfileAuthenticationInput::Password {
+                password: remote_interop_env("TERMINAL233_REMOTE_SSH_PASSWORD"),
+            },
+            tags: vec!["remote-interoperability".to_owned()],
+            terminal: TerminalPreferences::default(),
+        }
+    }
+
+    fn remote_interop_command(
+        ssh: &SshService,
+        admission: &OperationAdmission,
+        profile_id: Uuid,
+        command: &str,
+    ) -> SshCommandResult {
+        let permit = admission
+            .try_acquire(profile_id)
+            .expect("admit remote SSH command");
+        ssh.execute(profile_id, command.to_owned(), None, permit.close_signal())
+            .expect("execute remote SSH command")
+    }
+
+    fn remote_interop_delete(
+        service: &SftpTransferService,
+        admission: &OperationAdmission,
+        profile_id: Uuid,
+        path: &str,
+    ) {
+        let permit = admission
+            .try_acquire(profile_id)
+            .expect("admit remote SSH cleanup");
+        service
+            .delete_remote(profile_id, path.to_owned(), permit.close_signal())
+            .expect("delete remote SSH test entry");
+    }
+
+    fn remote_interop_safe_entry(name: &str) -> bool {
+        name == REMOTE_INTEROP_FILE
+            || name == REMOTE_INTEROP_RENAMED_FILE
+            || (name.starts_with(".payload.bin.terminal233-") && name.ends_with(".part"))
+    }
+
+    fn clean_remote_interop_directory(
+        ssh: &SshService,
+        service: &SftpTransferService,
+        admission: &OperationAdmission,
+        profile_id: Uuid,
+        remove_directory: bool,
+    ) {
+        let listing = match ssh.list_directory(profile_id, REMOTE_INTEROP_DIRECTORY.to_owned()) {
+            Ok(listing) => listing,
+            Err(_) => return,
+        };
+        for entry in listing.entries {
+            assert!(
+                remote_interop_safe_entry(&entry.name),
+                "refusing to delete unexpected remote interop entry: {}",
+                entry.name
+            );
+            remote_interop_delete(
+                service,
+                admission,
+                profile_id,
+                &format!("{REMOTE_INTEROP_DIRECTORY}/{}", entry.name),
+            );
+        }
+        if remove_directory {
+            remote_interop_delete(service, admission, profile_id, REMOTE_INTEROP_DIRECTORY);
+        }
+    }
+
+    struct RemoteInteropCleanup {
+        ssh: Arc<SshService>,
+        service: Arc<SftpTransferService>,
+        terminal: Arc<TerminalService>,
+        admission: OperationAdmission,
+        profile_id: Uuid,
+        armed: bool,
+    }
+
+    impl RemoteInteropCleanup {
+        fn run(&mut self) {
+            if !self.armed {
+                return;
+            }
+            let _ = self.terminal.close_for_profile(self.profile_id);
+            let _ = self.service.cancel_for_profile(self.profile_id);
+            std::thread::sleep(Duration::from_millis(250));
+            clean_remote_interop_directory(
+                &self.ssh,
+                &self.service,
+                &self.admission,
+                self.profile_id,
+                true,
+            );
+            self.armed = false;
+        }
+    }
+
+    impl Drop for RemoteInteropCleanup {
+        fn drop(&mut self) {
+            self.run();
+        }
+    }
 
     fn interoperability_profile(
         host: String,
@@ -1225,6 +1351,303 @@ mod tests {
             "wrong encrypted private-key passphrase must fail without an unbounded native prompt"
         );
         progress("wrong private-key passphrase rejected");
+    }
+
+    /// Opt-in acceptance against a real user-provided Linux SSH server. The fixed workspace is
+    /// created below /tmp, only the exact files produced by this test may be removed, and the Drop
+    /// guard repeats cleanup if an assertion or transfer worker fails.
+    #[test]
+    fn native_remote_ssh_interoperability() {
+        if !remote_interop_enabled() {
+            return;
+        }
+
+        let owner = Uuid::new_v4();
+        let store = Arc::new(EphemeralConnectionStore::new());
+        let profile = store
+            .create(owner, remote_interop_profile())
+            .expect("create remote SSH profile");
+        let ssh = Arc::new(SshService::new(Arc::clone(&store)));
+        let admission = OperationAdmission::new();
+
+        trust_fixture_host(&ssh, profile.id);
+        let exec_result = remote_interop_command(
+            &ssh,
+            &admission,
+            profile.id,
+            "printf 'terminal233-remote-exec-ok\\n'",
+        );
+        assert_eq!(exec_result.output, "terminal233-remote-exec-ok\n");
+        assert_eq!(exec_result.exit_status, 0);
+        assert!(!exec_result.truncated);
+
+        let tmp_listing = ssh
+            .list_directory(profile.id, "/tmp".to_owned())
+            .expect("list remote /tmp");
+        assert!(!tmp_listing.truncated);
+
+        let sftp = Arc::new(SftpTransferService::new(Arc::clone(&ssh)));
+        let terminal = Arc::new(TerminalService::new(Arc::clone(&ssh)));
+        let mut cleanup = RemoteInteropCleanup {
+            ssh: Arc::clone(&ssh),
+            service: Arc::clone(&sftp),
+            terminal: Arc::clone(&terminal),
+            admission: admission.clone(),
+            profile_id: profile.id,
+            armed: true,
+        };
+
+        let workspace_state = remote_interop_command(
+            &ssh,
+            &admission,
+            profile.id,
+            "if [ -d '/tmp/terminal233-remote-interop-v1' ]; then printf dir; elif [ ! -e '/tmp/terminal233-remote-interop-v1' ]; then printf missing; else printf other; fi",
+        );
+        match workspace_state.output.trim() {
+            "missing" => {
+                let permit = admission
+                    .try_acquire(profile.id)
+                    .expect("admit remote workspace creation");
+                sftp.create_directory(
+                    profile.id,
+                    REMOTE_INTEROP_DIRECTORY.to_owned(),
+                    permit.close_signal(),
+                )
+                .expect("create remote interop directory");
+            }
+            "dir" => {
+                clean_remote_interop_directory(&ssh, &sftp, &admission, profile.id, false);
+                assert!(
+                    ssh.list_directory(profile.id, REMOTE_INTEROP_DIRECTORY.to_owned())
+                        .expect("list cleaned remote interop directory")
+                        .entries
+                        .is_empty()
+                );
+            }
+            "other" => panic!(
+                "fixed remote interop path exists but is not a directory: {REMOTE_INTEROP_DIRECTORY}"
+            ),
+            unexpected => panic!("unexpected remote workspace state: {unexpected:?}"),
+        }
+
+        let upload_bytes = (0..131_097_usize)
+            .map(|index| ((index * 31 + 7) % 256) as u8)
+            .collect::<Vec<_>>();
+        let (upload_sender, upload_receiver) = mpsc::channel();
+        let upload_events = IpcChannel::new(move |body| {
+            let event = body
+                .deserialize::<Value>()
+                .expect("deserialize remote upload event");
+            upload_sender
+                .send(event)
+                .map_err(|_| "remote upload receiver dropped")
+        });
+        let upload_permit = admission
+            .try_acquire(profile.id)
+            .expect("admit remote upload");
+        let upload_started = sftp
+            .start_upload_headless(
+                profile.id,
+                REMOTE_INTEROP_DIRECTORY.to_owned(),
+                vec![SshSftpUploadInput {
+                    name: REMOTE_INTEROP_FILE.to_owned(),
+                    data_base64: STANDARD.encode(&upload_bytes),
+                    overwrite: false,
+                }],
+                upload_events,
+                upload_permit,
+            )
+            .expect("start remote upload");
+        let upload_events = receive_transfer_events(&upload_receiver);
+        assert_eq!(upload_started.total_files, 1);
+        assert_eq!(
+            upload_events.last().expect("remote upload completion")["status"],
+            "completed"
+        );
+        assert_eq!(
+            upload_events.last().expect("remote upload completion")["bytesTransferred"],
+            upload_bytes.len() as u64
+        );
+
+        let uploaded_listing = ssh
+            .list_directory(profile.id, REMOTE_INTEROP_DIRECTORY.to_owned())
+            .expect("list uploaded remote file");
+        assert_eq!(uploaded_listing.entries.len(), 1);
+        assert_eq!(uploaded_listing.entries[0].name, REMOTE_INTEROP_FILE);
+        assert_eq!(
+            uploaded_listing.entries[0].size,
+            Some(upload_bytes.len() as u64)
+        );
+
+        let download_service = Arc::clone(&sftp);
+        let (download_sender, download_receiver) = mpsc::channel();
+        let download_events = IpcChannel::new(move |body| {
+            let event = body
+                .deserialize::<Value>()
+                .expect("deserialize remote download event");
+            if event["kind"] == "chunk" {
+                let job_id = event["jobId"]
+                    .as_str()
+                    .expect("remote download job id")
+                    .parse::<Uuid>()
+                    .expect("valid remote download job id");
+                let sequence = event["sequence"]
+                    .as_u64()
+                    .expect("remote download sequence");
+                download_service
+                    .acknowledge_download(job_id, sequence)
+                    .expect("acknowledge remote download chunk");
+            }
+            download_sender
+                .send(event)
+                .map_err(|_| "remote download receiver dropped")
+        });
+        let download_permit = admission
+            .try_acquire(profile.id)
+            .expect("admit remote download");
+        let download_started = sftp
+            .start_download_headless(
+                profile.id,
+                vec![SshSftpDownloadInput {
+                    remote_path: format!("{REMOTE_INTEROP_DIRECTORY}/{REMOTE_INTEROP_FILE}"),
+                    save_as: REMOTE_INTEROP_FILE.to_owned(),
+                }],
+                download_events,
+                download_permit,
+            )
+            .expect("start remote download");
+        let download_events = receive_transfer_events(&download_receiver);
+        assert_eq!(download_started.total_files, 1);
+        let mut downloaded = Vec::new();
+        for event in download_events
+            .iter()
+            .filter(|event| event["kind"] == "chunk")
+        {
+            let chunk = STANDARD
+                .decode(event["dataBase64"].as_str().expect("remote download bytes"))
+                .expect("decode remote download bytes");
+            downloaded.extend_from_slice(&chunk);
+        }
+        assert_eq!(downloaded, upload_bytes);
+        assert_eq!(
+            download_events.last().expect("remote download completion")["status"],
+            "completed"
+        );
+
+        let rename_permit = admission
+            .try_acquire(profile.id)
+            .expect("admit remote rename");
+        sftp.rename_remote(
+            profile.id,
+            format!("{REMOTE_INTEROP_DIRECTORY}/{REMOTE_INTEROP_FILE}"),
+            format!("{REMOTE_INTEROP_DIRECTORY}/{REMOTE_INTEROP_RENAMED_FILE}"),
+            false,
+            rename_permit.close_signal(),
+        )
+        .expect("rename remote test file");
+        remote_interop_delete(
+            &sftp,
+            &admission,
+            profile.id,
+            &format!("{REMOTE_INTEROP_DIRECTORY}/{REMOTE_INTEROP_RENAMED_FILE}"),
+        );
+        remote_interop_delete(&sftp, &admission, profile.id, REMOTE_INTEROP_DIRECTORY);
+        // The remote SFTP channel close is asynchronous on some OpenSSH/PAM stacks. Give the
+        // server a bounded drain window before opening a fresh PTY transport.
+        std::thread::sleep(Duration::from_secs(2));
+
+        let (terminal_sender, terminal_receiver) = mpsc::channel();
+        let terminal_events = {
+            let event_service = Arc::clone(&terminal);
+            IpcChannel::new(move |body| {
+                let event = body
+                    .deserialize::<Value>()
+                    .expect("deserialize remote terminal event");
+                if event["kind"] == "output" {
+                    let session_id = event["sessionId"]
+                        .as_str()
+                        .expect("remote terminal session id")
+                        .parse::<Uuid>()
+                        .expect("valid remote terminal session id");
+                    let sequence = event["sequence"]
+                        .as_u64()
+                        .expect("remote terminal output sequence");
+                    event_service
+                        .acknowledge_output(session_id, sequence)
+                        .expect("acknowledge remote terminal output");
+                }
+                terminal_sender
+                    .send(event)
+                    .map_err(|_| "remote terminal receiver dropped")
+            })
+        };
+        let terminal_permit = admission
+            .try_acquire(profile.id)
+            .expect("admit remote terminal");
+        let started = terminal
+            .start(
+                profile.id,
+                Some(100),
+                Some(30),
+                terminal_events,
+                terminal_permit.close_signal(),
+            )
+            .expect("start remote terminal");
+        terminal
+            .resize(started.session_id, 132, 40)
+            .expect("resize remote terminal");
+        terminal
+            .write(
+                started.session_id,
+                "printf '\\nterminal233-remote-pty-ok\\n'\n".to_owned(),
+            )
+            .expect("write remote terminal input");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut terminal_output = Vec::new();
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .expect("remote terminal must return a marker before the deadline");
+            let event = terminal_receiver
+                .recv_timeout(remaining)
+                .expect("receive remote terminal event");
+            match event["kind"].as_str() {
+                Some("output") => {
+                    let bytes = STANDARD
+                        .decode(event["dataBase64"].as_str().expect("remote terminal bytes"))
+                        .expect("decode remote terminal bytes");
+                    terminal_output.extend_from_slice(&bytes);
+                    if terminal_output
+                        .windows(b"terminal233-remote-pty-ok".len())
+                        .any(|window| window == b"terminal233-remote-pty-ok")
+                    {
+                        break;
+                    }
+                }
+                Some("error") => panic!("remote terminal returned an error: {event}"),
+                Some("closed") => panic!("remote terminal closed before its marker"),
+                _ => panic!("unexpected remote terminal event: {event}"),
+            }
+        }
+        terminal
+            .close(started.session_id)
+            .expect("close remote terminal");
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .expect("remote terminal must close before the deadline");
+            let event = terminal_receiver
+                .recv_timeout(remaining)
+                .expect("receive remote terminal close event");
+            match event["kind"].as_str() {
+                Some("output") => {}
+                Some("closed") => break,
+                Some("error") => panic!("remote terminal returned an error: {event}"),
+                _ => panic!("unexpected remote terminal close event: {event}"),
+            }
+        }
+
+        cleanup.run();
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 - 上游项目：`https://github.com/neko233-com/rdesktop`
 - Terminal233 必须精确锁定已验证的 git revision；修改 revision 前必须重新验证桌面端构建、纯 Rust SSH 依赖和安装包。
-- 桌面端正式目标只有 Windows `x86_64-pc-windows-msvc` 和 `aarch64-pc-windows-msvc`。
+- 桌面端当前本机验证目标只有 Windows `x86_64-pc-windows-msvc`；ARM64 保留为用户明确说“发布”后由 tag-only CI 生成的未来目标。
 - 32 位 Windows、`i686`、`i386` 及其他 32 位目标不支持，也不生成对应的构建、安装包或更新资产。
 - Terminal233 Server 与桌面端分离，只发布 Linux `amd64` 和 `arm64` 服务端包。
 
@@ -22,4 +22,4 @@ corepack npm run terminal233:package:release
 
 ARM64 工具链、Windows linker 或其他必要条件缺失时，构建必须明确失败并修复环境；不得把 x86_64 产物伪装成 ARM64，也不得恢复 32 位目标来绕过问题。
 
-更新清单必须只包含实际生成并校验过的 x86_64/arm64 桌面资产和 Linux amd64/arm64 服务端资产。发布仍采用仓库文档约定的手工流程，不能新增 GitHub Actions。
+更新清单必须只包含实际生成并校验过的 x86_64 桌面资产和 Linux amd64/arm64 服务端资产；ARM64 桌面资产不得在普通开发中生成。发布仍采用仓库文档约定的手工流程，不能新增 GitHub Actions。
