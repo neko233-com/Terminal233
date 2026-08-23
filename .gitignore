@@ -32,6 +32,7 @@ terminal233/.cargo/credentials.toml
 data/
 terminal233-server/data/
 terminal233-server/bin/
+terminal233-server/target/
 terminal233-server/*.json
 neko233-v1.vault.json
 *.nekovault

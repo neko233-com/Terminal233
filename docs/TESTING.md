@@ -1,5 +1,18 @@
 # Terminal233 测试说明
 
+当前 Terminal233 发布验证入口：
+
+```powershell
+corepack npm run typecheck
+corepack npm run test:ui
+corepack npm run server:go:test
+corepack npm run terminal233:package:windows
+corepack npm run terminal233:package:server:linux
+corepack npm run terminal233:package:server:linux:arm64
+```
+
+完整发布包使用 `corepack npm run terminal233:package:release`，发布前由 `scripts/publish-terminal233-release.ps1` 手工上传；客户端更新清单必须覆盖 Windows x86_64/ARM64 和 Linux amd64/arm64 四个资产。
+
 ## 自动验证
 
 核心稳定性与安全边界可完全通过 CLI 验证；本流程不需要浏览器自动化、桌面操控或截图。

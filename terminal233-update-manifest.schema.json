@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/neko233-com/Terminal233/blob/main/terminal233-update-manifest.schema.json",
+  "title": "Terminal233 update manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "product", "version", "tag", "channel", "generatedAtUtc", "releaseUrl", "updateManifestUrl", "assets"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "product": { "const": "Terminal233" },
+    "version": { "$ref": "#/$defs/version" },
+    "tag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "channel": { "enum": ["stable", "beta"] },
+    "generatedAtUtc": { "type": "string", "format": "date-time" },
+    "releaseUrl": { "type": "string", "format": "uri" },
+    "updateManifestUrl": { "type": "string", "format": "uri" },
+    "assets": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component", "platform", "architecture", "name", "bytes", "sha256", "url"],
+        "properties": {
+          "component": { "enum": ["desktop", "server"] },
+          "platform": { "enum": ["windows", "linux"] },
+          "architecture": { "enum": ["x86_64", "arm64", "amd64"] },
+          "name": { "type": "string", "pattern": "^[^/\\\\:]+$" },
+          "bytes": { "type": "integer", "minimum": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "url": { "type": "string", "format": "uri" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    }
+  }
+}

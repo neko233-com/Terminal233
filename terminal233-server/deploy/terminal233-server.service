@@ -1,0 +1,22 @@
+[Unit]
+Description=Terminal233 credential sync server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=terminal233
+Group=terminal233
+WorkingDirectory=/opt/terminal233-server
+EnvironmentFile=/etc/terminal233/terminal233-server.env
+ExecStart=/opt/terminal233-server/terminal233-server
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/terminal233
+
+[Install]
+WantedBy=multi-user.target

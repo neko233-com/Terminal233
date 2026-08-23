@@ -1,5 +1,7 @@
 [CmdletBinding()]
 param(
+    [ValidateSet('x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc')]
+    [string]$Target = 'x86_64-pc-windows-msvc',
     [string]$ExecutablePath = '',
     [string]$FrontendPath = '',
     [string]$OutputRoot = ''
@@ -7,8 +9,19 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$architecture = if ($Target -eq 'aarch64-pc-windows-msvc') { 'arm64' } else { 'x86_64' }
+$defaultExecutable = if ($Target -eq 'x86_64-pc-windows-msvc') {
+    $nativePath = Join-Path $repositoryRoot 'terminal233\target\release\terminal233.exe'
+    if (Test-Path -LiteralPath $nativePath -PathType Leaf) {
+        $nativePath
+    } else {
+        Join-Path $repositoryRoot "terminal233\target\$Target\release\terminal233.exe"
+    }
+} else {
+    Join-Path $repositoryRoot "terminal233\target\$Target\release\terminal233.exe"
+}
 $resolvedExecutable = if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
-    (Resolve-Path -LiteralPath (Join-Path $repositoryRoot 'terminal233\target\release\terminal233.exe')).Path
+    (Resolve-Path -LiteralPath $defaultExecutable).Path
 } else {
     (Resolve-Path -LiteralPath $ExecutablePath).Path
 }
@@ -38,7 +51,7 @@ if ($versionOutput -notmatch '^Terminal233 (\d+\.\d+\.\d+)$') {
     throw "客户端版本输出无效：$versionOutput"
 }
 $version = $Matches[1]
-$packageDirectory = Join-Path $resolvedOutputRoot "Terminal233-$version-windows-x64"
+$packageDirectory = Join-Path $resolvedOutputRoot "Terminal233-$version-windows-$architecture"
 $zipPath = "$packageDirectory.zip"
 $packageFrontend = Join-Path $packageDirectory 'dist'
 
@@ -56,7 +69,9 @@ foreach ($document in @('README.md', 'LICENSE')) {
 $manifest = [ordered]@{
     product = 'Terminal233'
     version = $version
-    platform = 'windows-x64'
+    platform = "windows-$architecture"
+    target = $Target
+    architecture = $architecture
     renderer = 'rdesktop-webview'
     executable = 'Terminal233.exe'
     frontend = 'dist'

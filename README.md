@@ -14,7 +14,7 @@ Terminal233 是面向 SSH/SFTP/PTY 的桌面客户端与自部署凭据同步服
 
 ## 本地运行客户端
 
-环境要求：Windows x64、Node.js 24.18.1、npm 12.0.2、Rust 1.97.1、MSVC Build Tools、Windows SDK 和 WebView2 Runtime。
+本机开发要求：Windows x86_64、Node.js 24.18.1、npm 12.0.2、Rust 1.97.1、MSVC Build Tools、Windows SDK 和 WebView2 Runtime。正式桌面发布目标为 Windows x86_64 与 ARM64；服务端发布目标为 Linux amd64 与 arm64。
 
 corepack npm ci
 corepack npm run build
@@ -32,6 +32,25 @@ corepack npm run terminal233:install:windows
 也可以从解压后的桌面包目录执行 .\install-terminal233-windows.ps1。桌面客户端使用系统 WebView2 Runtime，不将 WebView2 安装程序重复打进包内。
 
 客户端默认从 Terminal233.exe 同目录的 dist/ 加载前端；如需指定前端目录，可设置 TERMINAL233_FRONTEND_ROOT。
+
+## 发布与自动更新
+
+发布流程不使用 GitHub Actions，由发布机手工执行。一次完整发布会生成：
+
+- Windows 桌面端：`x86_64`、`ARM64`
+- Linux 同步服务端：`amd64`、`arm64`
+
+```powershell
+corepack npm run terminal233:package:release
+```
+
+产物在 `terminal233/target/release/bundle/release/Terminal233-<version>/`，包含四个平台包、`SHA256SUMS.txt`、`RELEASE_NOTES.md` 和 `terminal233-update.json`。确认已配置 GitHub CLI、仓库保护规则和签名材料后，可手工发布：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-terminal233-release.ps1 -ReleaseDirectory .\terminal233\target\release\bundle\release\Terminal233-<version>
+```
+
+桌面客户端启动时会自动检查官方 `terminal233-update.json`，发现新版本后显示对应 Windows 架构的下载链接和 SHA-256 前缀。自建更新清单可通过 `VITE_TERMINAL233_UPDATE_MANIFEST_URL` 覆盖默认地址；清单和资产地址必须使用 HTTPS（本机 localhost 调试地址除外）。
 
 ## 自部署同步服务器
 

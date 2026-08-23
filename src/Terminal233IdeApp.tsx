@@ -63,6 +63,7 @@ import {
   type IdeUploadEvent,
 } from './lib/ide'
 import CredentialSyncPanel from './components/CredentialSyncPanel'
+import UpdateCheckPanel from './components/UpdateCheckPanel'
 import type { CredentialAccount } from './lib/credential-server'
 
 type ActiveConnection = {
@@ -507,6 +508,7 @@ export default function Terminal233IdeApp() {
           <div className="ide-side-heading">连接</div>
           <button className={`ide-side-item ${selectedGroup === '全部' ? 'active' : ''}`} onClick={() => setSelectedGroup('全部')} type="button"><Server size={15} />全部<span>{connections.length}</span></button>
           {groups.map(([group, count]) => <button className={`ide-side-item ${selectedGroup === group ? 'active' : ''}`} key={group} onClick={() => setSelectedGroup(group)} type="button"><Folder size={15} />{group}<span>{count}</span></button>)}
+          <UpdateCheckPanel />
           <CredentialSyncPanel onImport={(account) => void importCloudAccount(account)} />
           <div className="ide-side-note">本地连接信息仅保存在当前进程内。云端账号由自部署服务器加密保存，退出后清除本地会话。</div>
         </aside>

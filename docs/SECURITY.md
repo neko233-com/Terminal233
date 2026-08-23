@@ -74,6 +74,13 @@ JavaScript 引擎和垃圾回收器可能产生无法显式覆盖的短时字符
 - attachment 关闭、过期或 HTTP 请求取消会撤销其在途 exec/SFTP 通道，不关闭共享 SSH transport。
 - Agent 不能通过 MCP 提交或读取 SSH 密码。
 
+## 更新与发布安全
+
+- 客户端默认从 GitHub Release 的 `terminal233-update.json` 检查更新，也可以通过 `VITE_TERMINAL233_UPDATE_MANIFEST_URL` 指向自建 HTTPS 清单；清单只接受 Terminal233 schemaVersion 1、SemVer、HTTPS 地址和 64 位小写 SHA-256 资产记录。
+- 更新检查只显示当前 Windows 架构对应的下载包，不在 SSH 进程中执行远程脚本或静默替换二进制；下载后应按 `SHA256SUMS.txt` 校验并使用安装脚本升级。
+- 发布包严格区分组件：Windows x86_64/ARM64 桌面端，Linux amd64/arm64 Go server；不会发布 Linux/Windows server 混合包。
+- 当前手工发布入口是 `scripts/package-terminal233-release.ps1` 与 `scripts/publish-terminal233-release.ps1`。仓库禁止新增 GitHub Actions，发布前必须在干净的 `main` 上核对四个资产、清单、说明和哈希。
+
 ## 发布前检查
 
 - 使用锁定的 Node.js 24.18.1、npm 12.0.2 与 Rust 1.97.1 执行 `npm run verify`、`npm audit --audit-level=low`，并审计 Terminal233、Web 启动器与 Go server 依赖。

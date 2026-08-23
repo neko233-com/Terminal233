@@ -349,6 +349,20 @@ textarea:focus-visible,
 .ide-toast button:hover { background: rgba(255,255,255,.08); }
 
 .ide-sync-panel { margin-top: auto; border-top: 1px solid var(--ide-line); }
+.ide-update-panel { margin-top: 18px; padding: 10px 8px 0; border-top: 1px solid var(--ide-line); }
+.ide-update-head { display: flex; align-items: center; justify-content: space-between; color: #cbd4df; font-size: 11px; font-weight: 700; }
+.ide-update-head > span, .ide-update-status a, .ide-update-status .is-current { display: inline-flex; align-items: center; gap: 6px; }
+.ide-update-refresh { display: inline-grid; width: 24px; height: 24px; place-items: center; color: #9eabbc; border: 0; border-radius: 5px; background: transparent; cursor: pointer; }
+.ide-update-refresh:hover { background: #202832; color: #e8f7ed; }
+.ide-update-refresh:disabled { cursor: wait; opacity: .45; }
+.ide-update-status { display: grid; gap: 6px; margin-top: 8px; color: #8e9aab; font-size: 10px; line-height: 1.45; }
+.ide-update-status strong { color: #8fe5ae; font-size: 10px; }
+.ide-update-status a { width: max-content; padding: 4px 6px; color: #07130b; border-radius: 4px; background: var(--ide-green); font-size: 10px; font-weight: 750; text-decoration: none; }
+.ide-update-status a:hover { background: var(--ide-green-hover); }
+.ide-update-status small { overflow-wrap: anywhere; color: #667487; font: 9px/1.35 "Cascadia Code", Consolas, monospace; }
+.ide-update-status .is-current { color: #8db99e; }
+.ide-update-status .is-error { color: #dd9b9b; }
+.ide-update-status .is-muted { color: #718092; }
 .ide-sync-toggle { display: flex; width: 100%; min-height: 39px; align-items: center; justify-content: space-between; padding: 0 12px; color: #aeb8c5; border: 0; background: transparent; cursor: pointer; font-size: 10px; text-align: left; }
 .ide-sync-toggle:hover { background: #1c232b; }
 .ide-sync-toggle > span { display: flex; align-items: center; gap: 7px; }
