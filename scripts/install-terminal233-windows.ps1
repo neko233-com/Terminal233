@@ -38,13 +38,13 @@ $resolvedInstallRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
 }
 
 if (-not (Test-Path -LiteralPath $resolvedExecutable -PathType Leaf)) {
-    throw "找不到客户端可执行文件：$resolvedExecutable"
+    throw "Client executable was not found: $resolvedExecutable"
 }
 if (-not (Test-Path -LiteralPath $resolvedFrontend -PathType Container)) {
-    throw "找不到前端构建目录：$resolvedFrontend"
+    throw "Frontend build directory was not found: $resolvedFrontend"
 }
 if ([string]::IsNullOrWhiteSpace($resolvedInstallRoot) -or $resolvedInstallRoot -eq [IO.Path]::GetPathRoot($resolvedInstallRoot)) {
-    throw "拒绝使用盘符根目录作为安装目录：$resolvedInstallRoot"
+    throw "Refusing to use a drive root as the install directory: $resolvedInstallRoot"
 }
 
 $installedFrontend = Join-Path $resolvedInstallRoot 'dist'
@@ -54,8 +54,8 @@ Get-ChildItem -LiteralPath $resolvedFrontend -Force | Copy-Item -Destination $in
 
 $versionOutput = (& (Join-Path $resolvedInstallRoot 'Terminal233.exe') --version | Out-String).Trim()
 if ($versionOutput -notmatch '^Terminal233 \d+\.\d+\.\d+$') {
-    throw "已安装客户端版本输出无效：$versionOutput"
+    throw "Invalid installed client version output: $versionOutput"
 }
 Set-Content -LiteralPath (Join-Path $resolvedInstallRoot 'Terminal233.version.txt') -Value $versionOutput -Encoding UTF8
-Write-Host "Terminal233 已静默安装到 $resolvedInstallRoot"
-Write-Host "已安装版本：$versionOutput"
+Write-Host "Terminal233 was silently installed to $resolvedInstallRoot"
+Write-Host "Installed version: $versionOutput"

@@ -32,7 +32,7 @@
     "terminal233:dev": "npm run build && cargo run --manifest-path terminal233/Cargo.toml",
     "terminal233:build": "cargo build --manifest-path terminal233/Cargo.toml --release --locked",
     "terminal233:package:windows": "npm run build && npm run terminal233:build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-windows.ps1",
-    "terminal233:package:windows:arm64": "npm run build && rustup target add aarch64-pc-windows-msvc && cargo build --manifest-path terminal233/Cargo.toml --target aarch64-pc-windows-msvc --release --locked && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-windows.ps1 -Target aarch64-pc-windows-msvc",
+    "terminal233:package:windows:arm64": "npm run build && rustup target add aarch64-pc-windows-msvc && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-terminal233-windows.ps1 -Target aarch64-pc-windows-msvc && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-windows.ps1 -Target aarch64-pc-windows-msvc",
     "terminal233:package:server:linux": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-server-linux.ps1 -Architecture amd64",
     "terminal233:package:server:linux:arm64": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-server-linux.ps1 -Architecture arm64",
     "terminal233:package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-terminal233-release.ps1",

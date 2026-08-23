@@ -37,20 +37,35 @@ $resolvedOutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 }
 
 if (-not (Test-Path -LiteralPath $resolvedExecutable -PathType Leaf)) {
-    throw "找不到客户端可执行文件：$resolvedExecutable"
+    throw "Client executable was not found: $resolvedExecutable"
 }
 if (-not (Test-Path -LiteralPath $resolvedFrontend -PathType Container)) {
-    throw "找不到前端构建目录：$resolvedFrontend"
+    throw "Frontend build directory was not found: $resolvedFrontend"
 }
 if ([string]::IsNullOrWhiteSpace($resolvedOutputRoot) -or $resolvedOutputRoot -eq [IO.Path]::GetPathRoot($resolvedOutputRoot)) {
-    throw "拒绝使用盘符根目录作为打包目录：$resolvedOutputRoot"
+    throw "Refusing to use a drive root as the package directory: $resolvedOutputRoot"
 }
 
-$versionOutput = (& $resolvedExecutable --version | Out-String).Trim()
-if ($versionOutput -notmatch '^Terminal233 (\d+\.\d+\.\d+)$') {
-    throw "客户端版本输出无效：$versionOutput"
+$cargoManifest = Join-Path $repositoryRoot 'terminal233\Cargo.toml'
+$versionLine = Get-Content -LiteralPath $cargoManifest |
+    Select-String -Pattern '^\s*version\s*=\s*"(\d+\.\d+\.\d+)"' |
+    Select-Object -First 1
+if ($null -eq $versionLine) {
+    throw "Could not read the client version from Cargo.toml: $cargoManifest"
 }
-$version = $Matches[1]
+$version = $versionLine.Matches[0].Groups[1].Value
+
+if ($Target -eq 'x86_64-pc-windows-msvc') {
+    $versionOutput = (& $resolvedExecutable --version | Out-String).Trim()
+    if ($versionOutput -notmatch '^Terminal233 (\d+\.\d+\.\d+)$') {
+        throw "Invalid client version output: $versionOutput"
+    }
+    if ($Matches[1] -ne $version) {
+        throw "Executable version does not match Cargo.toml: $versionOutput / $version"
+    }
+} else {
+    Write-Host 'Skipping the ARM64 executable runtime check on this host architecture.'
+}
 $packageDirectory = Join-Path $resolvedOutputRoot "Terminal233-$version-windows-$architecture"
 $zipPath = "$packageDirectory.zip"
 $packageFrontend = Join-Path $packageDirectory 'dist'
@@ -81,5 +96,5 @@ $manifest = [ordered]@{
 $manifest | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $packageDirectory 'terminal233.manifest.json') -Encoding UTF8
 Compress-Archive -Path (Join-Path $packageDirectory '*') -DestinationPath $zipPath -Force
 
-Write-Host "Terminal233 Windows 桌面包已生成：$packageDirectory"
-Write-Host "ZIP：$zipPath"
+Write-Host "Terminal233 Windows desktop package created: $packageDirectory"
+Write-Host "ZIP: $zipPath"
