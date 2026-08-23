@@ -2,8 +2,8 @@ import { readFile, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const mode = process.argv[2]
-if (mode !== 'tauri' && mode !== 'web') {
-  throw new Error('Usage: node scripts/validate-runtime-bundle.mjs <tauri|web>')
+if (mode !== 'terminal233' && mode !== 'tauri' && mode !== 'web') {
+  throw new Error('Usage: node scripts/validate-runtime-bundle.mjs <terminal233|web>')
 }
 
 const assetsDirectory = resolve('dist/assets')
@@ -23,7 +23,7 @@ for (const marker of forbidden) {
   }
 }
 
-const expectedChunk = mode === 'web' ? 'WebMacWorkspace-' : 'TauriIdeApp-'
+const expectedChunk = mode === 'web' ? 'WebMacWorkspace-' : 'Terminal233IdeApp-'
 if (!sources.some(([name]) => name.startsWith(expectedChunk))) {
   throw new Error(`${mode} bundle is missing its expected ${expectedChunk} chunk.`)
 }

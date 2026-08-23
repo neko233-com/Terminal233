@@ -785,6 +785,7 @@ fn shell_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ipc::Channel as IpcChannel;
     use crate::{
         domain::{ProfileAuthenticationInput, SshProfileInput, TerminalPreferences},
         ephemeral::EphemeralConnectionStore,
@@ -794,7 +795,6 @@ mod tests {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use serde_json::Value;
     use std::sync::mpsc::{self, Receiver};
-    use tauri::ipc::Channel as IpcChannel;
 
     fn interoperability_profile(
         host: String,
@@ -954,7 +954,7 @@ mod tests {
         assert!(!initial_listing.entries[0].is_directory);
         assert_eq!(
             initial_listing.entries[0].size,
-            Some("NekoSSH native SFTP fixture\n".len() as u64)
+            Some("Terminal233 native SFTP fixture\n".len() as u64)
         );
         progress("initial SFTP listing");
 
@@ -1029,7 +1029,7 @@ mod tests {
                 .deserialize::<Value>()
                 .expect("deserialize upload IPC event");
             upload_sender.send(event).expect("capture upload IPC event");
-            Ok(())
+            Ok::<(), String>(())
         });
         let upload_permit = admission
             .try_acquire(password_profile.id)
@@ -1106,7 +1106,7 @@ mod tests {
             download_sender
                 .send(event)
                 .expect("capture download IPC event");
-            Ok(())
+            Ok::<(), String>(())
         });
         let download_permit = admission
             .try_acquire(password_profile.id)

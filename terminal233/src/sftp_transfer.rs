@@ -2,7 +2,7 @@
 //!
 //! The webview supplies upload bytes rather than a local filesystem path.  This deliberately
 //! prevents a compromised renderer from asking Rust to read arbitrary files.  Downloads are
-//! emitted as small base64 chunks, so the webview can use the browser/Tauri save flow chosen by
+//! emitted as small base64 chunks, so the webview can use the browser save flow chosen by
 //! the user; Rust never writes a renderer-selected local path either.
 //!
 //! Each file gets an independent verified/authenticated SFTP connection.  A small worker pool
@@ -25,17 +25,15 @@ use puressh::{
     sftp::{Attrs, FXF_CREAT, FXF_EXCL, FXF_READ, FXF_WRITE, FxpStatus, SftpClient, SftpError},
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Runtime, ipc::Channel as IpcChannel};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
     error::{NekoError, Result},
+    ipc::Channel as IpcChannel,
     operation_admission::{OperationPermit, ProfileCloseSignal},
     ssh::{SshService, validate_remote_path},
 };
-
-pub const SSH_SFTP_TRANSFER_PROGRESS_EVENT: &str = "ssh-sftp-transfer-progress";
 
 const MAX_ACTIVE_JOBS: usize = 4;
 const MAX_WORKERS_PER_JOB: usize = 4;
@@ -135,7 +133,7 @@ pub struct SshSftpDownloadChunk {
     /// download multiple files.
     pub sequence: u64,
     pub offset: u64,
-    /// Standard base64 keeps binary transfer data JSON-safe for Tauri events.  Chunks are capped
+    /// Standard base64 keeps binary transfer data JSON-safe for rdesktop events. Chunks are capped
     /// at 64 KiB before encoding.
     pub data_base64: String,
 }
@@ -241,7 +239,7 @@ impl DownloadOutputFlow {
 
     /// Sends at most one 64 KiB SFTP chunk until the renderer has acknowledged it.  A download
     /// job intentionally uses one worker, so this cap is strict even if a hostile renderer stops
-    /// reading its Tauri IPC channel.
+    /// reading its rdesktop IPC channel.
     fn send_and_wait(
         &self,
         events: &IpcChannel<SshSftpDownloadEvent>,
@@ -376,6 +374,7 @@ impl SftpTransferService {
         }
     }
 
+    #[cfg(any())]
     pub fn start_upload<R: Runtime>(
         &self,
         _app: AppHandle<R>,
@@ -394,8 +393,7 @@ impl SftpTransferService {
         )
     }
 
-    #[cfg(test)]
-    pub(crate) fn start_upload_headless(
+    pub fn start_upload_headless(
         &self,
         profile_id: Uuid,
         remote_directory: String,
@@ -527,6 +525,7 @@ impl SftpTransferService {
         Ok(started)
     }
 
+    #[cfg(any())]
     pub fn start_download<R: Runtime>(
         &self,
         app: AppHandle<R>,
@@ -546,8 +545,7 @@ impl SftpTransferService {
         )
     }
 
-    #[cfg(test)]
-    pub(crate) fn start_download_headless(
+    pub fn start_download_headless(
         &self,
         profile_id: Uuid,
         files: Vec<SshSftpDownloadInput>,
@@ -862,7 +860,7 @@ impl SftpTransferService {
         let upload_events = upload_events.map(Arc::new);
         let download_events = download_events.map(Arc::new);
         thread::Builder::new()
-            .name(format!("nekossh-sftp-job-{job_id}"))
+            .name(format!("terminal233-sftp-job-{job_id}"))
             .spawn(move || {
                 // One supervisor owns a small scoped worker pool. Every worker gets a separate
                 // pure-Rust SSH client, so connection state is never accessed across threads.
@@ -1336,7 +1334,7 @@ fn temporary_upload_path(remote_path: &str, file_id: Uuid) -> Result<String> {
         .rsplit_once('/')
         .ok_or(NekoError::SshTransferInputInvalid)?;
     let directory = if directory.is_empty() { "/" } else { directory };
-    let temporary_name = format!(".{file_name}.nekossh-{file_id}.part");
+    let temporary_name = format!(".{file_name}.terminal233-{file_id}.part");
     join_remote_path(directory, &temporary_name)
 }
 
@@ -1552,6 +1550,7 @@ const fn max_encoded_file_bytes() -> usize {
     MAX_FILE_BYTES.div_ceil(3) * 4
 }
 
+#[cfg(any())]
 fn emit<R: Runtime, T: Serialize + Clone>(app: &AppHandle<R>, event: &str, payload: T) {
     // Renderer shutdown/event delivery failure must not panic a transfer worker.
     let _ = app.emit(event, payload);
@@ -1642,7 +1641,7 @@ mod tests {
         assert_eq!(
             temporary_upload_path("/srv/uploads/report.csv", Uuid::nil())
                 .expect("safe temporary path"),
-            "/srv/uploads/.report.csv.nekossh-00000000-0000-0000-0000-000000000000.part"
+            "/srv/uploads/.report.csv.terminal233-00000000-0000-0000-0000-000000000000.part"
         );
         assert!(validate_destructive_remote_path("/srv/uploads/report.csv").is_ok());
         for invalid in ["/", ".", "..", "/srv/../etc", "/srv/./report.csv"] {
@@ -2002,7 +2001,7 @@ mod tests {
                         .deserialize::<Value>()
                         .expect("deserialize upload IPC event");
                     sender.send(event).expect("capture upload IPC event");
-                    Ok(())
+                    Ok::<(), String>(())
                 });
                 let permit = admission.try_acquire(profile.id).expect("admit upload");
                 let started = service

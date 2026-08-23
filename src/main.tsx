@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client'
 
 const RuntimeApp = import.meta.env.MODE === 'web'
   ? lazy(() => import('./components/WebMacWorkspace').then((module) => ({ default: module.WebMacWorkspace })))
-  : lazy(() => import('./TauriIdeApp'))
+  : lazy(() => import('./Terminal233IdeApp'))
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

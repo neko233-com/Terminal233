@@ -41,10 +41,10 @@ const MAX_SFTP_PACKET_BYTES = 256 * 1024
 const POSIX_RENAME_EXTENSION = 'posix-rename@openssh.com'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const fixtureUsername = 'nekossh-fixture'
+const fixtureUsername = 'terminal233-fixture'
 const fixturePassword = 'local-interoperability-password'
 const fixtureKeyPassphrase = 'local-interoperability-key-passphrase'
-const fixtureFileContent = Buffer.from('NekoSSH native SFTP fixture\n', 'utf8')
+const fixtureFileContent = Buffer.from('Terminal233 native SFTP fixture\n', 'utf8')
 const fixtureTransferFileName = '猫咪-数据.bin'
 const fixtureTransferPath = `/workspace/${fixtureTransferFileName}`
 const fixtureTransferContent = Buffer.alloc(150_123)
@@ -695,7 +695,7 @@ function configureSftp(sftp, client) {
       assert.equal(newPath, fixtureTransferPath, 'temporary upload must publish the intended path')
       assert.match(
         basename(oldPath),
-        /^\.猫咪-数据\.bin\.nekossh-[0-9a-f-]+\.part$/u,
+        /^\.猫咪-数据\.bin\.terminal233-[0-9a-f-]+\.part$/u,
         'upload must use the production temporary-file naming contract',
       )
       observations.mutations.add('upload-atomic-rename')
@@ -744,7 +744,7 @@ async function runCargoTest(port, privateKeyPath, testName) {
   const child = spawn(cargoExecutable(), [
     'test',
     '--manifest-path',
-    'src-tauri/Cargo.toml',
+    'terminal233/Cargo.toml',
     '--locked',
     '--all-features',
     testName,
@@ -893,7 +893,7 @@ const server = new SshServer({
   })
 })
 
-const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'nekossh-native-interop-'))
+const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'terminal233-native-interop-'))
 const privateKeyPath = path.join(temporaryDirectory, 'fixture-private-key.pem')
 await writeFile(privateKeyPath, clientPrivateKeyPem, { mode: 0o600, flag: 'wx' })
 

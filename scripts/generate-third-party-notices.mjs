@@ -27,14 +27,14 @@ const cargo = spawnSync('cargo', [
   '--filter-platform',
   'x86_64-pc-windows-msvc',
   '--manifest-path',
-  join(repositoryRoot, 'src-tauri', 'Cargo.toml'),
+  join(repositoryRoot, 'terminal233', 'Cargo.toml'),
 ], { cwd: repositoryRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true })
 if (cargo.error || cargo.status !== 0) {
   throw new Error(`cargo metadata failed: ${cargo.error?.message ?? cargo.stderr ?? cargo.stdout}`)
 }
 const metadata = JSON.parse(cargo.stdout)
 const resolvedCargoPackages = new Set(metadata.resolve.nodes.map((node) => node.id))
-const cargoVendorRoot = resolve(repositoryRoot, 'src-tauri', 'vendor')
+const cargoVendorRoot = resolve(repositoryRoot, 'terminal233', 'vendor')
 const isVendoredCargoPackage = (record) => {
   const packageDirectory = resolve(dirname(record.manifest_path))
   return packageDirectory === cargoVendorRoot || packageDirectory.startsWith(`${cargoVendorRoot}${sep}`)

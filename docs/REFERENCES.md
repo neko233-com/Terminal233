@@ -1,11 +1,11 @@
-# NekoSSH 参考与素材说明
+# Terminal233 参考与素材说明
 
 ## 产品与视觉研究
 
 - [macos.kimi.site](https://macos.kimi.site/)：用于研究 Web 桌面中的窗口、Dock、菜单栏、终端等交互隐喻。
 - [XTerminal](https://www.xterminal.cn/)：用于研究 SSH 工作台的连接管理、工作区与同步需求。
 
-它们是研究输入，不是本仓库代码或素材来源。NekoSSH 不表示获得上述站点、其运营方或 Apple 的认可、授权或关联。
+它们是研究输入，不是本仓库代码或素材来源。Terminal233 不表示获得上述站点、其运营方或 Apple 的认可、授权或关联。
 
 ## 当前仓库素材状态
 

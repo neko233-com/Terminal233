@@ -101,7 +101,7 @@ describe('web downloads', () => {
       blob: async () => new Blob(['neko']),
       headers: new Headers({ 'content-disposition': 'attachment; filename="notes.txt"' }),
     } as Response)
-    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:nekossh-download')
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:terminal233-download')
     const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
     let observedDownloadName = ''
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
@@ -119,7 +119,7 @@ describe('web downloads', () => {
       expect(revokeObjectURL).not.toHaveBeenCalled()
 
       vi.runAllTimers()
-      expect(revokeObjectURL).toHaveBeenCalledWith('blob:nekossh-download')
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:terminal233-download')
     } finally {
       vi.useRealTimers()
     }
@@ -134,7 +134,7 @@ describe('web downloads', () => {
         'content-disposition': 'attachment; filename="______.txt"; filename*=UTF-8\'\'%E4%B8%AD%E6%96%87%22%E7%AC%94%E8%AE%B0.txt',
       }),
     } as Response)
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:nekossh-unicode-download')
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:terminal233-unicode-download')
     const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
     let observedDownloadName = ''
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
@@ -148,7 +148,7 @@ describe('web downloads', () => {
 
       expect(observedDownloadName).toBe('中文"笔记.txt')
       vi.runAllTimers()
-      expect(revokeObjectURL).toHaveBeenCalledWith('blob:nekossh-unicode-download')
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:terminal233-unicode-download')
     } finally {
       vi.useRealTimers()
     }

@@ -1,6 +1,6 @@
 //! Bounded admission and per-profile retirement for blocking native SSH operations.
 //!
-//! Tauri's blocking pool is intentionally not used as the capacity limit: it is shared with
+//! rdesktop's event loop is intentionally not used as the capacity limit: it is shared with
 //! unrelated application work and can grow well beyond the number of SSH handshakes that this
 //! process should perform concurrently.  This small gate rejects excess work immediately and
 //! makes disconnect/idle expiry a one-way barrier for a profile.

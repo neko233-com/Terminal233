@@ -1,12 +1,12 @@
 {
-  "name": "nekossh",
+  "name": "terminal233",
   "private": true,
   "version": "0.2.0",
   "license": "MIT",
-  "homepage": "https://github.com/neko233-com/nekossh",
+  "homepage": "https://github.com/neko233-com/Terminal233",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/neko233-com/nekossh.git"
+    "url": "git+https://github.com/neko233-com/Terminal233.git"
   },
   "packageManager": "npm@12.0.2",
   "engines": {
@@ -20,7 +20,7 @@
     "web:build": "tsc -b && vite build --mode web && node scripts/validate-runtime-bundle.mjs web",
     "web:server": "node server/ssh2js-server.mjs",
     "web": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-web.ps1",
-    "build": "tsc -b && vite build && node scripts/validate-runtime-bundle.mjs tauri",
+    "build": "tsc -b && vite build && node scripts/validate-runtime-bundle.mjs terminal233",
     "typecheck": "tsc -b",
     "test": "npm run test:ui && npm run test:server",
     "test:ui": "vitest run",
@@ -29,18 +29,18 @@
     "test:pure-rust-ssh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-pure-rust-ssh-dependencies.ps1",
     "test:watch": "vitest",
     "preview": "vite preview",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:icon": "tauri icon src-tauri/icons/nekossh-icon.svg --output src-tauri/icons",
-    "tauri:build": "tauri build --ci -- --locked",
-    "tauri:bundle": "tauri build --ci --bundles nsis,msi -- --locked",
+    "terminal233:dev": "npm run build && cargo run --manifest-path terminal233/Cargo.toml",
+    "terminal233:build": "cargo build --manifest-path terminal233/Cargo.toml --release --locked",
+    "terminal233:self-test": "cargo run --manifest-path terminal233/Cargo.toml -- --self-test",
+    "terminal233:install:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-terminal233-windows.ps1",
+    "server:go:test": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-go-server.ps1",
+    "server:go:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-go-server.ps1",
     "verify:web-launcher": "cargo fmt --manifest-path web-launcher/Cargo.toml --all -- --check && cargo clippy --manifest-path web-launcher/Cargo.toml --locked --all-targets -- -D warnings && cargo test --manifest-path web-launcher/Cargo.toml --locked",
-    "audit:rust": "cargo audit --file src-tauri/Cargo.lock && cargo audit --file web-launcher/Cargo.lock",
+    "audit:rust": "cargo audit --file terminal233/Cargo.lock && cargo audit --file web-launcher/Cargo.lock",
     "audit:deps": "npm audit --audit-level=low && npm run audit:rust",
-    "verify": "npm run build && npm run web:build && npm test && npm run test:pure-rust-ssh && cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --locked --all-features && npm run test:native-ssh && npm run verify:web-launcher"
+    "verify": "npm run build && npm run web:build && npm test && npm run server:go:test && npm run test:pure-rust-ssh && cargo fmt --manifest-path terminal233/Cargo.toml --all -- --check && cargo clippy --manifest-path terminal233/Cargo.toml --locked --all-targets --all-features -- -D warnings && cargo test --manifest-path terminal233/Cargo.toml --locked --all-features && npm run test:native-ssh && npm run verify:web-launcher"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "lucide-react": "1.28.0",
@@ -49,7 +49,6 @@
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

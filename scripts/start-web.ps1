@@ -74,8 +74,8 @@ try {
   if (-not $frontendReady) { throw 'Web macOS 前端启动失败。' }
 
   if (-not $NoBrowser) { Start-Process $webUrl }
-  Write-Host "NekoSSH Web: $webUrl"
-  Write-Host "NekoSSH MCP: $backendUrl/mcp"
+  Write-Host "Terminal233 Web: $webUrl"
+  Write-Host "Terminal233 MCP: $backendUrl/mcp"
   Write-Host "Authorization: Bearer $mcpToken"
   Write-Host "后端 PID $($server.Id)，前端 PID $($web.Id)。保持此终端打开；Ctrl+C 停止。"
 

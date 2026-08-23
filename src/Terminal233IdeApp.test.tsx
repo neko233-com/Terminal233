@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import TauriIdeApp from './TauriIdeApp'
+import Terminal233IdeApp from './Terminal233IdeApp'
 
 const ide = vi.hoisted(() => ({
   acknowledgeIdeDownloadChunk: vi.fn(),
@@ -170,10 +170,10 @@ beforeEach(() => {
   ide.deleteIdeRemote.mockResolvedValue(undefined)
 })
 
-describe('Tauri SSH IDE', () => {
+describe('Terminal233 rdesktop SSH IDE', () => {
   it('prevents the WebView from persisting connection credentials through autofill', async () => {
     const user = userEvent.setup()
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     const dialog = await openCreateDialog(user)
 
     expect(dialog).toHaveAttribute('autocomplete', 'off')
@@ -195,7 +195,7 @@ describe('Tauri SSH IDE', () => {
 
   it('rejects an out-of-range port without creating a connection', async () => {
     const user = userEvent.setup()
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     const dialog = await openCreateDialog(user)
 
     await user.type(within(dialog).getByLabelText('主机'), 'example.test')
@@ -224,7 +224,7 @@ describe('Tauri SSH IDE', () => {
     ide.listIdeConnections.mockResolvedValue([connection])
     ide.prepareIdeConnection.mockReturnValue(prepare.promise)
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     const row = await screen.findByRole('row', { name: /测试服务器/ })
     await user.click(within(row).getByRole('button', { name: '连接' }))
     const progress = await screen.findByRole('dialog', { name: 'SSH 连接' })
@@ -257,7 +257,7 @@ describe('Tauri SSH IDE', () => {
       message: 'SSH 认证失败，请检查用户名和凭据。',
     })
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     const row = await screen.findByRole('row', { name: /测试服务器/ })
     await user.click(within(row).getByRole('button', { name: '连接' }))
 
@@ -278,7 +278,7 @@ describe('Tauri SSH IDE', () => {
     }
     ide.listIdeConnections.mockResolvedValue([connection, secondConnection])
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     const firstRow = await screen.findByRole('row', { name: /测试服务器/ })
     const secondRow = screen.getByRole('row', { name: /备用服务器/ })
 
@@ -310,7 +310,7 @@ describe('Tauri SSH IDE', () => {
     }
     ide.listIdeConnections.mockResolvedValue([connection, hiddenConnection, visibleConnection])
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     await screen.findByRole('row', { name: /测试服务器/ })
     await user.click(screen.getByRole('button', { name: /个人服务器/ }))
     const firstVisible = screen.getByRole('row', { name: /测试服务器/ })
@@ -346,7 +346,7 @@ describe('Tauri SSH IDE', () => {
       return Promise.resolve(started)
     })
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     await openWorkspace(user)
     const filePane = screen.getByText('拖入文件即可上传').closest('aside')
     if (!filePane) throw new Error('remote file pane not found')
@@ -394,7 +394,7 @@ describe('Tauri SSH IDE', () => {
       return Promise.resolve(started)
     })
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     await openWorkspace(user)
     const filePane = screen.getByText('拖入文件即可上传').closest('aside')
     if (!filePane) throw new Error('remote file pane not found')
@@ -437,7 +437,7 @@ describe('Tauri SSH IDE', () => {
       return new Promise(() => undefined)
     })
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     await openWorkspace(user)
     const filePane = screen.getByText('拖入文件即可上传').closest('aside')
     if (!filePane) throw new Error('remote file pane not found')
@@ -490,7 +490,7 @@ describe('Tauri SSH IDE', () => {
       return new Promise(() => undefined)
     })
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     await openWorkspace(user)
     const filePane = screen.getByText('拖入文件即可上传').closest('aside')
     if (!filePane) throw new Error('remote file pane not found')
@@ -518,7 +518,7 @@ describe('Tauri SSH IDE', () => {
     vi.stubGlobal('matchMedia', vi.fn(() => mediaQuery))
     ide.listIdeConnections.mockResolvedValue([connection])
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     await openWorkspace(user)
 
     await waitFor(() =>
@@ -540,7 +540,7 @@ describe('Tauri SSH IDE', () => {
     const create = deferred<typeof connection>()
     ide.createIdeConnection.mockReturnValue(create.promise)
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     const dialog = await openCreateDialog(user)
     await user.type(within(dialog).getByLabelText('主机'), 'key.example.test')
     await user.clear(within(dialog).getByLabelText('端口'))
@@ -593,7 +593,7 @@ describe('Tauri SSH IDE', () => {
           },
     ))
 
-    render(<TauriIdeApp />)
+    render(<Terminal233IdeApp />)
     await openWorkspace(user)
     const folder = await screen.findByRole('button', { name: /archive，文件夹/ })
     await user.dblClick(folder)

@@ -418,7 +418,7 @@ export function WebMacWorkspace() {
     <main className="web-mac-root" onContextMenu={(event) => event.preventDefault()}>
       <div className="web-mac-wallpaper" />
       <header className="web-mac-menubar">
-        <div className="web-mac-menu-left"><span className="web-mac-apple">●</span><strong>NekoSSH</strong><span>工作台</span><span>文件</span><span>窗口</span></div>
+        <div className="web-mac-menu-left"><span className="web-mac-apple">●</span><strong>Terminal233</strong><span>工作台</span><span>文件</span><span>窗口</span></div>
         <div className="web-mac-menu-right"><Wifi size={15} /><ShieldCheck size={15} /><span>{menuDate}</span></div>
       </header>
 
@@ -509,7 +509,7 @@ function ConnectionSheet({
   return (
     <section aria-labelledby="web-connect-title" aria-modal="true" className="web-connect-overlay" role="dialog">
       <div className="web-connect-card">
-        <div className="web-connect-brand"><span className="web-connect-orb"><Terminal size={23} /></span><div><b>NekoSSH</b><span>独立浏览器工作台</span></div></div>
+        <div className="web-connect-brand"><span className="web-connect-orb"><Terminal size={23} /></span><div><b>Terminal233</b><span>独立浏览器工作台</span></div></div>
         {phase === 'form' || phase === 'booting' ? (
           <form autoComplete="off" className="web-connect-form" onSubmit={submit}>
             <div className="web-connect-heading"><div><p>快速连接</p><h1 id="web-connect-title">把 SSH 主机拖进桌面</h1></div><span className="web-local-badge"><ShieldCheck size={14} />仅本机内存</span></div>

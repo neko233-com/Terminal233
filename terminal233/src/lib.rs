@@ -1,4 +1,4 @@
-//! NekoSSH native Tauri v2 SSH IDE backend.
+//! Terminal233 native rdesktop SSH IDE backend.
 //!
 //! The desktop path is deliberately independent from the browser workspace. It keeps SSH
 //! connection material in memory and uses pure-Rust `puressh` directly, without an external SSH
@@ -7,13 +7,71 @@
 pub mod domain;
 pub mod ephemeral;
 pub mod error;
-mod ide_commands;
+pub mod ide_commands;
+pub mod ipc;
 mod operation_admission;
 mod sftp_transfer;
 mod ssh;
 mod ssh_terminal;
 
-use tauri::Manager;
+pub fn run_rdesktop() -> Result<(), String> {
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    use rdesktop_core::{
+        AppConfig, WindowConfig,
+        ipc::{FnIpcHandler, IpcMessage},
+        renderer::Renderer,
+    };
+    use rdesktop_webview::WebViewRenderer;
+
+    tracing_subscriber::fmt()
+        .with_env_filter("terminal233=info,rdesktop=info")
+        .try_init()
+        .ok();
+
+    let config = AppConfig {
+        identifier: "site.neko233.terminal233".to_owned(),
+        name: "Terminal233".to_owned(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        window: WindowConfig {
+            title: "Terminal233".to_owned(),
+            width: 1280,
+            height: 800,
+            resizable: true,
+            min_size: Some((960, 640)),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let outbox = Arc::new(Mutex::new(Vec::<String>::new()));
+    let state = Arc::new(ide_commands::IdeState::new());
+    let handler = FnIpcHandler::new({
+        let state = Arc::clone(&state);
+        let outbox = Arc::clone(&outbox);
+        move |message: IpcMessage| ide_commands::handle_rdesktop_message(&state, message, &outbox)
+    });
+
+    let mut renderer = WebViewRenderer::new(&config).map_err(|error| error.to_string())?;
+    let asset_root = std::env::var_os("TERMINAL233_FRONTEND_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok().map(|path| path.join("dist")))
+        .ok_or_else(|| "无法确定前端目录".to_owned())?;
+    renderer
+        .set_asset_root(asset_root)
+        .map_err(|error| error.to_string())?;
+    renderer.set_outbox(Arc::clone(&outbox));
+    renderer.init().map_err(|error| error.to_string())?;
+    renderer.set_ipc_handler(Box::new(handler));
+    let window = renderer
+        .create_window(&config.window)
+        .map_err(|error| error.to_string())?;
+    renderer
+        .load_url(window, "rdesktop://localhost/index.html")
+        .map_err(|error| error.to_string())?;
+    Box::new(renderer).run().map_err(|error| error.to_string())
+}
 
 fn initialize_puressh_runtime() -> Result<(), String> {
     use std::sync::{Arc, Mutex};
@@ -105,38 +163,6 @@ pub fn production_self_test_receipt() -> Result<String, String> {
         "persistence": "memory_only",
     })
     .to_string())
-}
-
-pub fn run() {
-    tauri::Builder::default()
-        .setup(|app| {
-            app.manage(ide_commands::IdeState::new());
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            ide_commands::ide_connection_create,
-            ide_commands::ide_connection_list,
-            ide_commands::ide_connection_disconnect,
-            ide_commands::ide_ssh_prepare,
-            ide_commands::ide_ssh_trust_host_key,
-            ide_commands::ide_ssh_reject_host_key,
-            ide_commands::ide_ssh_exec,
-            ide_commands::ide_sftp_list,
-            ide_commands::ide_sftp_upload_start,
-            ide_commands::ide_sftp_download_start,
-            ide_commands::ide_sftp_transfer_cancel,
-            ide_commands::ide_sftp_download_ack,
-            ide_commands::ide_sftp_mkdir,
-            ide_commands::ide_sftp_rename,
-            ide_commands::ide_sftp_delete,
-            ide_commands::ide_terminal_start,
-            ide_commands::ide_terminal_write,
-            ide_commands::ide_terminal_resize,
-            ide_commands::ide_terminal_ack_output,
-            ide_commands::ide_terminal_close,
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running NekoSSH desktop application");
 }
 
 #[cfg(test)]

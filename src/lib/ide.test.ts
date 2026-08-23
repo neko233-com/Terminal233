@@ -1,25 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const tauri = vi.hoisted(() => ({
+const rdesktop = vi.hoisted(() => ({
   invoke: vi.fn(),
-  channels: [] as Array<{ onmessage: (event: unknown) => void }>,
-  listen: vi.fn(),
-}))
-
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: tauri.invoke,
-  Channel: class<T> {
-    onmessage: (event: T) => void
-
-    constructor(onmessage: (event: T) => void) {
-      this.onmessage = onmessage
-      tauri.channels.push(this as { onmessage: (event: unknown) => void })
-    }
-  },
-}))
-
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: tauri.listen,
 }))
 
 import {
@@ -31,11 +13,11 @@ import {
   uploadIdeFiles,
 } from './ide'
 
-describe('Tauri IDE terminal bridge', () => {
+describe('Terminal233 rdesktop terminal bridge', () => {
   beforeEach(() => {
-    tauri.invoke.mockReset()
-    tauri.listen.mockReset()
-    tauri.channels.length = 0
+    rdesktop.invoke.mockReset()
+    window.__RDESKTOP_INVOKE__ = rdesktop.invoke
+    delete window.__RDESKTOP_PUSH__
   })
 
   afterEach(() => {
@@ -46,7 +28,7 @@ describe('Tauri IDE terminal bridge', () => {
     expect([...decodeBase64Bytes('AP/DKA==')]).toEqual([0x00, 0xff, 0xc3, 0x28])
   })
 
-  it('normalizes Tauri, JavaScript, and string errors without hiding useful feedback', () => {
+  it('normalizes rdesktop, JavaScript, and string errors without hiding useful feedback', () => {
     expect(ideError({ code: 'profile_not_found', message: '连接已过期。' })).toBe('连接已过期。')
     expect(ideError(new Error('网络不可用。'))).toBe('网络不可用。')
     expect(ideError('已取消。')).toBe('已取消。')
@@ -63,16 +45,18 @@ describe('Tauri IDE terminal bridge', () => {
 
   it('installs a session-owned channel before invoking terminal start', async () => {
     const onEvent = vi.fn()
-    tauri.invoke.mockImplementation((command: string, arguments_: Record<string, unknown>) => {
+    rdesktop.invoke.mockImplementation((command: string, arguments_: { channelId?: string }) => {
       expect(command).toBe('ide_terminal_start')
-      expect(arguments_.events).toBe(tauri.channels[0])
-      tauri.channels[0].onmessage({
-        kind: 'output',
-        sessionId: 'session-1',
-        sequence: 1,
-        dataBase64: 'aGk=',
+      window.__RDESKTOP_PUSH__?.({
+        channelId: arguments_.channelId,
+        payload: {
+          kind: 'output',
+          sessionId: 'session-1',
+          sequence: 1,
+          dataBase64: 'aGk=',
+        },
       })
-      return Promise.resolve({ sessionId: 'session-1' })
+      return Promise.resolve({ success: true, data: { sessionId: 'session-1' } })
     })
 
     await expect(startIdeTerminal('connection-1', onEvent, 120, 36)).resolves.toEqual({
@@ -98,27 +82,32 @@ describe('Tauri IDE terminal bridge', () => {
       totalBytes: 2,
       items: [{ fileId: 'file-1', name: file.name, size: 2 }],
     }
-    tauri.invoke.mockImplementation((command: string, arguments_: Record<string, unknown>) => {
+    rdesktop.invoke.mockImplementation((command: string, arguments_: { channelId?: string; files?: unknown }) => {
       expect(command).toBe('ide_sftp_upload_start')
-      expect(arguments_.events).toBe(tauri.channels[0])
       expect(arguments_.files).toEqual([{
         name: 'fast.txt',
         dataBase64: 'aGk=',
         overwrite: false,
       }])
-      tauri.channels[0].onmessage({ kind: 'started', ...started })
-      tauri.channels[0].onmessage({
-        kind: 'completed',
-        jobId: started.jobId,
-        direction: 'upload',
-        status: 'completed',
-        completedFiles: 1,
-        failedFiles: 0,
-        cancelledFiles: 0,
-        bytesTransferred: 2,
-        totalBytes: 2,
+      window.__RDESKTOP_PUSH__?.({
+        channelId: arguments_.channelId,
+        payload: { kind: 'started', ...started },
       })
-      return Promise.resolve(started)
+      window.__RDESKTOP_PUSH__?.({
+        channelId: arguments_.channelId,
+        payload: {
+          kind: 'completed',
+          jobId: started.jobId,
+          direction: 'upload',
+          status: 'completed',
+          completedFiles: 1,
+          failedFiles: 0,
+          cancelledFiles: 0,
+          bytesTransferred: 2,
+          totalBytes: 2,
+        },
+      })
+      return Promise.resolve({ success: true, data: started })
     })
 
     await expect(uploadIdeFiles('connection-1', '/', [file], (event) => received.push(event)))

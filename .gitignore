@@ -12,16 +12,27 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/.tauri/
 src-tauri/binaries/
+terminal233/target/
+terminal233/gen/
+terminal233/.tauri/
+terminal233/binaries/
 
 # Per-machine Tauri / Cargo configuration
 src-tauri/tauri.conf.local.json
 src-tauri/tauri.conf.*.local.json
 src-tauri/.cargo/credentials
 src-tauri/.cargo/credentials.toml
+terminal233/tauri.conf.local.json
+terminal233/tauri.conf.*.local.json
+terminal233/.cargo/credentials
+terminal233/.cargo/credentials.toml
 
 # Local NekoSSH runtime data and encrypted vault backups
 .nekossh/
 data/
+terminal233-server/data/
+terminal233-server/bin/
+terminal233-server/*.json
 neko233-v1.vault.json
 *.nekovault
 *.vault

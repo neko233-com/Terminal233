@@ -123,7 +123,7 @@ mio = { version = "1", default-features = false, features = ["net", "os-poll"] }
 [lib]
 name = "puressh"
 path = "src/lib.rs"
-# NekoSSH vendors the Rust library only.
+# Terminal233 vendors the Rust library only.
 crate-type = ["lib"]
 
 [[bin]]

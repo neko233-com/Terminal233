@@ -21,12 +21,12 @@ use std::{
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use puressh::shared::{OwnedChannelStream, SharedClient};
 use serde::Serialize;
-use tauri::ipc::Channel as IpcChannel;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
     error::{NekoError, Result},
+    ipc::Channel as IpcChannel,
     operation_admission::ProfileCloseSignal,
     ssh::SshService,
 };
@@ -171,7 +171,7 @@ impl TerminalService {
         let worker_last_output_sequence = Arc::clone(&last_output_sequence);
         let worker_acknowledged_output_sequence = Arc::clone(&acknowledged_output_sequence);
         if thread::Builder::new()
-            .name(format!("nekossh-pty-{session_id}"))
+            .name(format!("terminal233-pty-{session_id}"))
             .spawn(move || {
                 terminal_worker(
                     session_id,
@@ -383,7 +383,7 @@ fn terminal_worker(
             let controller_close = Arc::clone(&close_requested);
             let controller_failure = Arc::clone(&failure_code);
             thread::Builder::new()
-                .name(format!("nekossh-pty-control-{session_id}"))
+                .name(format!("terminal233-pty-control-{session_id}"))
                 .spawn(move || {
                     terminal_control_worker(
                         controller_shared,

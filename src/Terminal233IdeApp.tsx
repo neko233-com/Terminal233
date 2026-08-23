@@ -9,7 +9,7 @@ import {
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as XTerm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import './tauri-ide.css'
+import './terminal233-ide.css'
 import {
   Activity,
   ChevronLeft,
@@ -62,6 +62,8 @@ import {
   type IdeDownloadEvent,
   type IdeUploadEvent,
 } from './lib/ide'
+import CredentialSyncPanel from './components/CredentialSyncPanel'
+import type { CredentialAccount } from './lib/credential-server'
 
 type ActiveConnection = {
   connection: IdeConnection
@@ -211,7 +213,7 @@ function useModalFocus(
   }, [dialogRef, open])
 }
 
-export default function TauriIdeApp() {
+export default function Terminal233IdeApp() {
   const [connections, setConnections] = useState<IdeConnection[]>([])
   const [loadingConnections, setLoadingConnections] = useState(true)
   const [libraryError, setLibraryError] = useState<string | null>(null)
@@ -446,6 +448,24 @@ export default function TauriIdeApp() {
     }
   }
 
+  async function importCloudAccount(account: CredentialAccount) {
+    try {
+      const connection = await createIdeConnection({
+        label: account.label,
+        host: account.host,
+        port: account.port,
+        username: account.username,
+        authentication: { kind: 'password', password: account.password },
+        tags: ['云端同步'],
+        terminal: { columns: 110, rows: 34, command: null },
+      })
+      setConnections((current) => current.some((item) => item.id === connection.id) ? current : [...current, connection])
+      await beginConnection(connection)
+    } catch (error) {
+      setLibraryError(ideError(error))
+    }
+  }
+
   function reorderConnection(connectionId: string, targetId: string) {
     if (connectionId === targetId) return
     setConnections((current) => {
@@ -478,7 +498,7 @@ export default function TauriIdeApp() {
   return (
     <main className="ide-shell" onContextMenu={() => setMenu(null)}>
       <header className="ide-titlebar">
-        <div className="ide-brand"><span className="ide-brand-mark"><TerminalSquare size={18} /></span><strong>NekoSSH</strong><span>Rust SSH IDE</span></div>
+        <div className="ide-brand"><span className="ide-brand-mark"><TerminalSquare size={18} /></span><strong>Terminal233</strong><span>rdesktop · Rust SSH IDE</span></div>
         <button className="ide-primary" onClick={() => { setFormError(null); setShowCreate(true) }} type="button"><CirclePlus size={15} />新建连接</button>
       </header>
 
@@ -487,7 +507,8 @@ export default function TauriIdeApp() {
           <div className="ide-side-heading">连接</div>
           <button className={`ide-side-item ${selectedGroup === '全部' ? 'active' : ''}`} onClick={() => setSelectedGroup('全部')} type="button"><Server size={15} />全部<span>{connections.length}</span></button>
           {groups.map(([group, count]) => <button className={`ide-side-item ${selectedGroup === group ? 'active' : ''}`} key={group} onClick={() => setSelectedGroup(group)} type="button"><Folder size={15} />{group}<span>{count}</span></button>)}
-          <div className="ide-side-note">连接信息仅保存在当前进程内。退出后自动清空。</div>
+          <CredentialSyncPanel onImport={(account) => void importCloudAccount(account)} />
+          <div className="ide-side-note">本地连接信息仅保存在当前进程内。云端账号由自部署服务器加密保存，退出后清除本地会话。</div>
         </aside>
 
         <section className="ide-library">
@@ -1131,7 +1152,7 @@ function IdeWorkspace({ active, onBack, onDisconnect }: { active: ActiveConnecti
       <aside className="ide-monitor-pane"><div className="ide-pane-tabs"><span className="active"><Activity size={14} />会话</span></div><div className="ide-monitor-card"><div className="ide-monitor-title"><Server size={16} /><strong>连接</strong></div><dl><div><dt>主机</dt><dd>{active.connection.host}:{active.connection.port}</dd></div><div><dt>用户</dt><dd>{active.connection.username}</dd></div><div><dt>状态</dt><dd className="ok">● 已验证</dd></div></dl></div><div className="ide-monitor-card"><div className="ide-monitor-title"><HardDrive size={16} /><strong>工作区</strong></div><dl><div><dt>目录</dt><dd title={cwd}>{cwd}</dd></div><div><dt>终端</dt><dd>{terminalState}</dd></div><div><dt>时长</dt><dd>{formatDuration(elapsed)}</dd></div></dl></div><div className="ide-monitor-card"><div className="ide-monitor-title"><Activity size={16} /><strong>传输</strong></div>{transfers.size ? [...transfers.values()].map((transfer) => <div className="ide-transfer" key={transfer.jobId}><span>{transfer.direction === 'upload' ? '上传' : '下载'} · {transfer.name}</span><progress aria-label={`${transfer.name} 传输进度`} max={transfer.jobTotalBytes ?? 1} value={transfer.jobBytesTransferred} /><small>{formatBytes(transfer.jobBytesTransferred)} / {formatBytes(transfer.jobTotalBytes)}</small><button onClick={() => void cancelTransferJob(transfer.jobId)} type="button">取消</button></div>) : <p className="ide-monitor-empty">当前没有传输任务</p>}</div><div className="ide-native-note">SSH 与 SFTP 均由纯 Rust puressh 进程内执行，不调用 Windows SSH、PuTTY 或 plink。</div></aside>
     </section>
     {fileMenu ? <FileContextMenu menu={fileMenu} onDownload={() => { setFileMenu(null); void download(fileMenu) }} onRename={() => { setDialog({ kind: 'rename', entry: fileMenu.entry, path: fileMenu.path, directory: fileMenu.directory }); setDialogValue(fileMenu.entry.name); setFileMenu(null) }} onDelete={() => { setDialog({ kind: 'delete', entry: fileMenu.entry, path: fileMenu.path, directory: fileMenu.directory }); setFileMenu(null) }} /> : null}
-    {dialog ? <div className="ide-overlay"><section aria-labelledby="ide-file-dialog-title" aria-modal="true" className="ide-dialog ide-small-dialog" ref={dialogRef} role="dialog" tabIndex={-1}><div className="ide-dialog-header"><div><h2 id="ide-file-dialog-title">{dialog.kind === 'mkdir' ? '新建远端文件夹' : dialog.kind === 'rename' ? '重命名' : '确认删除'}</h2><p>{dialog.kind === 'delete' ? '删除后无法从 NekoSSH 恢复；文件夹必须为空。' : dialog.directory}</p></div><button aria-label="关闭" disabled={operationPending} onClick={closeFileDialog} type="button"><X size={17} /></button></div>{dialog.kind === 'delete' ? <code className="ide-delete-path">{dialog.path}</code> : <label className="ide-dialog-input"><span>名称</span><input autoFocus disabled={operationPending} maxLength={255} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void commitDialog() } }} value={dialogValue} onChange={(event) => setDialogValue(event.target.value)} /></label>}<div className="ide-dialog-actions"><button className="ide-secondary" disabled={operationPending} onClick={closeFileDialog} type="button">取消</button><button className={dialog.kind === 'delete' ? 'ide-delete' : 'ide-primary'} disabled={operationPending} onClick={() => void commitDialog()} type="button">{operationPending ? '正在处理…' : dialog.kind === 'delete' ? '确认删除' : '确定'}</button></div></section></div> : null}
+    {dialog ? <div className="ide-overlay"><section aria-labelledby="ide-file-dialog-title" aria-modal="true" className="ide-dialog ide-small-dialog" ref={dialogRef} role="dialog" tabIndex={-1}><div className="ide-dialog-header"><div><h2 id="ide-file-dialog-title">{dialog.kind === 'mkdir' ? '新建远端文件夹' : dialog.kind === 'rename' ? '重命名' : '确认删除'}</h2><p>{dialog.kind === 'delete' ? '删除后无法从 Terminal233 恢复；文件夹必须为空。' : dialog.directory}</p></div><button aria-label="关闭" disabled={operationPending} onClick={closeFileDialog} type="button"><X size={17} /></button></div>{dialog.kind === 'delete' ? <code className="ide-delete-path">{dialog.path}</code> : <label className="ide-dialog-input"><span>名称</span><input autoFocus disabled={operationPending} maxLength={255} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void commitDialog() } }} value={dialogValue} onChange={(event) => setDialogValue(event.target.value)} /></label>}<div className="ide-dialog-actions"><button className="ide-secondary" disabled={operationPending} onClick={closeFileDialog} type="button">取消</button><button className={dialog.kind === 'delete' ? 'ide-delete' : 'ide-primary'} disabled={operationPending} onClick={() => void commitDialog()} type="button">{operationPending ? '正在处理…' : dialog.kind === 'delete' ? '确认删除' : '确定'}</button></div></section></div> : null}
     {notice ? <div aria-live={notice.tone === 'error' ? 'assertive' : 'polite'} className={`ide-toast ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}><span>{notice.message}</span><button aria-label="关闭通知" onClick={() => setNotice(null)} type="button"><X size={14} /></button></div> : null}
   </main>
 }
