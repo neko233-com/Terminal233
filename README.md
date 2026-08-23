@@ -21,7 +21,17 @@ corepack npm run build
 corepack npm run terminal233:build
 .\terminal233\target\release\terminal233.exe --version
 
-客户端默认从当前目录的 dist/ 加载前端；如需指定前端目录，可设置 TERMINAL233_FRONTEND_ROOT。
+生成 Windows 桌面包：
+
+corepack npm run terminal233:package:windows
+
+产物位于 terminal233/target/release/bundle/windows/，包含 Terminal233.exe、dist/、安装脚本和 ZIP。Windows 静默安装默认使用 C:\App\Terminal233：
+
+corepack npm run terminal233:install:windows
+
+也可以从解压后的桌面包目录执行 .\install-terminal233-windows.ps1。桌面客户端使用系统 WebView2 Runtime，不将 WebView2 安装程序重复打进包内。
+
+客户端默认从 Terminal233.exe 同目录的 dist/ 加载前端；如需指定前端目录，可设置 TERMINAL233_FRONTEND_ROOT。
 
 ## 自部署同步服务器
 

@@ -56,8 +56,19 @@ pub fn run_rdesktop() -> Result<(), String> {
     let mut renderer = WebViewRenderer::new(&config).map_err(|error| error.to_string())?;
     let asset_root = std::env::var_os("TERMINAL233_FRONTEND_ROOT")
         .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok().map(|path| path.join("dist")))
-        .ok_or_else(|| "无法确定前端目录".to_owned())?;
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(|parent| parent.join("dist")))
+                .filter(|path| path.is_dir())
+        })
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|path| path.join("dist"))
+                .filter(|path| path.is_dir())
+        })
+        .ok_or_else(|| "无法确定前端目录：请确认 dist 位于 Terminal233.exe 同目录".to_owned())?;
     renderer
         .set_asset_root(asset_root)
         .map_err(|error| error.to_string())?;

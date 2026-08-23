@@ -6,7 +6,7 @@ coverage/
 .coverage/
 *.tsbuildinfo
 
-# Rust / Tauri generated build output
+# Rust / rdesktop generated build output and desktop bundles
 target/
 src-tauri/target/
 src-tauri/gen/
@@ -17,7 +17,7 @@ terminal233/gen/
 terminal233/.tauri/
 terminal233/binaries/
 
-# Per-machine Tauri / Cargo configuration
+# Per-machine rdesktop / Cargo configuration
 src-tauri/tauri.conf.local.json
 src-tauri/tauri.conf.*.local.json
 src-tauri/.cargo/credentials

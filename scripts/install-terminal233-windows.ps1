@@ -1,24 +1,38 @@
 [CmdletBinding()]
 param(
+    [string]$PackageRoot = '',
     [string]$ExecutablePath = '',
     [string]$FrontendPath = '',
     [string]$InstallRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
+$scriptRoot = (Resolve-Path $PSScriptRoot).Path
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$sourceRoot = if (-not [string]::IsNullOrWhiteSpace($PackageRoot)) {
+    (Resolve-Path -LiteralPath $PackageRoot).Path
+} elseif (Test-Path -LiteralPath (Join-Path $scriptRoot 'Terminal233.exe') -PathType Leaf) {
+    $scriptRoot
+} else {
+    $repositoryRoot
+}
 $resolvedExecutable = if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
-    Join-Path $repositoryRoot 'terminal233\target\release\terminal233.exe'
+    $packageExecutable = Join-Path $sourceRoot 'Terminal233.exe'
+    if (Test-Path -LiteralPath $packageExecutable -PathType Leaf) {
+        (Resolve-Path -LiteralPath $packageExecutable).Path
+    } else {
+        (Resolve-Path -LiteralPath (Join-Path $sourceRoot 'terminal233\target\release\terminal233.exe')).Path
+    }
 } else {
     (Resolve-Path -LiteralPath $ExecutablePath).Path
 }
 $resolvedFrontend = if ([string]::IsNullOrWhiteSpace($FrontendPath)) {
-    Join-Path $repositoryRoot 'dist'
+    (Resolve-Path -LiteralPath (Join-Path $sourceRoot 'dist')).Path
 } else {
     (Resolve-Path -LiteralPath $FrontendPath).Path
 }
 $resolvedInstallRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
-    Join-Path $env:LOCALAPPDATA 'Programs\Terminal233'
+    'C:\App\Terminal233'
 } else {
     [IO.Path]::GetFullPath($InstallRoot)
 }
@@ -35,13 +49,13 @@ if ([string]::IsNullOrWhiteSpace($resolvedInstallRoot) -or $resolvedInstallRoot 
 
 $installedFrontend = Join-Path $resolvedInstallRoot 'dist'
 New-Item -ItemType Directory -Force -Path $resolvedInstallRoot, $installedFrontend | Out-Null
-Copy-Item -LiteralPath $resolvedExecutable -Destination (Join-Path $resolvedInstallRoot 'terminal233.exe') -Force
+Copy-Item -LiteralPath $resolvedExecutable -Destination (Join-Path $resolvedInstallRoot 'Terminal233.exe') -Force
 Get-ChildItem -LiteralPath $resolvedFrontend -Force | Copy-Item -Destination $installedFrontend -Recurse -Force
 
-$versionOutput = (& (Join-Path $resolvedInstallRoot 'terminal233.exe') --version | Out-String).Trim()
+$versionOutput = (& (Join-Path $resolvedInstallRoot 'Terminal233.exe') --version | Out-String).Trim()
 if ($versionOutput -notmatch '^Terminal233 \d+\.\d+\.\d+$') {
     throw "已安装客户端版本输出无效：$versionOutput"
 }
-Set-Content -LiteralPath (Join-Path $resolvedInstallRoot 'terminal233.version.txt') -Value $versionOutput -Encoding UTF8
+Set-Content -LiteralPath (Join-Path $resolvedInstallRoot 'Terminal233.version.txt') -Value $versionOutput -Encoding UTF8
 Write-Host "Terminal233 已静默安装到 $resolvedInstallRoot"
 Write-Host "已安装版本：$versionOutput"
