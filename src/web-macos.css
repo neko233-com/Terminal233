@@ -175,5 +175,22 @@ button { -webkit-tap-highlight-color: transparent; }
 @keyframes web-pulse { 50% { box-shadow: 0 0 0 7px rgba(75,190,255,.05); } }
 
 @media (max-width: 1100px) { .web-mac-root { min-width: 760px; }.web-desktop-icons { display: none; }.web-mac-window { max-width: calc(100vw - 30px); }.web-connect-card { width: min(620px, calc(100vw - 36px)); } }
+@media (max-width: 760px) {
+  .web-mac-root { min-width: 0; }
+  .web-mac-menubar { padding: 0 9px; font-size: 10px; }
+  .web-mac-menu-left, .web-mac-menu-right { gap: 8px; min-width: 0; }
+  .web-mac-menu-left > span:nth-of-type(n + 2) { display: none; }
+  .web-mac-menu-right > svg { width: 12px; height: 12px; }
+  .web-mac-menu-right > span { max-width: 92px; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+  .web-connect-overlay { place-items: start center; overflow: auto; padding: 52px 12px 24px; }
+  .web-connect-card { width: 100%; border-radius: 16px; }
+  .web-connect-brand { padding: 16px 18px; }
+  .web-connect-form, .web-connect-progress { padding: 20px 18px 21px; }
+  .web-connect-heading, .web-progress-title { flex-direction: column; gap: 12px; margin-bottom: 18px; }
+  .web-connect-heading h1, .web-progress-title h1 { font-size: 22px; }
+  .web-connect-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .web-connect-form label, .web-file-dialog label { margin-bottom: 13px; }
+  .web-connect-foot { align-items: flex-start; line-height: 1.4; }
+}
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 @media (prefers-reduced-transparency: reduce) { .web-connect-card, .web-mac-window, .web-mac-menubar, .web-mac-dock { backdrop-filter: none; background-color: rgba(15,22,34,.96); } }

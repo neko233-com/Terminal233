@@ -596,7 +596,161 @@ fn set_terminal_failure(failure_code: &Mutex<Option<&'static str>>, code: &'stat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{ProfileAuthenticationInput, SshProfileInput, TerminalPreferences};
     use crate::ephemeral::EphemeralConnectionStore;
+    use crate::operation_admission::OperationAdmission;
+    use crate::ssh::SshHostKeyStatus;
+    use serde_json::Value;
+
+    #[test]
+    fn native_terminal_interoperability() {
+        if std::env::var("NEKOSSH_NATIVE_INTEROP").as_deref() != Ok("1") {
+            return;
+        }
+
+        let host = std::env::var("NEKOSSH_NATIVE_INTEROP_HOST").expect("fixture host");
+        let port = std::env::var("NEKOSSH_NATIVE_INTEROP_PORT")
+            .expect("fixture port")
+            .parse::<u16>()
+            .expect("valid fixture port");
+        let username = std::env::var("NEKOSSH_NATIVE_INTEROP_USERNAME").expect("fixture username");
+        let password = std::env::var("NEKOSSH_NATIVE_INTEROP_PASSWORD").expect("fixture password");
+
+        let owner = Uuid::new_v4();
+        let store = Arc::new(EphemeralConnectionStore::new());
+        let profile = store
+            .create(
+                owner,
+                SshProfileInput {
+                    label: "native-terminal".to_owned(),
+                    host,
+                    port,
+                    username,
+                    authentication: ProfileAuthenticationInput::Password { password },
+                    tags: Vec::new(),
+                    terminal: TerminalPreferences::default(),
+                },
+            )
+            .expect("create terminal fixture profile");
+        let ssh = Arc::new(SshService::new(Arc::clone(&store)));
+        let confirmation_id = match ssh
+            .prepare(profile.id)
+            .expect("prepare terminal fixture host")
+        {
+            SshHostKeyStatus::ConfirmationRequired {
+                confirmation_id, ..
+            } => confirmation_id,
+            unexpected => panic!("fixture host must require confirmation: {unexpected:?}"),
+        };
+        assert!(matches!(
+            ssh.trust_host_key(profile.id, confirmation_id)
+                .expect("trust terminal fixture host"),
+            SshHostKeyStatus::Trusted { .. }
+        ));
+
+        let service = Arc::new(TerminalService::new(Arc::clone(&ssh)));
+        let event_service = Arc::clone(&service);
+        let (sender, receiver) = mpsc::channel();
+        let events = IpcChannel::new(move |body| {
+            let event = body
+                .deserialize::<Value>()
+                .expect("deserialize terminal event");
+            if event["kind"] == "output" {
+                let session_id = event["sessionId"]
+                    .as_str()
+                    .expect("terminal output session id")
+                    .parse::<Uuid>()
+                    .expect("valid terminal output session id");
+                let sequence = event["sequence"]
+                    .as_u64()
+                    .expect("terminal output sequence");
+                event_service
+                    .acknowledge_output(session_id, sequence)
+                    .expect("acknowledge terminal output");
+            }
+            sender
+                .send(event)
+                .map_err(|_| "terminal event receiver dropped")
+        });
+        let admission = OperationAdmission::new();
+        let permit = admission
+            .try_acquire(profile.id)
+            .expect("admit terminal fixture session");
+        let started = service
+            .start(
+                profile.id,
+                Some(100),
+                Some(30),
+                events,
+                permit.close_signal(),
+            )
+            .expect("start native terminal fixture session");
+        assert_eq!(
+            service
+                .profile_id_for_session(started.session_id)
+                .expect("terminal profile id"),
+            profile.id
+        );
+        service
+            .resize(started.session_id, 132, 40)
+            .expect("resize native terminal fixture session");
+        service
+            .write(started.session_id, "terminal233-terminal-ping\n".to_owned())
+            .expect("write native terminal fixture input");
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut output = Vec::new();
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .expect("terminal fixture must answer before the deadline");
+            let event = receiver
+                .recv_timeout(remaining)
+                .expect("receive terminal fixture event");
+            match event["kind"].as_str() {
+                Some("output") => {
+                    let data = STANDARD
+                        .decode(event["dataBase64"].as_str().expect("terminal output data"))
+                        .expect("decode terminal output data");
+                    output.extend_from_slice(&data);
+                    if output
+                        .windows(b"terminal233-terminal-pong".len())
+                        .any(|window| window == b"terminal233-terminal-pong")
+                    {
+                        break;
+                    }
+                }
+                Some("error") => panic!("native terminal fixture returned an error: {event}"),
+                Some("closed") => panic!("native terminal fixture closed before its reply"),
+                _ => panic!("unexpected native terminal event: {event}"),
+            }
+        }
+        assert!(
+            output
+                .windows(b"terminal233-terminal-pong".len())
+                .any(|window| window == b"terminal233-terminal-pong")
+        );
+
+        service
+            .close(started.session_id)
+            .expect("close native terminal fixture session");
+        let mut saw_closed = false;
+        while !saw_closed {
+            let event = receiver
+                .recv_timeout(Duration::from_secs(20))
+                .expect("receive terminal close event");
+            match event["kind"].as_str() {
+                Some("output") => {}
+                Some("error") => panic!("native terminal fixture returned an error: {event}"),
+                Some("closed") => saw_closed = true,
+                _ => panic!("unexpected native terminal close event: {event}"),
+            }
+        }
+        assert!(matches!(
+            service.write(started.session_id, "late-input".to_owned()),
+            Err(NekoError::SshTerminalSessionNotFound)
+        ));
+    }
 
     #[test]
     fn terminal_size_has_safe_defaults_and_limits() {

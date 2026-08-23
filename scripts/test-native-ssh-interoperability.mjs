@@ -64,6 +64,10 @@ const observations = {
   publicKeyAuthentications: 0,
   publicKeySignatureHashes: new Set(),
   successfulExecutions: 0,
+  ptyRequests: 0,
+  shellSessions: 0,
+  windowChanges: 0,
+  terminalInputs: [],
   sftpSessions: 0,
   directoryReads: 0,
   uploadBytesWritten: 0,
@@ -857,6 +861,39 @@ const server = new SshServer({
   client.on('ready', () => {
     client.on('session', (accept) => {
       const session = accept()
+      session.on('pty', (acceptPty, rejectPty, info) => {
+        observations.ptyRequests += 1
+        assert.equal(info.term, 'xterm-256color')
+        assert.equal(info.cols, 100)
+        assert.equal(info.rows, 30)
+        acceptPty()
+      })
+      session.on('window-change', (acceptWindowChange, _rejectWindowChange, info) => {
+        observations.windowChanges += 1
+        assert.equal(info.cols, 132)
+        assert.equal(info.rows, 40)
+        if (typeof acceptWindowChange === 'function') acceptWindowChange()
+      })
+      session.on('shell', (acceptShell, rejectShell) => {
+        if (atomicInteropPhase) {
+          rejectShell()
+          return
+        }
+        const channel = acceptShell()
+        observations.shellSessions += 1
+        channel.on('data', (data) => {
+          const input = Buffer.from(data).toString('utf8')
+          observations.terminalInputs.push(input)
+          if (input.includes('terminal233-terminal-ping')) {
+            channel.write('terminal233-terminal-pong\n')
+          }
+        })
+        channel.on('eof', () => {
+          channel.exit(0)
+          channel.end()
+        })
+        channel.on('close', () => client.end())
+      })
       session.on('exec', (acceptExec, rejectExec, info) => {
         const command = String(info.command)
         const output = command.includes('native-password-ok')
@@ -907,6 +944,11 @@ try {
     privateKeyPath,
     'ssh::tests::native_ssh_interoperability',
   )
+  await runCargoTest(
+    address.port,
+    privateKeyPath,
+    'ssh_terminal::tests::native_terminal_interoperability',
+  )
 
   files.set('/workspace/no-overwrite-source.bin', Buffer.from('no-overwrite-source'))
   files.set('/workspace/no-overwrite-target.bin', Buffer.from('existing-target'))
@@ -937,6 +979,13 @@ try {
     'RSA private-key authentication must never fall back to SHA-1',
   )
   assert.equal(observations.successfulExecutions, 2)
+  assert.equal(observations.ptyRequests, 1)
+  assert.equal(observations.shellSessions, 1)
+  assert.ok(observations.windowChanges >= 1, 'terminal resize must reach the SSH server')
+  assert.ok(
+    observations.terminalInputs.some((input) => input.includes('terminal233-terminal-ping')),
+    'terminal input must reach the SSH server',
+  )
   assert.ok(observations.sftpSessions >= 8, 'SFTP operations must use the in-process client')
   assert.ok(observations.directoryReads >= 2)
   assert.deepEqual(
@@ -994,6 +1043,9 @@ try {
     publicKeyAuthentications: observations.publicKeyAuthentications,
     publicKeySignatureHashes: [...observations.publicKeySignatureHashes].sort(),
     successfulExecutions: observations.successfulExecutions,
+    ptyRequests: observations.ptyRequests,
+    shellSessions: observations.shellSessions,
+    windowChanges: observations.windowChanges,
     sftpSessions: observations.sftpSessions,
     directoryReads: observations.directoryReads,
     uploadBytesWritten: observations.uploadBytesWritten,

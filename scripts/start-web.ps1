@@ -13,14 +13,14 @@ function Test-LocalPortInUse {
 }
 
 if (Test-LocalPortInUse -Port $backendPort) {
-  throw "本地 MCP/API 端口 $backendPort 已被占用。请先释放该端口。"
+  throw "Local MCP/API port $backendPort is already in use."
 }
 
 while ($frontendPort -lt 5200 -and (Test-LocalPortInUse -Port $frontendPort)) {
   $frontendPort += 1
 }
 if ($frontendPort -ge 5200) {
-  throw '5173-5199 均被占用，无法启动 Web macOS。'
+  throw 'Ports 5173-5199 are all in use; Web macOS cannot start.'
 }
 
 $tokenBytes = New-Object byte[] 32
@@ -55,10 +55,10 @@ try {
       Start-Sleep -Milliseconds 250
     }
   }
-  if (-not $backendReady) { throw '本地 ssh2js 后端启动失败。' }
+  if (-not $backendReady) { throw 'The local ssh2js backend did not start.' }
 
   $viteEntry = Join-Path $projectRoot 'node_modules\vite\bin\vite.js'
-  if (-not (Test-Path -LiteralPath $viteEntry)) { throw '缺少前端依赖，请先运行 npm install。' }
+  if (-not (Test-Path -LiteralPath $viteEntry)) { throw 'Vite is missing; run npm install first.' }
   $web = Start-Process -FilePath 'node' -ArgumentList $viteEntry, '--mode', 'web' -WorkingDirectory $projectRoot -PassThru -WindowStyle Hidden
   $frontendReady = $false
   for ($attempt = 0; $attempt -lt 80; $attempt++) {
@@ -71,19 +71,19 @@ try {
       Start-Sleep -Milliseconds 250
     }
   }
-  if (-not $frontendReady) { throw 'Web macOS 前端启动失败。' }
+  if (-not $frontendReady) { throw 'The Web macOS frontend did not start.' }
 
   if (-not $NoBrowser) { Start-Process $webUrl }
   Write-Host "Terminal233 Web: $webUrl"
   Write-Host "Terminal233 MCP: $backendUrl/mcp"
   Write-Host "Authorization: Bearer $mcpToken"
-  Write-Host "后端 PID $($server.Id)，前端 PID $($web.Id)。保持此终端打开；Ctrl+C 停止。"
+  Write-Host "Backend PID $($server.Id), frontend PID $($web.Id). Keep this terminal open; press Ctrl+C to stop."
 
   while ($true) {
     $server.Refresh()
     $web.Refresh()
-    if ($server.HasExited) { throw '本地 ssh2js 后端意外退出。' }
-    if ($web.HasExited) { throw 'Web macOS 前端意外退出。' }
+    if ($server.HasExited) { throw 'The local ssh2js backend exited unexpectedly.' }
+    if ($web.HasExited) { throw 'The Web macOS frontend exited unexpectedly.' }
     Start-Sleep -Seconds 1
   }
 } finally {

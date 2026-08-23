@@ -43,6 +43,29 @@ builder lock 中的 rustc/Cargo 必须显式指向 `rustup which --toolchain 1.9
 
 `npm run verify` 会执行 Terminal233 rdesktop renderer 与 Web macOS renderer 的生产构建、运行时包隔离检查、前端、Node 与 Go server 测试，以及 Rust fmt、Clippy 和测试。测试数量随覆盖面增长，不在文档中写死。
 
+## 本地完整验收
+
+本轮 SSH 验收使用隔离的真实 SSHD 夹具；它会覆盖密码认证、加密私钥认证、错误凭据、host-key 信任与拒绝、PTY 请求/resize/输入/输出/关闭、SFTP 列表、上传、下载、改名、目录创建与删除、大小限制、原子覆盖和权限错误。运行：
+
+```powershell
+corepack npm run verify
+```
+
+其中 `npm run test:native-ssh` 会启动一次性 SSHD，并输出 `ptyRequests`、`shellSessions`、`windowChanges`、`sftpSessions` 与上传字节数；必须看到 `status:passed`。纯 Rust SSH 依赖检查由 `npm run test:pure-rust-ssh` 执行，禁止 `ssh2`、libssh2、OpenSSL、`ring`、`aws-lc-*` 和原生 C/ASM SSH/密码学链路。
+
+桌面视觉验收使用 `npm run web` 启动 Web 工作台，在 1280px 桌面视口和 390×844 移动视口分别检查：连接卡片、表单、按钮和中文状态可读；移动视口不得出现横向滚动；浏览器控制台不得出现 warning/error。页面标题必须为 `Terminal233`。
+
+打包验收使用以下命令：
+
+```powershell
+corepack npm run terminal233:package:windows
+corepack npm run terminal233:package:server:linux
+corepack npm run terminal233:package:server:linux:arm64
+corepack npm run terminal233:package:windows:arm64
+```
+
+Windows x86_64 包应解压并静默安装到 `C:\App\Terminal233`，然后检查 `Terminal233.exe --version`、`Terminal233.exe --self-test` 和 `dist\index.html` 标题。Windows ARM64 构建需要本机安装对应的 Visual C++ Build Tools/Windows SDK；缺少 `link.exe` 时必须明确记录为环境阻塞，不得伪造 ARM64 包。Linux server 包只发布 amd64 与 arm64 两种架构。
+
 `scripts/package-windows-release.ps1` 从全新的 Cargo target 构建并精确收集当前版本 NSIS/MSI，同时生成独立 Web macOS Windows 便携 ZIP、第三方许可、`SHA256SUMS.txt` 与提交绑定 manifest。正式打包与发布禁止以 npm script 作为入口；必须直接调用 PowerShell，并在任何 Git/gh/Node/npm 调用前以独立 SHA-256 锚定仓库外的 builder toolchain lock。正式构建还必须传入本机 Tauri 签名配置和策略允许的证书指纹，并要求真正分发的 Tauri 主程序、NSIS、MSI 与 Web 启动器均为有效时间戳签名。`-AllowUnsigned` 仅允许本机静态打包验证，manifest 固定为 `publishable=false`，且验证器不会执行未签名 EXE。详见 [手工发布说明](RELEASING.md)。
 
 私有仓库的本机 unsigned 验证可在外部完成 `git fetch origin main` 后追加
