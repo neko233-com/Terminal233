@@ -335,6 +335,42 @@ describe("Terminal233 rdesktop SSH IDE", () => {
     });
   });
 
+  it("renders the dense workstation chrome and filters the open session tree", async () => {
+    const user = userEvent.setup();
+    ide.listIdeConnections.mockResolvedValue([connection]);
+
+    render(<Terminal233IdeApp />);
+    await openWorkspace(user);
+
+    expect(
+      screen.getByRole("navigation", { name: "工作台工具栏" }),
+    ).toBeVisible();
+    expect(screen.getByRole("tablist", { name: "已打开会话" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: /测试服务器/ })).toBeVisible();
+    expect(screen.getByText("会话树")).toBeVisible();
+    const toolsTab = screen.getByRole("button", { name: "工具" });
+    await user.click(toolsTab);
+    expect(toolsTab).toHaveClass("active");
+
+    const filter = screen.getByLabelText("筛选已打开会话");
+    await user.type(filter, "不存在");
+    expect(screen.queryByRole("button", { name: /测试服务器.*example\.test/ })).not.toBeInTheDocument();
+  });
+
+  it("closes the active session tab without deleting the saved connection", async () => {
+    const user = userEvent.setup();
+    ide.listIdeConnections.mockResolvedValue([connection]);
+
+    render(<Terminal233IdeApp />);
+    await openWorkspace(user);
+    await user.click(screen.getByRole("button", { name: "关闭 测试服务器" }));
+
+    expect(
+      screen.queryByRole("region", { name: "交互式 SSH 终端" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /测试服务器/ })).toBeVisible();
+  });
+
   it("moves by the adjacent visible connection while a group is filtered", async () => {
     const user = userEvent.setup();
     const hiddenConnection = {

@@ -257,12 +257,14 @@ export default function Terminal233IdeApp() {
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selectedGroup, setSelectedGroup] = useState("全部");
+  const [libraryRibbonTab, setLibraryRibbonTab] = useState("会话");
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [active, setActive] = useState<ActiveConnection | null>(null);
+  const [openSessionIds, setOpenSessionIds] = useState<string[]>([]);
   const [menu, setMenu] = useState<ConnectionMenu>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const libraryLoadId = useRef(0);
@@ -437,6 +439,9 @@ export default function Terminal233IdeApp() {
       keyAlgorithm: hostKey.keyAlgorithm,
       connectedAt: Date.now(),
     });
+    setOpenSessionIds((current) =>
+      current.includes(connection.id) ? current : [...current, connection.id],
+    );
     setProgress(null);
   }
 
@@ -551,6 +556,9 @@ export default function Terminal233IdeApp() {
       setConnections((current) =>
         current.filter((item) => item.id !== connection.id),
       );
+      setOpenSessionIds((current) =>
+        current.filter((id) => id !== connection.id),
+      );
       if (active?.connection.id === connection.id) setActive(null);
     } catch (error) {
       setLibraryError(ideError(error));
@@ -605,12 +613,41 @@ export default function Terminal233IdeApp() {
     reorderConnection(connectionId, target.id);
   }
 
+  function switchWorkspaceSession(connection: IdeConnection) {
+    if (active?.connection.id === connection.id) return;
+    setActive(null);
+    void beginConnection(connection);
+  }
+
+  function closeWorkspaceSession(connection: IdeConnection) {
+    setOpenSessionIds((current) =>
+      current.filter((id) => id !== connection.id),
+    );
+    if (active?.connection.id === connection.id) setActive(null);
+  }
+
+  const openSessions = openSessionIds
+    .map((id) => connections.find((connection) => connection.id === id))
+    .filter((connection): connection is IdeConnection => Boolean(connection));
+
   if (active) {
     return (
       <IdeWorkspace
         active={active}
+        sessions={openSessions}
         onBack={() => setActive(null)}
         onDisconnect={() => void removeConnection(active.connection)}
+        onCloseSession={closeWorkspaceSession}
+        onNewSession={() => {
+          setActive(null);
+          setFormError(null);
+          setShowCreate(true);
+        }}
+        onReconnect={() => {
+          setActive(null);
+          void beginConnection(active.connection);
+        }}
+        onSelectSession={switchWorkspaceSession}
       />
     );
   }
@@ -654,6 +691,18 @@ export default function Terminal233IdeApp() {
         </div>
       </header>
 
+      <nav aria-label="会话工作台工具栏" className="ide-library-ribbon">
+        <div className="ide-ribbon-tabs">
+          <button className={libraryRibbonTab === "会话" ? "active" : ""} onClick={() => setLibraryRibbonTab("会话")} type="button"><Server size={13} />会话</button>
+          <button className={libraryRibbonTab === "工具" ? "active" : ""} onClick={() => setLibraryRibbonTab("工具")} type="button"><Activity size={13} />工具</button>
+          <button className={libraryRibbonTab === "查看" ? "active" : ""} onClick={() => setLibraryRibbonTab("查看")} type="button"><HardDrive size={13} />查看</button>
+        </div>
+        <div className="ide-ribbon-actions">
+          <button className="ide-ribbon-primary" onClick={() => setShowCreate(true)} type="button"><CirclePlus size={14} />新建会话</button>
+          <button onClick={() => void loadConnections()} type="button"><RefreshCw size={13} />刷新列表</button>
+          <span className="ide-ribbon-hint">双击打开 · 右键操作 · 拖拽排序</span>
+        </div>
+      </nav>
       <div className="ide-library-layout">
         <aside className="ide-sidebar">
           <div className="ide-side-heading">连接</div>
@@ -1198,12 +1247,22 @@ function ConnectionProgress({
 
 function IdeWorkspace({
   active,
+  sessions,
   onBack,
   onDisconnect,
+  onCloseSession,
+  onNewSession,
+  onReconnect,
+  onSelectSession,
 }: {
   active: ActiveConnection;
+  sessions: IdeConnection[];
   onBack: () => void;
   onDisconnect: () => void;
+  onCloseSession: (connection: IdeConnection) => void;
+  onNewSession: () => void;
+  onReconnect: () => void;
+  onSelectSession: (connection: IdeConnection) => void;
 }) {
   const [cwd, setCwd] = useState("/");
   const [entries, setEntries] = useState<IdeDirectoryEntry[]>([]);
@@ -1213,6 +1272,8 @@ function IdeWorkspace({
   const [terminalState, setTerminalState] = useState<
     "connecting" | "connected" | "closed" | "error"
   >("connecting");
+  const [sessionFilter, setSessionFilter] = useState("");
+  const [workspaceRibbonTab, setWorkspaceRibbonTab] = useState("会话");
   const [terminalGeneration, setTerminalGeneration] = useState(0);
   const [transfers, setTransfers] = useState<Map<string, IdeTransferProgress>>(
     () => new Map(),
@@ -1851,6 +1912,11 @@ function IdeWorkspace({
   }
 
   const elapsed = Math.max(0, Math.floor((now - active.connectedAt) / 1000));
+  const visibleSessions = sessions.filter((session) =>
+    `${session.label} ${session.username}@${session.host}`
+      .toLowerCase()
+      .includes(sessionFilter.trim().toLowerCase()),
+  );
   return (
     <main
       className="ide-shell ide-workspace-shell"
@@ -1878,13 +1944,10 @@ function IdeWorkspace({
         >
           <ChevronLeft size={16} />
         </button>
-        <div className="ide-session-tab">
-          <i />
-          <Server size={14} />
-          <strong>{active.connection.label}</strong>
-          <span>
-            {active.connection.username}@{active.connection.host}
-          </span>
+        <div className="ide-workspace-brand">
+          <span className="ide-brand-mark"><TerminalSquare size={16} /></span>
+          <strong>Terminal233</strong>
+          <span>远程工作台</span>
         </div>
         <div className="ide-title-actions">
           <span title={`${active.keyAlgorithm} · ${active.fingerprint}`}>
@@ -1901,7 +1964,92 @@ function IdeWorkspace({
           <NativeWindowControls />
         </div>
       </header>
+      <nav aria-label="工作台工具栏" className="ide-ribbon">
+        <div className="ide-ribbon-tabs">
+          <button className={workspaceRibbonTab === "会话" ? "active" : ""} onClick={() => setWorkspaceRibbonTab("会话")} type="button"><Server size={13} />会话</button>
+          <button className={workspaceRibbonTab === "工具" ? "active" : ""} onClick={() => setWorkspaceRibbonTab("工具")} type="button"><Activity size={13} />工具</button>
+          <button className={workspaceRibbonTab === "查看" ? "active" : ""} onClick={() => setWorkspaceRibbonTab("查看")} type="button"><HardDrive size={13} />查看</button>
+        </div>
+        <div className="ide-ribbon-actions">
+          <button onClick={onNewSession} type="button"><CirclePlus size={14} />新建会话</button>
+          <button onClick={onReconnect} type="button"><RefreshCw size={13} />重连</button>
+          <button onClick={() => void load(cwdRef.current)} type="button"><Folder size={13} />刷新文件</button>
+          <button onClick={onBack} type="button">会话列表</button>
+        </div>
+      </nav>
+      <div aria-label="已打开会话" className="ide-session-tabs" role="tablist">
+        {sessions.map((session) => (
+          <div
+            className={`ide-open-session ${session.id === active.connection.id ? "active" : ""}`}
+            key={session.id}
+          >
+            <button
+              aria-selected={session.id === active.connection.id}
+              className="ide-open-session-main"
+              onClick={() => onSelectSession(session)}
+              role="tab"
+              type="button"
+            >
+              <i />
+              <Server size={13} />
+              <span>{session.label}</span>
+              <small>{session.username}@{session.host}</small>
+            </button>
+            <button
+              aria-label={`关闭 ${session.label}`}
+              className="ide-open-session-close"
+              onClick={() => onCloseSession(session)}
+              title="关闭会话标签"
+              type="button"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+        <button aria-label="新建会话" className="ide-session-add" onClick={onNewSession} type="button">
+          <CirclePlus size={14} />
+        </button>
+      </div>
       <section className="ide-workspace-grid">
+        <aside className="ide-session-pane">
+          <div className="ide-pane-tabs">
+            <span className="active"><Server size={14} />会话树</span>
+            <button aria-label="会话列表" className="ide-pane-tool" onClick={onBack} title="会话列表" type="button"><MoreHorizontal size={15} /></button>
+          </div>
+          <div className="ide-session-filter">
+            <Search size={13} />
+            <input
+              aria-label="筛选已打开会话"
+              onChange={(event) => setSessionFilter(event.target.value)}
+              placeholder="筛选会话"
+              value={sessionFilter}
+            />
+          </div>
+          <div className="ide-session-tree">
+            <div className="ide-session-tree-heading"><span>已打开</span><small>{sessions.length}</small></div>
+            {visibleSessions.map((session) => (
+              <button
+                className={`ide-tree-row ${session.id === active.connection.id ? "active" : ""}`}
+                key={session.id}
+                onClick={() => onSelectSession(session)}
+                type="button"
+              >
+                <Server size={14} />
+                <span><strong>{session.label}</strong><small>{session.username}@{session.host}</small></span>
+                <i title="已打开" />
+              </button>
+            ))}
+            <button className="ide-tree-new" onClick={onNewSession} type="button"><CirclePlus size={13} />新建会话</button>
+          </div>
+          <div className="ide-session-inspector">
+            <div className="ide-session-inspector-title"><Activity size={13} /><strong>当前会话</strong></div>
+            <dl>
+              <div><dt>主机</dt><dd>{active.connection.host}:{active.connection.port}</dd></div>
+              <div><dt>用户</dt><dd>{active.connection.username}</dd></div>
+              <div><dt>状态</dt><dd className="ok">已验证</dd></div>
+            </dl>
+          </div>
+        </aside>
         <aside
           className="ide-file-pane"
           onDragOver={(event) => event.preventDefault()}
@@ -2040,6 +2188,21 @@ function IdeWorkspace({
             </span>
             <span>拖入文件即可上传</span>
           </div>
+          {transfers.size ? (
+            <div className="ide-transfer-strip" aria-label="文件传输">
+              {[...transfers.values()].map((transfer) => (
+                <div className="ide-transfer" key={transfer.jobId}>
+                  <span>{transfer.direction === "upload" ? "上传" : "下载"} · {transfer.name}</span>
+                  <progress
+                    aria-label={`${transfer.name} 传输进度`}
+                    max={transfer.jobTotalBytes ?? 1}
+                    value={transfer.jobBytesTransferred}
+                  />
+                  <button onClick={() => void cancelTransferJob(transfer.jobId)} type="button">取消</button>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </aside>
         <section className="ide-terminal-pane">
           <div className="ide-pane-tabs">
@@ -2166,6 +2329,15 @@ function IdeWorkspace({
           <div className="ide-native-note">{IDE_SECURITY_NOTE}</div>
         </aside>
       </section>
+      <footer className="ide-statusbar">
+        <span className={`ide-status-dot ${terminalState}`} />
+        <strong>{terminalState === "connected" ? "连接正常" : terminalState === "connecting" ? "连接中" : "会话已关闭"}</strong>
+        <span>{active.connection.username}@{active.connection.host}</span>
+        <span className="ide-status-path" title={cwd}>{cwd}</span>
+        <span className="ide-status-spacer" />
+        <span>会话 {sessions.length}</span>
+        <span>{IDE_TRANSPORT_LABEL}</span>
+      </footer>
       {fileMenu ? (
         <FileContextMenu
           menu={fileMenu}
