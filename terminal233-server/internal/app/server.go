@@ -72,6 +72,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case r.URL.Path == "/" && r.Method == http.MethodGet:
+		s.landingPage(w)
+	case r.URL.Path == "/docs.html" && r.Method == http.MethodGet:
+		s.docsPage(w)
 	case r.URL.Path == "/healthz" && (r.Method == http.MethodGet || r.Method == http.MethodHead):
 		if r.Method == http.MethodHead {
 			w.WriteHeader(http.StatusOK)
@@ -255,6 +259,16 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) landingPage(w http.ResponseWriter) {
+	writeHTMLPageHeaders(w)
+	_ = landingTemplate.Execute(w, struct{ Version string }{Version: Version})
+}
+
+func (s *Server) docsPage(w http.ResponseWriter) {
+	writeHTMLPageHeaders(w)
+	_, _ = io.WriteString(w, docsHTML)
+}
+
 func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil || r.FormValue("username") != s.cfg.AdminUsername || r.FormValue("password") != s.cfg.AdminPassword {
 		http.Error(w, "账号或密码错误", http.StatusUnauthorized)
@@ -304,6 +318,14 @@ func (s *Server) json(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeHTMLPageHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
 }
 func (s *Server) error(w http.ResponseWriter, status int, code, message string) {
 	s.json(w, status, map[string]string{"code": code, "message": message})
@@ -387,5 +409,11 @@ func verifySSH(account Account, timeout time.Duration) error {
 }
 
 var adminLoginHTML = `<!doctype html><meta charset="utf-8"><title>Terminal233 Server</title><style>body{font:16px system-ui;max-width:420px;margin:12vh auto;padding:24px;background:#111827;color:#e5e7eb}input,button{box-sizing:border-box;width:100%;padding:10px;margin:7px 0;border-radius:6px;border:1px solid #374151;background:#1f2937;color:#fff}button{background:#2563eb;border:0;cursor:pointer}</style><h1>Terminal233 Server</h1><p>管理后台</p><form method="post" action="/admin/login"><input name="username" placeholder="账号" value="root" autocomplete="username"><input name="password" type="password" placeholder="密码" autocomplete="current-password"><button>登录</button></form>`
+
+var landingTemplate = template.Must(template.New("landing").Parse(`<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Terminal233 Cloud</title><style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:#07111b;color:#e7f2ff}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 18% 12%,rgba(77,211,255,.22),transparent 34%),radial-gradient(circle at 86% 78%,rgba(107,242,171,.16),transparent 32%),#07111b}.card{width:min(720px,calc(100% - 32px));padding:38px;border:1px solid rgba(174,216,255,.16);border-radius:28px;background:rgba(10,25,39,.9);box-shadow:0 24px 80px rgba(0,0,0,.32)}.eyebrow{letter-spacing:.18em;text-transform:uppercase;font-size:12px;color:#76e8b0}h1{margin:12px 0 10px;font-size:clamp(38px,8vw,68px);letter-spacing:-.055em}p{color:#a6bacb;line-height:1.7}.status{display:flex;align-items:center;gap:10px;margin:24px 0;padding:14px 16px;border-radius:16px;background:rgba(118,232,176,.09);color:#baffd8}.dot{width:10px;height:10px;border-radius:50%;background:#76e8b0;box-shadow:0 0 18px #76e8b0}.links{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}a{padding:12px 16px;border-radius:999px;text-decoration:none;font-weight:700;color:#07111b;background:linear-gradient(135deg,#6ee7ff,#76e8b0)}a.secondary{color:#e7f2ff;background:rgba(255,255,255,.08)}small{display:block;margin-top:26px;color:#71879a}</style></head><body><main class="card"><div class="eyebrow">terminal233 cloud</div><h1>SSH 凭据同步服务</h1><p>这是你自部署的 Terminal233 Server。客户端通过 HTTPS 使用它同步加密保存的 SSH 连接信息。</p><div class="status"><span class="dot"></span><strong>服务在线 · 版本 {{.Version}}</strong></div><div class="links"><a href="/docs.html">查看 API 说明</a><a class="secondary" href="/healthz">健康检查</a><a class="secondary" href="/admin">管理后台</a></div><small>SSH 密码不会显示在此页面；注册必须携带官方 token。</small></main></body></html>`))
+
+var docsHTML = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Terminal233 Cloud API</title><style>body{margin:0;background:#07111b;color:#e7f2ff;font:15px/1.7 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}main{width:min(900px,calc(100% - 32px));margin:48px auto}h1{font-size:42px;letter-spacing:-.04em}p,li{color:#a6bacb}code{padding:3px 6px;border-radius:6px;background:#132639;color:#baffd8}section{margin:24px 0;padding:20px;border:1px solid rgba(174,216,255,.16);border-radius:18px;background:rgba(10,25,39,.82)}a{color:#76e8ff}</style></head><body><main><a href="/">← 返回 Terminal233 Cloud</a><h1>API 说明</h1><p>所有 API 均使用 HTTPS；响应不会缓存。SSH 密码只在服务端加密存储，不会显示在管理后台。</p><section><h2>注册与登录</h2><ul><li><code>POST /api/v1/register</code>：需要 <code>username</code>、<code>password</code>、<code>officialToken</code>。</li><li><code>POST /api/v1/login</code>：返回短期 Bearer 会话 token。</li><li>登录和注册失败会触发短时冷却；成功登录后会清除失败计数。</li></ul></section><section><h2>凭据管理</h2><ul><li><code>GET /api/v1/accounts</code>：读取当前用户的 SSH 连接。</li><li><code>POST /api/v1/accounts</code>：验证 SSH 后保存或更新连接。</li><li><code>DELETE /api/v1/accounts/:id</code>：删除连接。</li></ul></section><section><h2>运维</h2><ul><li><code>GET /healthz</code>：服务健康检查。</li><li><code>GET /admin</code>：管理员概览，不展示 SSH 密码。</li></ul></section></main></body></html>`
 
 var adminTemplate = template.Must(template.New("admin").Parse(`<!doctype html><meta charset="utf-8"><title>Terminal233 Server 管理后台</title><style>body{font:15px system-ui;max-width:1000px;margin:32px auto;padding:0 20px;background:#f4f6f8;color:#111827}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;border-bottom:1px solid #e5e7eb;text-align:left}button{padding:7px 12px}</style><h1>Terminal233 Server</h1><p>当前管理员：{{.Username}}　<a href="/admin/logout" onclick="event.preventDefault();document.getElementById('logout').submit()">退出</a></p><form id="logout" method="post" action="/admin/logout"></form><table><thead><tr><th>用户</th><th>SSH 凭据数</th><th>创建时间</th></tr></thead><tbody>{{range .Users}}<tr><td>{{.Username}}</td><td>{{.AccountCount}} / 1000</td><td>{{.CreatedAt}}</td></tr>{{else}}<tr><td colspan="3">暂无注册用户</td></tr>{{end}}</tbody></table>`))

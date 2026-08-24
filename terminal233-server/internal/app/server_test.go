@@ -44,6 +44,22 @@ func TestHealthzSupportsGetAndHead(t *testing.T) {
 	}
 }
 
+func TestPublicPagesDoNotExposeSecrets(t *testing.T) {
+	server := testServer(t)
+	for _, path := range []string{"/", "/docs.html"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		res := httptest.NewRecorder()
+		server.ServeHTTP(res, req)
+		if res.Code != http.StatusOK || !strings.Contains(res.Header().Get("Content-Type"), "text/html") {
+			t.Fatalf("path=%s status=%d contentType=%q", path, res.Code, res.Header().Get("Content-Type"))
+		}
+		body := res.Body.String()
+		if strings.Contains(body, "official-token-for-tests") || strings.Contains(body, "test-master-key-which-is-long") {
+			t.Fatalf("path=%s leaked a configured secret", path)
+		}
+	}
+}
+
 func TestRegisterAndLoginRoundTrip(t *testing.T) {
 	server := testServer(t)
 	register := httptest.NewRequest(http.MethodPost, "/api/v1/register", strings.NewReader(`{"username":"Alice","password":"long-password","officialToken":"official-token-for-tests"}`))
