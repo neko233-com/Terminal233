@@ -32,6 +32,18 @@ func TestRegisterRequiresOfficialToken(t *testing.T) {
 	}
 }
 
+func TestHealthzSupportsGetAndHead(t *testing.T) {
+	server := testServer(t)
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		req := httptest.NewRequest(method, "/healthz", nil)
+		res := httptest.NewRecorder()
+		server.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("method=%s status=%d body=%s", method, res.Code, res.Body.String())
+		}
+	}
+}
+
 func TestRegisterAndLoginRoundTrip(t *testing.T) {
 	server := testServer(t)
 	register := httptest.NewRequest(http.MethodPost, "/api/v1/register", strings.NewReader(`{"username":"Alice","password":"long-password","officialToken":"official-token-for-tests"}`))

@@ -38,10 +38,12 @@ type Account struct {
 }
 
 type Server struct {
-	cfg      Config
-	store    *Store
-	sessions map[string]session
-	mu       sync.Mutex
+	cfg             Config
+	store           *Store
+	sessions        map[string]session
+	loginLimiter    *authAttemptLimiter
+	registerLimiter *authAttemptLimiter
+	mu              sync.Mutex
 }
 
 type session struct {
@@ -54,7 +56,13 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{cfg: cfg, store: store, sessions: map[string]session{}}, nil
+	return &Server{
+		cfg:             cfg,
+		store:           store,
+		sessions:        map[string]session{},
+		loginLimiter:    newAuthAttemptLimiter(),
+		registerLimiter: newAuthAttemptLimiter(),
+	}, nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +72,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
-	case r.URL.Path == "/healthz" && r.Method == http.MethodGet:
+	case r.URL.Path == "/healthz" && (r.Method == http.MethodGet || r.Method == http.MethodHead):
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version})
 	case r.URL.Path == "/api/v1/register" && r.Method == http.MethodPost:
 		s.register(w, r)
@@ -98,7 +110,14 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &input) {
 		return
 	}
+	registerKeys := []string{"register@" + requestClientIdentity(r)}
+	if retryAfter, ok := s.registerLimiter.allow(time.Now(), registerKeys...); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(retryAfter)))
+		s.error(w, http.StatusTooManyRequests, "rate_limited", "注册尝试过于频繁，请稍后再试")
+		return
+	}
 	if !constantTimeEqual(input.OfficialToken, s.cfg.OfficialToken) {
+		s.registerLimiter.failure(time.Now(), registerKeys...)
 		s.error(w, http.StatusForbidden, "official_token_required", "需要有效的官方注册 token")
 		return
 	}
@@ -114,6 +133,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusInternalServerError, "storage_failed", "账号创建失败")
 		return
 	}
+	s.registerLimiter.success(time.Now(), registerKeys...)
 	s.json(w, http.StatusCreated, map[string]any{"ok": true, "username": normalizeUsername(input.Username)})
 }
 
@@ -125,10 +145,18 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &input) {
 		return
 	}
+	loginKeys := authAttemptKeys(r, input.Username)
+	if retryAfter, ok := s.loginLimiter.allow(time.Now(), loginKeys...); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(retryAfter)))
+		s.error(w, http.StatusTooManyRequests, "rate_limited", "登录尝试过于频繁，请稍后再试")
+		return
+	}
 	if !s.store.authenticateUser(input.Username, input.Password) {
+		s.loginLimiter.failure(time.Now(), loginKeys...)
 		s.error(w, http.StatusUnauthorized, "invalid_credentials", "账号或密码错误")
 		return
 	}
+	s.loginLimiter.success(time.Now(), loginKeys...)
 	token := newID()
 	s.mu.Lock()
 	s.sessions[token] = session{Username: normalizeUsername(input.Username), ExpiresAt: time.Now().Add(sessionTTL)}
@@ -279,6 +307,14 @@ func (s *Server) json(w http.ResponseWriter, status int, value any) {
 }
 func (s *Server) error(w http.ResponseWriter, status int, code, message string) {
 	s.json(w, status, map[string]string{"code": code, "message": message})
+}
+
+func retryAfterSeconds(duration time.Duration) int {
+	seconds := int(duration.Seconds())
+	if seconds < 1 {
+		return 1
+	}
+	return seconds
 }
 func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
