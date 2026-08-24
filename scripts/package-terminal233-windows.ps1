@@ -93,6 +93,7 @@ $manifest = [ordered]@{
     target = $Target
     architecture = $architecture
     renderer = 'rdesktop-webview'
+    windowUi = 'integrated-default; switchable-system-window'
     executable = 'Terminal233.exe'
     frontend = 'dist'
     defaultInstallRoot = 'C:\App\Terminal233'

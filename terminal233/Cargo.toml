@@ -21,7 +21,7 @@ sha2 = "0.11.0"
 thiserror = "2.0.19"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
 zeroize = { version = "1.9.0", features = ["derive"] }
-rdesktop-core = { git = "https://github.com/neko233-com/rdesktop", rev = "01359a93b4337698ee4f43093f0c7bc78bb1b99a", version = "=0.1.5" }
-rdesktop-webview = { git = "https://github.com/neko233-com/rdesktop", rev = "01359a93b4337698ee4f43093f0c7bc78bb1b99a", version = "=0.1.5" }
+rdesktop-core = { git = "https://github.com/neko233-com/rdesktop", rev = "e9ad03a14f6519a730389a00ba25f2337ba6f3be", version = "=0.1.6" }
+rdesktop-webview = { git = "https://github.com/neko233-com/rdesktop", rev = "e9ad03a14f6519a730389a00ba25f2337ba6f3be", version = "=0.1.6" }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }

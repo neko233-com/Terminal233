@@ -41,6 +41,8 @@ corepack npm run browser:dev
 
 它会启动同源 localhost Node `ssh2js` 后端和 `http://127.0.0.1:1420/` 浏览器 IDE；浏览器入口只使用 Web 后端，桌面入口只使用进程内纯 Rust `puressh`，二者共享界面、连接流程、终端与 SFTP 数据约定。
 
+打包桌面端默认使用 rdesktop 原生 WebView 的一体化 UI，并提供“系统窗口 UI”实时切换；浏览器开发模式默认显示“浏览器调试”，不发起桌面更新请求。需要脚本启动系统装饰窗口时可运行 `Terminal233.exe --window-mode system`，正常启动或打包安装默认仍是 integrated。
+
 ## 发布与自动更新
 
 普通开发流程不使用 GitHub Actions。只有用户明确说“发布”后，才允许创建正式 tag 并触发未来的 tag-only GitHub Actions；当前仓库不新增 workflow。手工发布流程一次完整发布会生成：

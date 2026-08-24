@@ -15,6 +15,10 @@ mod ssh;
 mod ssh_terminal;
 
 pub fn run_rdesktop() -> Result<(), String> {
+    run_rdesktop_with_mode(None)
+}
+
+pub fn run_rdesktop_with_mode(cli_window_mode: Option<&str>) -> Result<(), String> {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
@@ -30,6 +34,9 @@ pub fn run_rdesktop() -> Result<(), String> {
         .try_init()
         .ok();
 
+    let decorations = native_window_decorations(cli_window_mode)?;
+    let explicit_window_mode =
+        cli_window_mode.is_some() || std::env::var_os("TERMINAL233_WINDOW_UI_MODE").is_some();
     let config = AppConfig {
         identifier: "site.neko233.terminal233".to_owned(),
         name: "Terminal233".to_owned(),
@@ -40,6 +47,7 @@ pub fn run_rdesktop() -> Result<(), String> {
             height: 800,
             resizable: true,
             min_size: Some((960, 640)),
+            decorations,
             ..Default::default()
         },
         ..Default::default()
@@ -78,10 +86,30 @@ pub fn run_rdesktop() -> Result<(), String> {
     let window = renderer
         .create_window(&config.window)
         .map_err(|error| error.to_string())?;
+    let native_url = if explicit_window_mode {
+        let mode = if decorations { "system" } else { "integrated" };
+        format!("rdesktop://localhost/index.html?windowMode={mode}")
+    } else {
+        "rdesktop://localhost/index.html".to_owned()
+    };
     renderer
-        .load_url(window, "rdesktop://localhost/index.html")
+        .load_url(window, &native_url)
         .map_err(|error| error.to_string())?;
     Box::new(renderer).run().map_err(|error| error.to_string())
+}
+
+fn native_window_decorations(cli_window_mode: Option<&str>) -> Result<bool, String> {
+    let requested = cli_window_mode
+        .map(str::to_owned)
+        .or_else(|| std::env::var("TERMINAL233_WINDOW_UI_MODE").ok())
+        .unwrap_or_else(|| "integrated".to_owned());
+    match requested.trim().to_ascii_lowercase().as_str() {
+        "integrated" | "native" => Ok(false),
+        "system" | "decorated" => Ok(true),
+        other => Err(format!(
+            "窗口界面模式无效：{other}，只支持 integrated 或 system。"
+        )),
+    }
 }
 
 fn initialize_puressh_runtime() -> Result<(), String> {
@@ -186,6 +214,16 @@ mod configuration_tests {
         assert_eq!(receipt["ok"].as_bool(), Some(true));
         assert_eq!(receipt["runtime"].as_str(), Some("pure-rust-puressh"));
         assert_eq!(receipt["persistence"].as_str(), Some("memory_only"));
+    }
+
+    #[test]
+    fn integrated_window_mode_is_the_packaged_default() {
+        assert_eq!(
+            super::native_window_decorations(Some("integrated")),
+            Ok(false)
+        );
+        assert_eq!(super::native_window_decorations(Some("system")), Ok(true));
+        assert!(super::native_window_decorations(Some("browser")).is_err());
     }
 
     #[test]

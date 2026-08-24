@@ -24,9 +24,10 @@
 
 ## rdesktop 集成边界
 
-- `terminal233/Cargo.toml` 中的 `rdesktop` 版本和 git revision 必须精确锁定；升级前先验证 Windows x86_64 与 ARM64 构建路径及纯 Rust 依赖约束。
+- `terminal233/Cargo.toml` 中的 `rdesktop` 版本和 git revision 必须精确锁定；当前已验证 revision 为 `e9ad03a14f6519a730389a00ba25f2337ba6f3be`。升级前先验证 Windows x86_64 与 ARM64 构建路径及纯 Rust 依赖约束。
 - 实际上游源码由 Cargo git dependency 管理；仓库内 `rdesktop/README.md` 与 `rdesktop/AGENTS.md` 是 Terminal233 的集成说明和操作约束，不是上游源码副本。
 - 如果必须修改上游实现，应提交上游变更或更新锁定 revision，并在 Terminal233 中补充验证记录；不要直接把 Cargo 缓存当作可交付源码目录。
+- 桌面端打包默认使用 rdesktop 无系统装饰的一体化窗口；用户可以在前端实时切换到系统窗口 UI。开发脚本默认使用浏览器调试模式，三者必须共用同一套 Terminal233 UI 与操作契约。
 
 ## SSH 技术边界
 

@@ -18,11 +18,15 @@ fn main() {
             }
         }
     }
-    if !arguments.is_empty() {
-        eprintln!("仅支持 --version 与 --self-test。");
+    let window_mode = if arguments.len() == 2 && arguments[0] == "--window-mode" {
+        Some(arguments[1].as_str())
+    } else if arguments.is_empty() {
+        None
+    } else {
+        eprintln!("仅支持 --version、--self-test 与 --window-mode integrated|system。");
         std::process::exit(2);
-    }
-    if let Err(error) = terminal233_lib::run_rdesktop() {
+    };
+    if let Err(error) = terminal233_lib::run_rdesktop_with_mode(window_mode) {
         eprintln!("Terminal233 启动失败：{error}");
         std::process::exit(1);
     }

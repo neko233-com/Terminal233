@@ -68,6 +68,15 @@ import {
 } from "./lib/ide-runtime";
 import CredentialSyncPanel from "./components/CredentialSyncPanel";
 import UpdateCheckPanel from "./components/UpdateCheckPanel";
+import {
+  NativeWindowControls,
+  WindowUiControl,
+} from "./components/WindowUiControl";
+import {
+  getWindowUiMode,
+  isNativeDesktopWindow,
+  startNativeWindowDrag,
+} from "./lib/window-ui";
 import type { CredentialAccount } from "./lib/credential-server";
 
 type ActiveConnection = {
@@ -608,7 +617,19 @@ export default function Terminal233IdeApp() {
 
   return (
     <main className="ide-shell" onContextMenu={() => setMenu(null)}>
-      <header className="ide-titlebar">
+      <header
+        className="ide-titlebar"
+        onPointerDown={(event) => {
+          if (
+            event.button !== 0 ||
+            !isNativeDesktopWindow() ||
+            getWindowUiMode() !== "integrated" ||
+            (event.target as HTMLElement).closest("button, input, select, a")
+          )
+            return;
+          startNativeWindowDrag();
+        }}
+      >
         <div className="ide-brand">
           <span className="ide-brand-mark">
             <TerminalSquare size={18} />
@@ -616,17 +637,21 @@ export default function Terminal233IdeApp() {
           <strong>Terminal233</strong>
           <span>rdesktop · Rust SSH IDE</span>
         </div>
-        <button
-          className="ide-primary"
-          onClick={() => {
-            setFormError(null);
-            setShowCreate(true);
-          }}
-          type="button"
-        >
-          <CirclePlus size={15} />
-          新建连接
-        </button>
+        <div className="ide-titlebar-actions">
+          <WindowUiControl />
+          <button
+            className="ide-primary"
+            onClick={() => {
+              setFormError(null);
+              setShowCreate(true);
+            }}
+            type="button"
+          >
+            <CirclePlus size={15} />
+            新建连接
+          </button>
+          <NativeWindowControls />
+        </div>
       </header>
 
       <div className="ide-library-layout">
@@ -1831,7 +1856,19 @@ function IdeWorkspace({
       className="ide-shell ide-workspace-shell"
       onClick={() => setFileMenu(null)}
     >
-      <header className="ide-titlebar ide-workspace-titlebar">
+      <header
+        className="ide-titlebar ide-workspace-titlebar"
+        onPointerDown={(event) => {
+          if (
+            event.button !== 0 ||
+            !isNativeDesktopWindow() ||
+            getWindowUiMode() !== "integrated" ||
+            (event.target as HTMLElement).closest("button, input, select, a")
+          )
+            return;
+          startNativeWindowDrag();
+        }}
+      >
         <button
           aria-label="返回连接列表"
           className="ide-icon-button"
@@ -1853,6 +1890,7 @@ function IdeWorkspace({
           <span title={`${active.keyAlgorithm} · ${active.fingerprint}`}>
             {IDE_RUNTIME_LABEL} · 主机已验证
           </span>
+          <WindowUiControl />
           <button
             className="ide-danger-button"
             onClick={onDisconnect}
@@ -1860,6 +1898,7 @@ function IdeWorkspace({
           >
             断开并清除
           </button>
+          <NativeWindowControls />
         </div>
       </header>
       <section className="ide-workspace-grid">

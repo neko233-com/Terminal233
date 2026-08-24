@@ -5,11 +5,14 @@ import {
   currentTerminal233Version,
   type UpdateCheckResult,
 } from '../lib/update-checker'
+import { isBrowserDevelopmentMode } from '../lib/window-ui'
 
 type UpdateState =
   | { kind: 'checking' }
   | { kind: 'ready'; result: UpdateCheckResult }
   | { kind: 'error'; message: string }
+  | { kind: 'unavailable'; message: string }
+  | { kind: 'browser-dev' }
 
 export default function UpdateCheckPanel() {
   const [state, setState] = useState<UpdateState>({ kind: 'checking' })
@@ -19,11 +22,17 @@ export default function UpdateCheckPanel() {
     try {
       setState({ kind: 'ready', result: await checkForTerminal233Update() })
     } catch (error) {
-      setState({ kind: 'error', message: error instanceof Error ? error.message : '更新检查失败。' })
+      const message = error instanceof Error ? error.message : '更新检查失败。'
+      const unavailable = /Failed to fetch|更新清单请求失败（404）/iu.test(message)
+      setState({ kind: unavailable ? 'unavailable' : 'error', message: unavailable ? '暂无可用发布清单，将自动重试。' : message })
     }
   }
 
   useEffect(() => {
+    if (isBrowserDevelopmentMode()) {
+      setState({ kind: 'browser-dev' })
+      return
+    }
     void check()
     const timer = window.setInterval(() => void check(), 6 * 60 * 60 * 1000)
     return () => window.clearInterval(timer)
@@ -37,6 +46,8 @@ export default function UpdateCheckPanel() {
     </div>
     <div className="ide-update-status" aria-live="polite">
       {state.kind === 'checking' ? <span className="is-muted">正在检查…</span> : null}
+      {state.kind === 'browser-dev' ? <span className="is-muted">浏览器开发模式 · 桌面版启动时检查更新</span> : null}
+      {state.kind === 'unavailable' ? <span className="is-muted">{state.message}</span> : null}
       {state.kind === 'error' ? <span className="is-error">{state.message}</span> : null}
       {result && !result.updateAvailable ? <span className="is-current"><Check size={12} />已是最新版本 v{currentTerminal233Version}</span> : null}
       {result?.updateAvailable ? <>
