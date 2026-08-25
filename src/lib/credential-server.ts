@@ -17,7 +17,21 @@ export const defaultCredentialServerUrl = (import.meta.env.VITE_TERMINAL233_SERV
 
 function normalizeUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/u, '')
-  if (!/^https?:\/\//iu.test(trimmed)) throw new Error('同步服务器地址必须以 http:// 或 https:// 开头。')
+  let url: URL
+  try {
+    url = new URL(trimmed)
+  } catch {
+    throw new Error('同步服务器地址必须是有效的 HTTPS 地址。')
+  }
+
+  if (url.username || url.password) throw new Error('同步服务器地址不能包含账号或密码。')
+  if (url.search || url.hash) throw new Error('同步服务器地址不能包含查询参数或片段。')
+
+  const isLoopbackHttp = url.protocol === 'http:'
+    && ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname.toLowerCase())
+  if (url.protocol !== 'https:' && !isLoopbackHttp) {
+    throw new Error('公网同步服务器必须使用 HTTPS；HTTP 仅允许本机回环地址。')
+  }
   return trimmed
 }
 
@@ -69,6 +83,8 @@ export class CredentialServerClient {
   private async request<T = unknown>(path: string, options: { method?: string; body?: unknown; token?: string } = {}): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: options.method ?? 'GET',
+      credentials: 'omit',
+      redirect: 'error',
       headers: {
         Accept: 'application/json',
         ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
