@@ -1,0 +1,140 @@
+package main
+
+import (
+	"crypto/subtle"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/ssh"
+)
+
+type connectionSettings struct {
+	Host, Port, User, Password, KeyPath, Passphrase, Fingerprint string
+}
+
+func (s connectionSettings) address() (string, error) {
+	host := strings.TrimSpace(s.Host)
+	port, err := strconv.Atoi(strings.TrimSpace(s.Port))
+	if host == "" || strings.ContainsAny(host, "/\\@ \r\n\t") || err != nil || port < 1 || port > 65535 || strings.TrimSpace(s.User) == "" {
+		return "", errors.New("请输入有效的主机、端口和用户名")
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port)), nil
+}
+
+// inspectHost stops the SSH handshake before credentials can be sent.
+func inspectHost(s connectionSettings) (string, error) {
+	addr, err := s.address()
+	if err != nil {
+		return "", err
+	}
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	var fingerprint string
+	cfg := &ssh.ClientConfig{User: s.User, HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+		fingerprint = ssh.FingerprintSHA256(key)
+		return errors.New("主机指纹待确认")
+	}}
+	c, _, _, err := ssh.NewClientConn(conn, addr, cfg)
+	if c != nil {
+		_ = c.Close()
+	}
+	if fingerprint != "" {
+		return fingerprint, nil
+	}
+	return "", err
+}
+
+type remoteShell struct {
+	client  *ssh.Client
+	session *ssh.Session
+	in      io.WriteCloser
+	out     io.Reader
+}
+
+func (s *remoteShell) Read(p []byte) (int, error)  { return s.out.Read(p) }
+func (s *remoteShell) Write(p []byte) (int, error) { return s.in.Write(p) }
+func (s *remoteShell) Resize(cols, rows int) error { return s.session.WindowChange(rows, cols) }
+func (s *remoteShell) Close() error                { _ = s.in.Close(); _ = s.session.Close(); return s.client.Close() }
+
+func connectShell(s connectionSettings) (*remoteShell, error) {
+	addr, err := s.address()
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(s.Fingerprint, "SHA256:") {
+		return nil, errors.New("请先确认服务器的 SHA256 指纹")
+	}
+	var auth ssh.AuthMethod
+	if s.KeyPath != "" {
+		pem, err := os.ReadFile(s.KeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("读取私钥失败: %w", err)
+		}
+		var signer ssh.Signer
+		if s.Passphrase != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(pem, []byte(s.Passphrase))
+		} else {
+			signer, err = ssh.ParsePrivateKey(pem)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("解析私钥失败: %w", err)
+		}
+		auth = ssh.PublicKeys(signer)
+	} else {
+		if s.Password == "" {
+			return nil, errors.New("请输入密码或私钥路径")
+		}
+		auth = ssh.Password(s.Password)
+	}
+	cfg := &ssh.ClientConfig{User: s.User, Auth: []ssh.AuthMethod{auth}, HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+		actual := ssh.FingerprintSHA256(key)
+		if subtle.ConstantTimeCompare([]byte(actual), []byte(s.Fingerprint)) != 1 {
+			return fmt.Errorf("服务器指纹已变化：%s", actual)
+		}
+		return nil
+	}}
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	cc, channels, requests, err := ssh.NewClientConn(conn, addr, cfg)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	_ = conn.SetDeadline(time.Time{})
+	client := ssh.NewClient(cc, channels, requests)
+	fail := func(err error) (*remoteShell, error) { _ = client.Close(); return nil, err }
+	session, err := client.NewSession()
+	if err != nil {
+		return fail(err)
+	}
+	if err = session.RequestPty("xterm-256color", 24, 80, ssh.TerminalModes{ssh.ECHO: 1, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400}); err != nil {
+		return fail(err)
+	}
+	in, err := session.StdinPipe()
+	if err != nil {
+		return fail(err)
+	}
+	out, output := io.Pipe()
+	session.Stdout = output
+	session.Stderr = output
+	if err = session.Shell(); err != nil {
+		_ = out.Close()
+		_ = output.Close()
+		return fail(err)
+	}
+	go func() { _ = output.CloseWithError(session.Wait()) }()
+	return &remoteShell{client: client, session: session, in: in, out: out}, nil
+}

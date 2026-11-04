@@ -111,3 +111,10 @@ Desktop.ini
 .vscode/*
 !.vscode/extensions.json
 *.swp
+
+# MyGo and Go build artifacts
+/build/
+client/.mygo/
+client/build/
+server/terminal233-server
+

@@ -1,10 +1,10 @@
 # Terminal233 Product Boundaries
 
-## 产品入口
+## 当前迁移目标（2026-11-04）
 
-- **Web（独立浏览器工作台）**：本机 `localhost` 后端 + 外部浏览器。保留 macOS 伪桌面体验：桌面、Dock、Terminal、Finder、窗口、拖拽和右键菜单。
-- **Terminal233 桌面端**：位于 `terminal233/`，使用锁定版本的 `rdesktop` 与纯 Rust `puressh`，提供连接列表、连接过程、终端、文件树和轻量状态面板。桌面端不使用 Web 伪桌面作为主界面。
-- **Terminal233 Server**：位于 `terminal233-server/`，只发布 Linux 服务端；用户可以自行部署自己的 SSH 密码保存服务器。
+- 应用迁移到 Go 1.27 与 MyGo 原生 UI，不使用 WebView；最终代码目录为 `client/` 和 `server/`，用 Taskfile 构建测试。
+- `client/` 是进程内 Go SSH/SFTP/PTY 客户端；`server/` 是自部署凭据同步服务，不承载客户端 SSH 会话。新客户端与服务尚在迁移中，旧入口暂时保留，不能宣称功能已完整迁移。
+- 用户明确要求账号密码云同步；必须使用 HTTPS，验证主机密钥，并保护服务端凭据。不得调用外部 SSH 客户端。
 
 ## 平台与发布范围
 
@@ -22,27 +22,12 @@
 - 当前阶段不创建 `.github/workflows`、不触发 GitHub Actions、不产出 Windows ARM64 桌面包。后续若用户明确说“发布”，才按 tag-only CI 方案生成并验证发布资产。
 - 这组规则是本项目的长期协作记忆；任何后续任务都必须先遵守它，再执行构建、提交或发布动作。
 
-## rdesktop 集成边界
+## 客户端和安全约束
 
-- `terminal233/Cargo.toml` 中的 `rdesktop` 版本和 git revision 必须精确锁定；当前已验证 revision 为 `e9ad03a14f6519a730389a00ba25f2337ba6f3be`。升级前先验证 Windows x86_64 与 ARM64 构建路径及纯 Rust 依赖约束。
-- 实际上游源码由 Cargo git dependency 管理；仓库内 `rdesktop/README.md` 与 `rdesktop/AGENTS.md` 是 Terminal233 的集成说明和操作约束，不是上游源码副本。
-- 如果必须修改上游实现，应提交上游变更或更新锁定 revision，并在 Terminal233 中补充验证记录；不要直接把 Cargo 缓存当作可交付源码目录。
-- 桌面端打包默认使用 rdesktop 无系统装饰的一体化窗口；用户可以在前端实时切换到系统窗口 UI。开发脚本默认使用浏览器调试模式，三者必须共用同一套 Terminal233 UI 与操作契约。
-
-## SSH 技术边界
-
-- Web 的 SSH/SFTP 必须由随项目启动的 Node.js 本地后端内置 `ssh2` 实现；浏览器只通过同源 localhost API 使用它。
-- 桌面端必须直接使用精确锁定的纯 Rust `puressh` 进程内实现 SSH、PTY 和 SFTP，不得通过 Web 后端中转。
-- 桌面端 SSH 实现及其密码学、传输依赖链禁止使用 `ssh2` / libssh2、OpenSSL / `openssl-sys`、`ring`、`aws-lc-*`，也禁止任何原生 C/ASM SSH 或密码学实现，以及需要 `cc`、CMake、Perl、NASM、nmake 的构建路径。
-- 两条链路都禁止调用或依赖 Windows OpenSSH、`ssh.exe`、PuTTY、plink、Windows Terminal 或其他外部 SSH 客户端。
-- Web 与桌面端可以共享数据模型和测试向量，但不共享 SSH 运行时、连接对象、终端会话或凭据。
-
-## 精简与安全
-
-- 不做 Vault、云同步、密码锁、商品化设置页或无关功能；SSH 凭据与主机信任只保留在进程内，断开或退出即清空。
-- 所有 UI 文案优先中文；连接过程必须显示中文状态与可读失败原因。
-- 连接列表要支持搜索、分组、右键菜单、拖拽排序；文件区要支持拖拽上传、右键操作和显式删除确认。
-- 优先少而完整的功能。每个操作必须有即时反馈、键盘可用性和 `prefers-reduced-motion` 降级。
+- 全部界面使用 MyGo 原生 UI 和 Go；SSH 使用进程内 Go 实现，不调用系统 SSH 客户端。
+- 连接列表支持搜索、分组、右键与拖拽排序；文件区支持拖拽上传、右键操作和显式删除确认。
+- 中文状态与可读错误、键盘可用性、可访问性及减少动态效果设置应在新界面得到支持。
+- 云同步服务采用安全默认配置，凭据与会话不写入日志，服务端不能代替客户端盲信 SSH 主机密钥。
 
 ## Git 开发规范
 

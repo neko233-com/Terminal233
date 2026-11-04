@@ -1,0 +1,16 @@
+version: '3'
+
+tasks:
+  test:
+    desc: 运行正在迁移的 Go 客户端与同步服务测试
+    cmds:
+      - go -C client test -p 1 ./...
+      - go -C server test -p 1 ./...
+  build:client:
+    desc: 编译 MyGo 原生客户端
+    cmds:
+      - go -C client build -p 1 -o ../build/Terminal233.exe .
+  build:server:
+    desc: 编译同步服务
+    cmds:
+      - go -C server build -p 1 -o ../build/terminal233-server ./cmd/server
