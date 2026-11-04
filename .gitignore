@@ -118,3 +118,6 @@ client/.mygo/
 client/build/
 server/terminal233-server
 
+
+# MyGo creates this Windows resource temporarily during packaging
+client/mygo_windows_*.syso
