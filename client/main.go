@@ -10,6 +10,9 @@ import (
 )
 
 type desktop struct {
+	shell                                                              *remoteShell
+	fileDir, fileLocal, fileStatus, selectedFile, confirmDelete        string
+	files                                                              []remoteFile
 	expectedFingerprint                                                string
 	win                                                                *mygo.Window
 	settings                                                           connectionSettings
@@ -81,6 +84,11 @@ func (d *desktop) connect() {
 				_ = d.term.Close()
 			}
 			d.term = term
+			d.shell = shell
+			d.fileDir = "."
+			d.files = nil
+			d.selectedFile = ""
+			d.refreshFiles()
 			d.active = settings
 			d.status = "已连接"
 		})
@@ -115,6 +123,7 @@ func (d *desktop) view(c *ui.Context) {
 					d.status = "已断开"
 				}
 				ui.Text(c, d.status).FontSize(13)
+				d.fileView(c)
 				d.cloudView(c)
 			})
 		})

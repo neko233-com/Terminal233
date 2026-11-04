@@ -5,11 +5,15 @@ import (
 	"crypto/rand"
 	"io"
 	"net"
+	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -66,6 +70,19 @@ func testSSHServer(t *testing.T) (connectionSettings, string, *atomic.Int32) {
 							switch req.Type {
 							case "pty-req", "window-change":
 								_ = req.Reply(true, nil)
+							case "subsystem":
+								var sub struct{ Name string }
+								if ssh.Unmarshal(req.Payload, &sub) != nil || sub.Name != "sftp" {
+									_ = req.Reply(false, nil)
+									continue
+								}
+								_ = req.Reply(true, nil)
+								srv, err := sftp.NewServer(channel)
+								if err == nil {
+									_ = srv.Serve()
+									_ = srv.Close()
+								}
+								return
 							case "shell":
 								_ = req.Reply(true, nil)
 								_, _ = channel.Write([]byte("ready\r\n"))
@@ -127,5 +144,51 @@ func TestInvalidConnectionSettings(t *testing.T) {
 		if _, err := input.address(); err == nil {
 			t.Fatalf("accepted invalid settings: %+v", input)
 		}
+	}
+}
+
+func TestSFTPTransferAndExplicitDelete(t *testing.T) {
+	settings, fingerprint, _ := testSSHServer(t)
+	settings.Fingerprint = fingerprint
+	shell, err := connectShell(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shell.Close()
+	root := t.TempDir()
+	source := filepath.Join(root, "source.txt")
+	if err := os.WriteFile(source, []byte("hello"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	remoteDir := filepath.ToSlash(filepath.Join(root, "remote"))
+	if err := os.Mkdir(filepath.Join(root, "remote"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := uploadFile(shell, source, remoteDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := uploadFile(shell, source, remoteDir); err == nil {
+		t.Fatal("upload overwrote existing file")
+	}
+	files, err := listRemote(shell, remoteDir)
+	if err != nil || len(files) != 1 || files[0].Name != "source.txt" {
+		t.Fatalf("files=%v err=%v", files, err)
+	}
+	target := filepath.Join(root, "download.txt")
+	if err := downloadFile(shell, path.Join(remoteDir, "source.txt"), target); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "hello" {
+		t.Fatalf("download=%q err=%v", data, err)
+	}
+	if err := downloadFile(shell, path.Join(remoteDir, "source.txt"), target); err == nil {
+		t.Fatal("download overwrote local file")
+	}
+	if err := deleteRemote(shell, path.Join(remoteDir, "source.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "remote", "source.txt")); !os.IsNotExist(err) {
+		t.Fatalf("file still exists: %v", err)
 	}
 }
