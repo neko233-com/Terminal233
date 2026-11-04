@@ -74,7 +74,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	var windows map[string]any
 	for time.Now().Before(deadline) {
 		windows = call("windows")
-		if strings.Contains(fmt.Sprint(windows), "Terminal233") {
+		if strings.Contains(fmt.Sprint(windows), "NekoSSH") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -142,7 +142,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !strings.Contains(tree, "本机终端已打开") {
-		t.Fatal("local PowerShell terminal failed to start")
+		t.Fatalf("local PowerShell terminal failed to start: %s", tree)
 	}
 	call("act", map[string]any{"key": "disconnect", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)

@@ -1,6 +1,6 @@
-# Terminal233
+# NekoSSH
 
-Terminal233 是使用 Go 1.27 与 MyGo 原生界面构建的 SSH 桌面客户端，配套自部署凭据同步服务。客户端无需 WebView 或外部 SSH 客户端。
+NekoSSH 是使用 Go 1.27 与 MyGo 原生界面构建的 SSH 桌面客户端，配套自部署凭据同步服务。客户端无需 WebView 或外部 SSH 客户端。当前 Windows 程序和快捷方式仍使用 `Terminal233` 名称，以兼容现有安装。
 
 - `client/`：MyGo 原生客户端、进程内 SSH、PTY、SFTP 与同步客户端。
 - `server/`：Go 凭据同步服务，不转发 SSH 会话或主动连接用户指定的服务器。

@@ -116,7 +116,7 @@ func (d *desktop) view(c *ui.Context) {
 	ui.Row(c).Fill().Children(func() {
 		ui.Scroll(c).Width(340).FillHeight().Children(func() {
 			ui.Column(c).Padding(18).Gap(8).Children(func() {
-				ui.Text(c, "Terminal233").FontSize(23).Bold()
+				ui.Text(c, "NekoSSH").FontSize(23).Bold()
 				ui.Button(c.Key("local-terminal"), "本机终端").Disabled(d.busy).OnClick(d.openLocalTerminal)
 				ui.Text(c, "SSH 连接").Bold()
 				ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
@@ -165,7 +165,7 @@ func main() {
 	}
 	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息", cloudURL: "https://nekossh.neko233.com", teamInviteHours: "24", teamInviteUses: "1"}
 	mygo.App.WhenReady(func() {
-		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "Terminal233", Width: 1200, Height: 760, Content: ui.View(d.view)})
+		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH", Width: 1200, Height: 760, Content: ui.View(d.view)})
 		d.win.OnClosed(func() {
 			if d.term != nil {
 				_ = d.term.Close()
