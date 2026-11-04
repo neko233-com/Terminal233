@@ -1,0 +1,24 @@
+[Unit]
+Description=Terminal233 credential sync
+After=network.target
+
+[Service]
+Type=simple
+User=terminal233
+Group=terminal233
+EnvironmentFile=/etc/terminal233/server.env
+WorkingDirectory=/var/lib/terminal233
+ExecStart=/usr/local/bin/terminal233-server
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/terminal233
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

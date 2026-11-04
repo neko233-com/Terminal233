@@ -120,4 +120,16 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if attempts.Load() != 1 {
 		t.Fatalf("authentication attempts: %d", attempts.Load())
 	}
+	call("act", map[string]any{"key": "disconnect", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "已断开") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "已断开") {
+		t.Fatalf("desktop failed to disconnect")
+	}
 }

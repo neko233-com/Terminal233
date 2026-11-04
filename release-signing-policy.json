@@ -1,8 +1,0 @@
-{
-  "$schema": "./release-signing-policy.schema.json",
-  "schemaVersion": 1,
-  "repository": "neko233-com/nekossh",
-  "windowsAuthenticode": {
-    "allowedSigners": []
-  }
-}

@@ -8,8 +8,8 @@ tasks:
   test:
     desc: 运行正在迁移的 Go 客户端与同步服务测试
     cmds:
-      - go -C client test -p 1 ./...
-      - go -C server test -p 1 ./...
+      - go -C client test -p 1 -count 1 ./...
+      - go -C server test -p 1 -count 1 ./...
   build:client:
     desc: 编译 MyGo 原生客户端
     cmds:
@@ -26,3 +26,19 @@ tasks:
     desc: 生成仅用于本机验证的未签名 Windows 安装包
     cmds:
       - go -C client tool mygo build -platform windows/amd64 -o ../build/unsigned-local
+  build:server:linux-amd64:
+    desc: 构建 Linux amd64 同步服务
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: '0'
+    cmds:
+      - go -C server build -o ../build/linux-amd64/terminal233-server ./cmd/server
+  build:server:linux-arm64:
+    desc: 构建 Linux arm64 同步服务
+    env:
+      GOOS: linux
+      GOARCH: arm64
+      CGO_ENABLED: '0'
+    cmds:
+      - go -C server build -o ../build/linux-arm64/terminal233-server ./cmd/server
