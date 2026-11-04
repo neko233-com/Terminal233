@@ -3,6 +3,8 @@ param()
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $installRoot = 'C:\App\nekossh'
+$version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'mygo.json') -Raw | ConvertFrom-Json).version
+if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid application version.' }
 $head = (& git -C $repo rev-parse HEAD).Trim()
 $remote = (& git -C $repo rev-parse origin/main).Trim()
 if ($head -ne $remote -or (& git -C $repo status --porcelain)) { throw 'Install requires a clean main matching origin/main.' }
@@ -25,11 +27,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Package build failed.' }
 } finally { Pop-Location }
 $bundle = Join-Path $repo 'build\release-windows\windows-amd64'
-$installer = Join-Path $bundle 'terminal233-setup-0.2.0-amd64.exe'
+$installer = Join-Path $bundle "terminal233-setup-$version-amd64.exe"
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Installer not found.' }
 $process = Start-Process -FilePath $installer -ArgumentList @('/S', '/D=C:\App\nekossh') -WindowStyle Hidden -PassThru -Wait
 if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
-if ((& $installedExe --version | Out-String).Trim() -ne 'Terminal233 0.2.0') { throw 'Installed version verification failed.' }
+if ((& $installedExe --version | Out-String).Trim() -ne "Terminal233 $version") { throw 'Installed version verification failed.' }
 foreach ($name in @('Terminal233.exe','ghostty-vt.dll')) {
     if ((Get-FileHash -LiteralPath (Join-Path $bundle $name)).Hash -ne (Get-FileHash -LiteralPath (Join-Path $installRoot $name)).Hash) { throw "Installed file mismatch: $name" }
 }
@@ -40,7 +42,7 @@ $link = $shell.CreateShortcut($shortcut)
 try { if (-not [string]::Equals($link.TargetPath, $installedExe, [StringComparison]::OrdinalIgnoreCase)) { throw 'Start Menu shortcut target mismatch.' } }
 finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
 $key = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.neko233.terminal233'
-if ($key.DisplayVersion -ne '0.2.0' -or $key.InstallLocation -ne $installRoot) { throw 'Uninstall registration verification failed.' }
+if ($key.DisplayVersion -ne $version -or $key.InstallLocation -ne $installRoot) { throw 'Uninstall registration verification failed.' }
 Set-Content -LiteralPath (Join-Path $installRoot 'UNSIGNED-BUILD.txt') -Value "Unsigned Windows build; source commit $head" -Encoding UTF8
 # Remove only the known previous local validation installation, never arbitrary files.
 if (Test-Path -LiteralPath $legacyRoot -PathType Container) {
@@ -55,4 +57,4 @@ if (Test-Path -LiteralPath $legacyRoot -PathType Container) {
         Remove-Item -LiteralPath $legacyRoot
     } else { Write-Warning "Previous directory was preserved because it contains unrecognized data: $legacyRoot" }
 }
-Write-Output "Installed unsigned build: Terminal233 0.2.0 ($head)"
+Write-Output "Installed unsigned build: Terminal233 $version ($head)"

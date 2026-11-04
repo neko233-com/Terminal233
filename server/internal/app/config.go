@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-var Version = "0.2.0"
+var Version = "0.2.1"
 
 type Config struct {
 	Address        string

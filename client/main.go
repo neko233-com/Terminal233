@@ -141,7 +141,7 @@ func (d *desktop) view(c *ui.Context) {
 	})
 }
 
-const version = "0.2.0"
+const version = "0.2.1"
 
 func main() {
 	showVersion := flag.Bool("version", false, "显示版本")
