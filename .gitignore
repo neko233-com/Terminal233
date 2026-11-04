@@ -121,3 +121,21 @@ server/terminal233-server
 
 # MyGo creates this Windows resource temporarily during packaging
 client/mygo_windows_*.syso
+
+# Encrypted cloud backups and SQLite runtime files
+*.nekobackup
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.legacy-backup
+*.migration-*
+*.sqlite.lock
+*.sqlite3.lock
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.db.lock
+*.json.lock

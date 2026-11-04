@@ -1,6 +1,11 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base32"
+	binenc "encoding/binary"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +40,7 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	address := l.Addr().String()
 	_ = l.Close()
 	command := exec.Command(binary)
-	command.Env = append(os.Environ(), "TERMINAL233_SERVER_ADDR="+address, "TERMINAL233_DATA_PATH="+filepath.Join(t.TempDir(), "store.json"), "TERMINAL233_MASTER_KEY="+strings.Repeat("m", 40), "TERMINAL233_OFFICIAL_TOKEN="+strings.Repeat("t", 40))
+	command.Env = append(os.Environ(), "TERMINAL233_SERVER_ADDR="+address, "TERMINAL233_DATA_PATH="+filepath.Join(t.TempDir(), "store.json"), "TERMINAL233_MASTER_KEY="+strings.Repeat("m", 40), "TERMINAL233_OFFICIAL_TOKEN="+strings.Repeat("t", 40), "TERMINAL233_ADMIN_USERNAME=platform-admin", "TERMINAL233_ADMIN_BOOTSTRAP_TOKEN="+strings.Repeat("a", 40), "TERMINAL233_ADMIN_TOTP_SECRET=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +86,87 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	accounts, err = client.list()
 	if err != nil || len(accounts) != 0 {
 		t.Fatalf("delete list=%v err=%v", accounts, err)
+	}
+	team, err := client.createTeam("开发组")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.teamID = team.ID
+	if err := client.save(account); err != nil {
+		t.Fatal(err)
+	}
+	invite, err := client.createInvite("invite-pass-123", 3600, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragment, err := url.ParseQuery(parsed.Fragment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := newCloudClient(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob.http.Transport = proxy.Client().Transport
+	if err = bob.registerWithInvite("bobby", "long-password", fragment.Get("join"), "invite-pass-123"); err != nil {
+		t.Fatal(err)
+	}
+	if err = bob.login("bobby", "long-password"); err != nil {
+		t.Fatal(err)
+	}
+	bob.teamID = team.ID
+	shared, err := bob.list()
+	if err != nil || len(shared) != 1 || shared[0].Password != "ssh-password" {
+		t.Fatalf("team share failed: %v", err)
+	}
+	if err = bob.save(account); err == nil {
+		t.Fatal("team member modified credentials")
+	}
+	if err = client.removeMember("bobby"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = bob.list(); err == nil {
+		t.Fatal("removed member retained team access")
+	}
+	admin, err := newCloudClient(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin.http.Transport = proxy.Client().Transport
+	if err = admin.register("platform-admin", "long-password", strings.Repeat("a", 40)); err != nil {
+		t.Fatal(err)
+	}
+	if err = admin.login("platform-admin", "long-password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = admin.adminUsers(); err == nil {
+		t.Fatal("admin action without TOTP succeeded")
+	}
+	secret, _ := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+	var counter [8]byte
+	binenc.BigEndian.PutUint64(counter[:], uint64(time.Now().Unix()/30))
+	mac := hmac.New(sha1.New, secret)
+	_, _ = mac.Write(counter[:])
+	digest := mac.Sum(nil)
+	offset := digest[len(digest)-1] & 15
+	admin.adminTOTP = fmt.Sprintf("%06d", (binenc.BigEndian.Uint32(digest[offset:offset+4])&0x7fffffff)%1000000)
+	users, err := admin.adminUsers()
+	if err != nil || len(users) != 3 {
+		t.Fatalf("admin users: %d %v", len(users), err)
+	}
+	backup, err := admin.exportBackup()
+	if err != nil || backup.Format != "nekossh-encrypted-v1" || strings.Contains(backup.Data, "ssh-password") {
+		t.Fatalf("backup export failed: %v", err)
+	}
+	if err = admin.importBackup(backup); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = admin.adminUsers(); err == nil {
+		t.Fatal("restore did not invalidate admin session")
 	}
 	if err := client.logout(); err != nil {
 		t.Fatal(err)

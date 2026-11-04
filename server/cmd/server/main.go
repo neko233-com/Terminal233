@@ -29,6 +29,7 @@ func main() {
 		log.Fatalf("Terminal233 Server 初始化失败：%v", err)
 	}
 
+	defer server.Close()
 	httpServer := &http.Server{
 		Addr:              cfg.Address,
 		Handler:           server,

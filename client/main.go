@@ -11,23 +11,35 @@ import (
 )
 
 type desktop struct {
-	confirmCloudDelete                                                 string
-	profiles                                                           []profile
-	profileSearch, profileGroup, selectedProfile                       string
-	nextProfileID                                                      int
-	shell                                                              *remoteShell
-	fileDir, fileLocal, fileStatus, selectedFile, confirmDelete        string
-	files                                                              []remoteFile
-	expectedFingerprint                                                string
-	win                                                                *mygo.Window
-	settings                                                           connectionSettings
-	fingerprint, status                                                string
-	busy                                                               bool
-	term                                                               *terminal.Terminal
-	active                                                             connectionSettings
-	cloud                                                              *cloudClient
-	cloudURL, cloudUser, cloudPassword, cloudRegistration, cloudStatus string
-	accounts                                                           []cloudAccount
+	showTeams, showAdmin                                                                    bool
+	teamInvites                                                                             []cloudInvite
+	confirmInvite                                                                           string
+	adminTeams                                                                              []cloudTeam
+	adminConfirmTeam                                                                        string
+	adminUsers                                                                              []cloudAdminUser
+	adminTOTP, adminBackupPath, adminStatus, adminConfirmUser                               string
+	adminConfirmRestore                                                                     bool
+	teams                                                                                   []cloudTeam
+	members                                                                                 []cloudTeamMember
+	teamName, teamInvitePassword, teamInviteInput, teamInviteURL, teamStatus, confirmMember string
+	teamInviteHours, teamInviteUses                                                         string
+	confirmCloudDelete                                                                      string
+	profiles                                                                                []profile
+	profileSearch, profileGroup, selectedProfile                                            string
+	nextProfileID                                                                           int
+	shell                                                                                   *remoteShell
+	fileDir, fileLocal, fileStatus, selectedFile, confirmDelete                             string
+	files                                                                                   []remoteFile
+	expectedFingerprint                                                                     string
+	win                                                                                     *mygo.Window
+	settings                                                                                connectionSettings
+	fingerprint, status                                                                     string
+	busy                                                                                    bool
+	term                                                                                    *terminal.Terminal
+	active                                                                                  connectionSettings
+	cloud                                                                                   *cloudClient
+	cloudURL, cloudUser, cloudPassword, cloudRegistration, cloudStatus                      string
+	accounts                                                                                []cloudAccount
 }
 
 func (d *desktop) inspect() {
@@ -105,6 +117,7 @@ func (d *desktop) view(c *ui.Context) {
 		ui.Scroll(c).Width(340).FillHeight().Children(func() {
 			ui.Column(c).Padding(18).Gap(8).Children(func() {
 				ui.Text(c, "Terminal233").FontSize(23).Bold()
+				ui.Button(c.Key("local-terminal"), "本机终端").Disabled(d.busy).OnClick(d.openLocalTerminal)
 				ui.Text(c, "SSH 连接").Bold()
 				ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
 				ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
@@ -141,7 +154,7 @@ func (d *desktop) view(c *ui.Context) {
 	})
 }
 
-const version = "0.2.1"
+const version = "0.3.0"
 
 func main() {
 	showVersion := flag.Bool("version", false, "显示版本")
@@ -150,7 +163,7 @@ func main() {
 		fmt.Println("Terminal233 " + version)
 		return
 	}
-	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息"}
+	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息", cloudURL: "https://nekossh.neko233.com", teamInviteHours: "24", teamInviteUses: "1"}
 	mygo.App.WhenReady(func() {
 		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "Terminal233", Width: 1200, Height: 760, Content: ui.View(d.view)})
 		d.win.OnClosed(func() {

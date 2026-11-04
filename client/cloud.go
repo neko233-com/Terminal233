@@ -25,9 +25,11 @@ type cloudAccount struct {
 }
 
 type cloudClient struct {
-	base  *url.URL
-	http  *http.Client
-	token string
+	base      *url.URL
+	http      *http.Client
+	token     string
+	teamID    string
+	adminTOTP string
 }
 
 func newCloudClient(raw string) (*cloudClient, error) {
@@ -61,17 +63,24 @@ func (c *cloudClient) request(method, path string, input, output any) error {
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
+	if strings.HasPrefix(path, "/api/v1/admin/") && c.adminTOTP != "" {
+		req.Header.Set("X-Admin-TOTP", c.adminTOTP)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("同步连接失败: %w", err)
 	}
 	defer resp.Body.Close()
-	limited := io.LimitReader(resp.Body, 2*1024*1024+1)
+	limit := int64(2 * 1024 * 1024)
+	if path == "/api/v1/admin/export" {
+		limit = 24 * 1024 * 1024
+	}
+	limited := io.LimitReader(resp.Body, limit+1)
 	data, err := io.ReadAll(limited)
 	if err != nil {
 		return err
 	}
-	if len(data) > 2*1024*1024 {
+	if int64(len(data)) > limit {
 		return errors.New("同步服务响应过大")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -112,14 +121,14 @@ func (c *cloudClient) list() ([]cloudAccount, error) {
 	if c.token == "" {
 		return nil, errors.New("请先登录同步服务")
 	}
-	err := c.request(http.MethodGet, "/api/v1/accounts", nil, &result)
+	err := c.request(http.MethodGet, c.accountsPath(), nil, &result)
 	return result, err
 }
 func (c *cloudClient) save(a cloudAccount) error {
 	if c.token == "" {
 		return errors.New("请先登录同步服务")
 	}
-	return c.request(http.MethodPost, "/api/v1/accounts", a, nil)
+	return c.request(http.MethodPost, c.accountsPath(), a, nil)
 }
 func (c *cloudClient) logout() error {
 	if c.token == "" {
@@ -137,5 +146,116 @@ func (c *cloudClient) remove(id string) error {
 	if id == "" || strings.ContainsAny(id, "/\\") {
 		return errors.New("无效的连接编号")
 	}
-	return c.request(http.MethodDelete, "/api/v1/accounts/"+url.PathEscape(id), nil, nil)
+	return c.request(http.MethodDelete, c.accountsPath()+"/"+url.PathEscape(id), nil, nil)
+}
+
+func (c *cloudClient) accountsPath() string {
+	if c.teamID != "" {
+		return "/api/v1/teams/" + url.PathEscape(c.teamID) + "/accounts"
+	}
+	return "/api/v1/accounts"
+}
+
+type cloudTeam struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Role        string `json:"role"`
+	MemberCount int    `json:"memberCount"`
+	Disabled    bool   `json:"disabled"`
+}
+type cloudTeamMember struct {
+	Username string `json:"username"`
+	Role     string `json:"role"`
+}
+
+func (c *cloudClient) teams() ([]cloudTeam, error) {
+	var teams []cloudTeam
+	err := c.request(http.MethodGet, "/api/v1/teams", nil, &teams)
+	return teams, err
+}
+func (c *cloudClient) createTeam(name string) (cloudTeam, error) {
+	var t cloudTeam
+	err := c.request(http.MethodPost, "/api/v1/teams", map[string]string{"name": name}, &t)
+	return t, err
+}
+func (c *cloudClient) joinTeam(token, password string) (cloudTeam, error) {
+	var t cloudTeam
+	err := c.request(http.MethodPost, "/api/v1/teams/join", map[string]string{"token": token, "password": password}, &t)
+	return t, err
+}
+func (c *cloudClient) createInvite(password string, seconds, uses int) (string, error) {
+	var out struct {
+		URL string `json:"url"`
+	}
+	err := c.request(http.MethodPost, "/api/v1/teams/"+url.PathEscape(c.teamID)+"/invitations", map[string]any{"password": password, "expiresInSeconds": seconds, "uses": uses}, &out)
+	return out.URL, err
+}
+func (c *cloudClient) members() ([]cloudTeamMember, error) {
+	var members []cloudTeamMember
+	err := c.request(http.MethodGet, "/api/v1/teams/"+url.PathEscape(c.teamID)+"/members", nil, &members)
+	return members, err
+}
+func (c *cloudClient) removeMember(username string) error {
+	return c.request(http.MethodDelete, "/api/v1/teams/"+url.PathEscape(c.teamID)+"/members/"+url.PathEscape(username), nil, nil)
+}
+
+type cloudAdminUser struct {
+	Username     string `json:"username"`
+	AccountCount int    `json:"accountCount"`
+	CreatedAt    string `json:"createdAt"`
+	Disabled     bool   `json:"disabled"`
+}
+type cloudBackup struct {
+	Format  string `json:"format"`
+	Data    string `json:"data"`
+	Confirm string `json:"confirm,omitempty"`
+}
+
+func (c *cloudClient) adminUsers() ([]cloudAdminUser, error) {
+	var users []cloudAdminUser
+	err := c.request(http.MethodGet, "/api/v1/admin/users", nil, &users)
+	return users, err
+}
+func (c *cloudClient) setUserDisabled(user string, disabled bool) error {
+	return c.request(http.MethodPost, "/api/v1/admin/user-status", map[string]any{"username": user, "disabled": disabled}, nil)
+}
+func (c *cloudClient) exportBackup() (cloudBackup, error) {
+	var backup cloudBackup
+	err := c.request(http.MethodGet, "/api/v1/admin/export", nil, &backup)
+	return backup, err
+}
+func (c *cloudClient) importBackup(backup cloudBackup) error {
+	backup.Confirm = "RESTORE"
+	return c.request(http.MethodPost, "/api/v1/admin/import", backup, nil)
+}
+
+func (c *cloudClient) adminTeams() ([]cloudTeam, error) {
+	var teams []cloudTeam
+	err := c.request(http.MethodGet, "/api/v1/admin/teams", nil, &teams)
+	return teams, err
+}
+func (c *cloudClient) setTeamDisabled(id string, disabled bool) error {
+	return c.request(http.MethodPost, "/api/v1/admin/team-status", map[string]any{"id": id, "disabled": disabled}, nil)
+}
+
+func (c *cloudClient) registerWithInvite(user, password, invite, invitePassword string) error {
+	return c.request(http.MethodPost, "/api/v1/register", map[string]string{"username": user, "password": password, "officialToken": "", "teamInviteToken": invite, "teamInvitePassword": invitePassword}, nil)
+}
+
+type cloudInvite struct {
+	ID        string `json:"id"`
+	ExpiresAt int64  `json:"expiresAt"`
+	Remaining int    `json:"remaining"`
+}
+
+func (c *cloudClient) invitations() ([]cloudInvite, error) {
+	var inv []cloudInvite
+	err := c.request(http.MethodGet, "/api/v1/teams/"+url.PathEscape(c.teamID)+"/invitations", nil, &inv)
+	return inv, err
+}
+func (c *cloudClient) revokeInvitation(id string) error {
+	return c.request(http.MethodDelete, "/api/v1/teams/"+url.PathEscape(c.teamID)+"/invitations/"+url.PathEscape(id), nil, nil)
+}
+func (c *cloudClient) setMemberRole(user, role string) error {
+	return c.request(http.MethodPost, "/api/v1/teams/"+url.PathEscape(c.teamID)+"/members/role", map[string]string{"username": user, "role": role}, nil)
 }

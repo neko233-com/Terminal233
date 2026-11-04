@@ -101,7 +101,7 @@ func (d *desktop) cloudSave() {
 	}()
 }
 func (d *desktop) cloudView(c *ui.Context) {
-	ui.Text(c, "云同步（测试中）").Bold()
+	ui.Text(c, "云同步").Bold()
 	ui.TextInput(c.Key("cloudurl"), &d.cloudURL).Label("同步服务 HTTPS 地址").Placeholder("同步服务 HTTPS 地址")
 	ui.TextInput(c.Key("clouduser"), &d.cloudUser).Label("同步账号").Placeholder("同步账号")
 	ui.TextInput(c.Key("cloudpassword"), &d.cloudPassword).Label("同步密码").Placeholder("同步密码").Password()
@@ -125,6 +125,26 @@ func (d *desktop) cloudView(c *ui.Context) {
 		d.cloudDelete()
 	}
 	ui.Text(c, d.cloudStatus).FontSize(12)
+	teamLabel := "展开团队管理"
+	if d.showTeams {
+		teamLabel = "收起团队管理"
+	}
+	if ui.Button(c.Key("toggle-teams"), teamLabel).Clicked() {
+		d.showTeams = !d.showTeams
+	}
+	if d.showTeams {
+		d.teamView(c)
+	}
+	adminLabel := "展开服务器管理"
+	if d.showAdmin {
+		adminLabel = "收起服务器管理"
+	}
+	if ui.Button(c.Key("toggle-admin"), adminLabel).Clicked() {
+		d.showAdmin = !d.showAdmin
+	}
+	if d.showAdmin {
+		d.adminView(c)
+	}
 	for _, item := range d.accounts {
 		account := item
 		row := ui.Button(c.Key("account-"+account.ID), account.Label).Disabled(d.busy)
@@ -179,6 +199,20 @@ func (d *desktop) cloudLogout() {
 			d.busy = false
 			d.cloud = nil
 			d.accounts = nil
+			d.teams = nil
+			d.members = nil
+			d.teamInviteURL = ""
+			d.teamInviteInput = ""
+			d.confirmMember = ""
+			d.teamInvites = nil
+			d.confirmInvite = ""
+			d.adminUsers = nil
+			d.adminTeams = nil
+			d.adminConfirmTeam = ""
+			d.adminStatus = ""
+			d.adminTOTP = ""
+			d.adminConfirmRestore = false
+			d.adminConfirmUser = ""
 			d.confirmCloudDelete = ""
 			if err != nil {
 				d.cloudStatus = "本地已退出，服务端注销失败：" + err.Error()

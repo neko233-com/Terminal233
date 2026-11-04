@@ -7,3 +7,6 @@
 Windows 桌面自动化验证：`pwsh -NoProfile -File client/test-desktop.ps1 -Quiet`。它构建仅用于测试的自动化版本，在本机测试 SSH 服务上验证原生窗口与连接，不使用外部 SSH 客户端。
 
 Windows 安装包：`task package:windows:local`。`pwsh -NoProfile -File client/install-local-windows.ps1` 要求干净且与远端一致的 `main`，执行测试并重新打包，再静默安装至 `C:\App\nekossh`，核验版本、文件哈希、开始菜单与卸载注册项；Windows 构建不带 Authenticode 签名。
+
+
+本机终端使用 PowerShell 7（若安装了 PSReadLine 则加载命令语法高亮）；远程 shell 的高亮由远端配置决定。团队邀请可通过链接和密码注册或加入，邀请可撤销；平台管理员通过动态验证码执行用户、团队和加密备份管理。默认云地址为 `https://nekossh.neko233.com`，部署尚需完成。

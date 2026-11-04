@@ -126,7 +126,7 @@ func TestLoginBoundsSessionsAndPrunesExpired(t *testing.T) {
 	if err := server.store.createUser("alice", "long-password"); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 1024; i++ {
+	for i := 0; i < maxSessions; i++ {
 		server.sessions[fmt.Sprint(i)] = session{Username: "alice", ExpiresAt: time.Now().Add(time.Hour)}
 	}
 	request := func() *httptest.ResponseRecorder {

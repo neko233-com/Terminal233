@@ -5,10 +5,12 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,21 +18,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofrs/flock"
 	"golang.org/x/crypto/scrypt"
+	_ "modernc.org/sqlite"
 )
 
 const maxAccountsPerUser = 1000
 
 type storeDocument struct {
-	Version  int                        `json:"version"`
-	Users    map[string]userRecord      `json:"users"`
-	Accounts map[string][]storedAccount `json:"accounts"`
+	Version     int                        `json:"version"`
+	Users       map[string]userRecord      `json:"users"`
+	Accounts    map[string][]storedAccount `json:"accounts"`
+	Teams       map[string]teamRecord      `json:"teams,omitempty"`
+	Invitations map[string]teamInvitation  `json:"invitations,omitempty"`
 }
 
 type userRecord struct {
 	Username     string `json:"username"`
 	PasswordHash string `json:"passwordHash"`
 	CreatedAt    string `json:"createdAt"`
+	Disabled     bool   `json:"disabled,omitempty"`
 }
 
 type storedAccount struct {
@@ -46,54 +53,243 @@ type storedAccount struct {
 }
 
 type Store struct {
-	path string
-	key  []byte
-	mu   sync.Mutex
-	doc  storeDocument
+	path     string
+	key      []byte
+	mu       sync.Mutex
+	doc      storeDocument
+	revision int64
+	hasState bool
+	fileLock *flock.Flock
 }
 
-func openStore(path, masterKey string) (*Store, error) {
+// openStore keeps only authenticated ciphertext in SQLite. Existing encrypted
+// v1 files are migrated after verification; their original bytes are retained.
+func openStore(path, masterKey string) (result *Store, err error) {
 	key := sha256.Sum256([]byte(masterKey))
 	s := &Store{path: path, key: key[:], doc: storeDocument{Version: 1, Users: map[string]userRecord{}, Accounts: map[string][]storedAccount{}}}
-	data, err := os.ReadFile(path)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, err
+	}
+	lock := flock.New(path + ".lock")
+	acquired, err := lock.TryLock()
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		_ = lock.Close()
+		return nil, errors.New("数据文件已由其他服务实例使用")
+	}
+	s.fileLock = lock
+	defer func() {
+		if err != nil {
+			_ = lock.Close()
+		}
+	}()
+	file, err := os.Open(path)
+	var data []byte
 	if errors.Is(err, os.ErrNotExist) {
+		if _, backupErr := os.Stat(path + ".legacy-backup"); backupErr == nil {
+			return nil, errors.New("数据库缺失但旧数据备份存在，请先恢复备份后重试")
+		} else if !errors.Is(backupErr, os.ErrNotExist) {
+			return nil, backupErr
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("读取数据文件失败: %w", err)
+	} else {
+		header := make([]byte, 16)
+		n, readErr := io.ReadFull(file, header)
+		if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+			_ = file.Close()
+			return nil, readErr
+		}
+		if n > 0 && string(header[:n]) != "SQLite format 3\x00" {
+			if _, err = file.Seek(0, io.SeekStart); err != nil {
+				_ = file.Close()
+				return nil, err
+			}
+			data, err = io.ReadAll(io.LimitReader(file, maxBackupBytes+65))
+			if err != nil {
+				_ = file.Close()
+				return nil, err
+			}
+			if len(data) > maxBackupBytes+64 {
+				_ = file.Close()
+				return nil, errors.New("旧数据文件过大")
+			}
+		}
+		if err = file.Close(); err != nil {
+			return nil, err
+		}
+	}
+	if len(data) > 0 {
+		plain, err := decrypt(s.key, data)
+		if err != nil {
+			return nil, fmt.Errorf("旧数据解密失败: %w", err)
+		}
+		if err = json.Unmarshal(plain, &s.doc); err != nil {
+			return nil, fmt.Errorf("旧数据格式无效: %w", err)
+		}
+		if err = s.validateDocument(); err != nil {
+			return nil, err
+		}
+		backup := path + ".legacy-backup"
+		if _, err = os.Stat(backup); err == nil {
+			return nil, errors.New("旧数据备份已存在，拒绝覆盖")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		tmp := path + ".migration-" + newID()
+		migrated := &Store{path: tmp, key: s.key, doc: s.doc}
+		if err = migrated.saveLocked(); err != nil {
+			_ = os.Remove(tmp)
+			return nil, err
+		}
+		if err = os.Rename(path, backup); err != nil {
+			_ = os.Remove(tmp)
+			return nil, err
+		}
+		if err = os.Rename(tmp, path); err != nil {
+			restoreErr := os.Rename(backup, path)
+			_ = os.Remove(tmp)
+			if restoreErr != nil {
+				return nil, errors.Join(err, fmt.Errorf("旧数据仍保存在备份文件，恢复失败: %w", restoreErr))
+			}
+			return nil, err
+		}
+		s.revision = migrated.revision
+		s.hasState = migrated.hasState
+		return s, nil
+	}
+	db, err := openSQLite(path)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	var payload []byte
+	err = db.QueryRow("SELECT payload, revision FROM encrypted_state WHERE id=1").Scan(&payload, &s.revision)
+	if errors.Is(err, sql.ErrNoRows) {
 		return s, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("读取数据文件失败: %w", err)
+		return nil, err
 	}
-	plain, err := decrypt(key[:], data)
+	s.hasState = true
+	plain, err := decrypt(s.key, payload)
 	if err != nil {
 		return nil, fmt.Errorf("数据文件解密失败，可能是 master key 不匹配: %w", err)
 	}
-	if err := json.Unmarshal(plain, &s.doc); err != nil {
+	if err = json.Unmarshal(plain, &s.doc); err != nil {
 		return nil, fmt.Errorf("数据文件格式错误: %w", err)
 	}
-	if s.doc.Version != 1 || s.doc.Users == nil || s.doc.Accounts == nil {
-		return nil, errors.New("数据文件版本不受支持")
+	if err = s.validateDocument(); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
-
+func (s *Store) validateDocument() error {
+	if s.doc.Version != 1 || s.doc.Users == nil || s.doc.Accounts == nil {
+		return errors.New("数据文件版本不受支持")
+	}
+	if s.doc.Teams == nil {
+		s.doc.Teams = map[string]teamRecord{}
+	}
+	if s.doc.Invitations == nil {
+		s.doc.Invitations = map[string]teamInvitation{}
+	}
+	return nil
+}
+func openSQLite(path string) (*sql.DB, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err = file.Close(); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	if _, err = db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err = db.Exec("CREATE TABLE IF NOT EXISTS encrypted_state (id INTEGER PRIMARY KEY CHECK (id=1), payload BLOB NOT NULL, revision INTEGER NOT NULL DEFAULT 0)"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	rows, err := db.Query("PRAGMA table_info(encrypted_state)")
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	hasRevision := false
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var def any
+		if err = rows.Scan(&cid, &name, &typ, &notnull, &def, &pk); err != nil {
+			rows.Close()
+			db.Close()
+			return nil, err
+		}
+		if name == "revision" {
+			hasRevision = true
+		}
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		db.Close()
+		return nil, err
+	}
+	rows.Close()
+	if !hasRevision {
+		if _, err = db.Exec("ALTER TABLE encrypted_state ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	return db, nil
+}
 func (s *Store) saveLocked() error {
 	plain, err := json.Marshal(s.doc)
 	if err != nil {
 		return err
 	}
+	if len(plain) > maxBackupBytes {
+		return errors.New("storage capacity reached")
+	}
 	data, err := encrypt(s.key, plain)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+	db, err := openSQLite(s.path)
+	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	defer db.Close()
+	var result sql.Result
+	if s.hasState {
+		result, err = db.Exec("UPDATE encrypted_state SET payload=?,revision=revision+1 WHERE id=1 AND revision=?", data, s.revision)
+	} else {
+		result, err = db.Exec("INSERT INTO encrypted_state (id,payload,revision) VALUES (1,?,1) ON CONFLICT(id) DO NOTHING", data)
+	}
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		_ = os.Remove(tmp)
+	changed, err := result.RowsAffected()
+	if err != nil {
 		return err
+	}
+	if changed != 1 {
+		return errors.New("数据库已由其他实例修改，拒绝覆盖；请重启服务")
+	}
+	if s.hasState {
+		s.revision++
+	} else {
+		s.hasState = true
+		s.revision = 1
 	}
 	return nil
 }
@@ -123,12 +319,15 @@ func (s *Store) authenticateUser(username, password string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.doc.Users[normalizeUsername(username)]
-	return ok && verifyPassword(record.PasswordHash, password)
+	return ok && !record.Disabled && verifyPassword(record.PasswordHash, password)
 }
 
 func (s *Store) listAccounts(username string) ([]Account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.activeUserLocked(username) {
+		return nil, errTeamUnavailable
+	}
 	stored := append([]storedAccount(nil), s.doc.Accounts[normalizeUsername(username)]...)
 	result := make([]Account, 0, len(stored))
 	for _, item := range stored {
@@ -146,6 +345,9 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	owner = normalizeUsername(owner)
+	if !s.activeUserLocked(owner) {
+		return Account{}, errTeamUnavailable
+	}
 	items := append([]storedAccount(nil), s.doc.Accounts[owner]...)
 	original := s.doc.Accounts[owner]
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -201,6 +403,9 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 func (s *Store) deleteAccount(owner, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.activeUserLocked(owner) {
+		return errTeamUnavailable
+	}
 	items := s.doc.Accounts[normalizeUsername(owner)]
 	for i, item := range items {
 		if item.ID == id {
@@ -222,6 +427,7 @@ type UserSummary struct {
 	Username     string `json:"username"`
 	AccountCount int    `json:"accountCount"`
 	CreatedAt    string `json:"createdAt"`
+	Disabled     bool   `json:"disabled"`
 }
 
 func (s *Store) summaries() []UserSummary {
@@ -229,7 +435,7 @@ func (s *Store) summaries() []UserSummary {
 	defer s.mu.Unlock()
 	result := make([]UserSummary, 0, len(s.doc.Users))
 	for username, user := range s.doc.Users {
-		result = append(result, UserSummary{Username: username, AccountCount: len(s.doc.Accounts[username]), CreatedAt: user.CreatedAt})
+		result = append(result, UserSummary{Username: username, AccountCount: len(s.doc.Accounts[username]), CreatedAt: user.CreatedAt, Disabled: user.Disabled})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Username < result[j].Username })
 	return result
@@ -321,3 +527,15 @@ var (
 	errAccountNotFound = errors.New("account not found")
 	errAccountLimit    = errors.New("account limit reached")
 )
+
+func (s *Store) Close() error {
+	if s.fileLock == nil {
+		return nil
+	}
+	return s.fileLock.Close()
+}
+
+func (s *Store) activeUserLocked(name string) bool {
+	u, ok := s.doc.Users[normalizeUsername(name)]
+	return ok && !u.Disabled
+}

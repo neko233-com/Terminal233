@@ -1,0 +1,8 @@
+# Template only: replace the UUID and credentials path on the selected host.
+# Do not commit tunnel credentials. Keep the catch-all as the final rule.
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/nekossh-tunnel.json
+ingress:
+  - hostname: nekossh.neko233.com
+    service: http://127.0.0.1:8787
+  - service: http_status:404

@@ -12,10 +12,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const (
 	maxBodyBytes = 256 * 1024
+	maxSessions  = 10000
 	sessionTTL   = 12 * time.Hour
 )
 
@@ -37,6 +39,9 @@ type Server struct {
 	sessions        map[string]session
 	loginLimiter    *authAttemptLimiter
 	registerLimiter *authAttemptLimiter
+	inviteLimiter   *authAttemptLimiter
+	adminLimiter    *authAttemptLimiter
+	authSlots       chan struct{}
 	mu              sync.Mutex
 }
 
@@ -56,6 +61,9 @@ func New(cfg Config) (*Server, error) {
 		sessions:        map[string]session{},
 		loginLimiter:    newAuthAttemptLimiter(),
 		registerLimiter: newAuthAttemptLimiter(),
+		inviteLimiter:   newAuthAttemptLimiter(),
+		adminLimiter:    newAuthAttemptLimiter(),
+		authSlots:       make(chan struct{}, 2),
 	}, nil
 }
 
@@ -67,7 +75,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.URL.Path == "/" && r.Method == http.MethodGet:
-		s.json(w, http.StatusOK, map[string]string{"service": "terminal233-sync"})
+		s.json(w, http.StatusOK, map[string]string{"service": "terminal233-sync", "message": "团队邀请请复制完整链接到 NekoSSH 客户端，在团队共享中粘贴并输入邀请密码。"})
 	case r.URL.Path == "/docs.html" && r.Method == http.MethodGet:
 		s.error(w, http.StatusNotFound, "not_found", "接口不存在")
 	case r.URL.Path == "/healthz" && (r.Method == http.MethodGet || r.Method == http.MethodHead):
@@ -82,6 +90,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.login(w, r)
 	case r.URL.Path == "/api/v1/logout" && r.Method == http.MethodPost:
 		s.logout(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/v1/admin/"):
+		s.withUser(w, r, s.adminResource)
+	case r.URL.Path == "/api/v1/teams":
+		s.withUser(w, r, s.teamRoot)
+	case r.URL.Path == "/api/v1/teams/join":
+		s.withUser(w, r, s.teamJoin)
+	case strings.HasPrefix(r.URL.Path, "/api/v1/teams/"):
+		s.withUser(w, r, s.teamResource)
 	case r.URL.Path == "/api/v1/accounts" && r.Method == http.MethodGet:
 		s.withUser(w, r, s.listAccounts)
 	case r.URL.Path == "/api/v1/accounts" && r.Method == http.MethodPost:
@@ -95,9 +111,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Username      string `json:"username"`
-		Password      string `json:"password"`
-		OfficialToken string `json:"officialToken"`
+		Username           string `json:"username"`
+		Password           string `json:"password"`
+		OfficialToken      string `json:"officialToken"`
+		TeamInviteToken    string `json:"teamInviteToken,omitempty"`
+		TeamInvitePassword string `json:"teamInvitePassword,omitempty"`
 	}
 	if !s.decode(w, r, &input) {
 		return
@@ -108,16 +126,38 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusTooManyRequests, "rate_limited", "注册尝试过于频繁，请稍后再试")
 		return
 	}
-	if !constantTimeEqual(input.OfficialToken, s.cfg.OfficialToken) {
+	registrationToken := s.cfg.OfficialToken
+	adminRegistration := s.cfg.AdminUsername != "" && normalizeUsername(input.Username) == s.cfg.AdminUsername
+	if adminRegistration {
+		registrationToken = s.cfg.AdminBootstrapToken
+	}
+	useInvite := input.TeamInviteToken != "" && !adminRegistration
+	if !useInvite && (registrationToken == "" || !constantTimeEqual(input.OfficialToken, registrationToken)) {
 		s.registerLimiter.failure(time.Now(), registerKeys...)
-		s.error(w, http.StatusForbidden, "official_token_required", "需要有效的官方注册 token")
+		s.error(w, http.StatusForbidden, "registration_token_required", "注册令牌或团队邀请无效")
 		return
 	}
-	if len(input.Username) < 3 || len(input.Username) > 64 || len(input.Password) < 8 || len(input.Password) > 256 {
+	if !validRegistrationUsername(input.Username) || len(input.Password) < 12 || len(input.Password) > 256 {
+		s.registerLimiter.failure(time.Now(), registerKeys...)
 		s.error(w, http.StatusBadRequest, "invalid_registration", "账号或密码格式无效")
 		return
 	}
-	if err := s.store.createUser(input.Username, input.Password); err != nil {
+	if !s.acquireAuth(w) {
+		return
+	}
+	defer s.releaseAuth()
+	var createErr error
+	if useInvite {
+		createErr = s.store.registerWithInvitation(input.Username, input.Password, input.TeamInviteToken, input.TeamInvitePassword)
+	} else {
+		createErr = s.store.createUser(input.Username, input.Password)
+	}
+	if err := createErr; err != nil {
+		s.registerLimiter.failure(time.Now(), registerKeys...)
+		if errors.Is(err, errInvalidInvitation) {
+			s.error(w, http.StatusForbidden, "invitation_invalid", "邀请不可用、密码错误或团队已满")
+			return
+		}
 		if errors.Is(err, errUserExists) {
 			s.error(w, http.StatusConflict, "user_exists", "账号已存在")
 			return
@@ -125,7 +165,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusInternalServerError, "storage_failed", "账号创建失败")
 		return
 	}
-	s.registerLimiter.success(time.Now(), registerKeys...)
+	s.registerLimiter.failure(time.Now(), registerKeys...)
 	s.json(w, http.StatusCreated, map[string]any{"ok": true, "username": normalizeUsername(input.Username)})
 }
 
@@ -143,6 +183,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusTooManyRequests, "rate_limited", "登录尝试过于频繁，请稍后再试")
 		return
 	}
+	if !s.acquireAuth(w) {
+		return
+	}
+	defer s.releaseAuth()
 	if len(input.Username) < 3 || len(input.Username) > 64 || len(input.Password) < 8 || len(input.Password) > 256 || !s.store.authenticateUser(input.Username, input.Password) {
 		s.loginLimiter.failure(time.Now(), loginKeys...)
 		s.error(w, http.StatusUnauthorized, "invalid_credentials", "账号或密码错误")
@@ -157,7 +201,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 			delete(s.sessions, key)
 		}
 	}
-	if len(s.sessions) >= 1024 {
+	if len(s.sessions) >= maxSessions {
 		s.mu.Unlock()
 		s.error(w, http.StatusServiceUnavailable, "session_limit", "会话数量已达上限，请稍后重试")
 		return
@@ -231,7 +275,7 @@ func (s *Server) withUser(w http.ResponseWriter, r *http.Request, handler func(h
 		ok = false
 	}
 	s.mu.Unlock()
-	if !ok {
+	if !ok || !s.store.userEnabled(current.Username) {
 		s.error(w, http.StatusUnauthorized, "unauthorized", "登录已失效，请重新登录")
 		return
 	}
@@ -305,3 +349,29 @@ func newID() string {
 func validAccountInput(a Account) bool {
 	return a.Label != "" && len(a.Label) <= 128 && a.Host != "" && len(a.Host) <= 253 && !strings.ContainsAny(a.Host, "/\\@ \t\r\n") && a.Port > 0 && a.Port <= 65535 && a.Username != "" && len(a.Username) <= 128 && !strings.ContainsAny(a.Username, "/\\@ \t\r\n") && a.Password != "" && len(a.Password) <= 64*1024 && strings.HasPrefix(a.HostKeyFingerprint, "SHA256:") && len(a.HostKeyFingerprint) <= 100
 }
+
+func (s *Server) acquireAuth(w http.ResponseWriter) bool {
+	select {
+	case s.authSlots <- struct{}{}:
+		return true
+	default:
+		s.error(w, http.StatusServiceUnavailable, "authentication_busy", "认证请求繁忙，请稍后重试")
+		return false
+	}
+}
+func (s *Server) releaseAuth() { <-s.authSlots }
+
+func validRegistrationUsername(value string) bool {
+	value = normalizeUsername(value)
+	if len(value) < 3 || len(value) > 64 {
+		return false
+	}
+	for _, r := range value {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("._-@", r) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) Close() error { return s.store.Close() }

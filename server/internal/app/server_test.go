@@ -17,6 +17,7 @@ func testServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = server.Close() })
 	return server
 }
 
