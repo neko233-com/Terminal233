@@ -71,6 +71,7 @@ func (d *desktop) profileView(c *ui.Context) {
 		d.moveSelectedProfile(1)
 	}
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
+	var moveFrom, moveTo profileID
 	for _, item := range d.profiles {
 		p := item
 		if query != "" && !strings.Contains(strings.ToLower(p.Label+" "+p.Group), query) {
@@ -99,9 +100,13 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.loadProfile(p)
 		}
 		if dragged, ok := ui.Drop[profileID](row); ok {
-			d.moveProfile(dragged, p.ID)
-			d.status = "连接顺序已调整"
+			moveFrom, moveTo = dragged, p.ID
 		}
+	}
+	if moveFrom != "" {
+		d.moveProfile(moveFrom, moveTo)
+		d.status = "连接顺序已调整"
+		c.Invalidate()
 	}
 }
 
