@@ -112,22 +112,21 @@ func (d *desktop) view(c *ui.Context) {
 				ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password()
 				ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）")
 				ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password()
-				if ui.Button(c.Key("inspect"), "获取主机指纹").Disabled(d.busy).Clicked() {
-					d.inspect()
-				}
+				ui.Button(c.Key("inspect"), "获取主机指纹").Disabled(d.busy).OnClick(d.inspect)
 				if d.fingerprint != "" {
 					ui.Text(c, d.fingerprint).FontSize(12)
 				}
-				if ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || d.fingerprint == "").Clicked() {
-					d.connect()
-				}
+				ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || d.fingerprint == "").OnClick(d.connect)
 				if ui.Button(c.Key("disconnect"), "断开").Disabled(d.term == nil).Clicked() {
 					_ = d.term.Close()
 					d.term = nil
+					d.shell = nil
+					d.files = nil
 					d.active = connectionSettings{}
 					d.status = "已断开"
 				}
 				ui.Text(c, d.status).FontSize(13)
+				d.profileView(c)
 				d.fileView(c)
 				d.cloudView(c)
 			})

@@ -18,3 +18,7 @@ tasks:
     desc: 编译同步服务
     cmds:
       - go -C server build -p 1 -o ../build/terminal233-server ./cmd/server
+  test:desktop:windows:
+    desc: 静音验证 Windows 原生窗口和本机测试 SSH 连接
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File client/test-desktop.ps1 -Quiet
