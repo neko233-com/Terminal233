@@ -129,3 +129,13 @@ func (c *cloudClient) logout() error {
 	c.token = ""
 	return err
 }
+
+func (c *cloudClient) remove(id string) error {
+	if c.token == "" {
+		return errors.New("请先登录同步服务")
+	}
+	if id == "" || strings.ContainsAny(id, "/\\") {
+		return errors.New("无效的连接编号")
+	}
+	return c.request(http.MethodDelete, "/api/v1/accounts/"+url.PathEscape(id), nil, nil)
+}

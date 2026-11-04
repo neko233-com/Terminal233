@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 
@@ -10,6 +11,10 @@ import (
 )
 
 type desktop struct {
+	confirmCloudDelete                                                 string
+	profiles                                                           []profile
+	profileSearch, profileGroup, selectedProfile                       string
+	nextProfileID                                                      int
 	shell                                                              *remoteShell
 	fileDir, fileLocal, fileStatus, selectedFile, confirmDelete        string
 	files                                                              []remoteFile
@@ -137,7 +142,15 @@ func (d *desktop) view(c *ui.Context) {
 	})
 }
 
+const version = "0.2.0"
+
 func main() {
+	showVersion := flag.Bool("version", false, "显示版本")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println("Terminal233 " + version)
+		return
+	}
 	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息"}
 	mygo.App.WhenReady(func() {
 		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "Terminal233", Width: 1200, Height: 760, Content: ui.View(d.view)})

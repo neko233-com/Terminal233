@@ -103,7 +103,20 @@ func (d *desktop) fileView(c *ui.Context) {
 		if f.IsDir {
 			label = "📁 " + label
 		}
-		if ui.Button(c.Key("file-"+f.Name), label).Disabled(d.busy).Clicked() {
+		row := ui.Button(c.Key("file-"+f.Name), label).Disabled(d.busy)
+		row.ContextMenu(func(menu *ui.Menu) {
+			if menu.Item("选择").Chosen() {
+				d.selectedFile = f.Name
+				d.confirmDelete = ""
+				d.fileStatus = "已选择：" + f.Name
+			}
+			if menu.Item("删除…").Chosen() {
+				d.selectedFile = f.Name
+				d.confirmDelete = ""
+				d.removeSelected()
+			}
+		})
+		if row.Clicked() {
 			d.confirmDelete = ""
 			if f.IsDir {
 				d.fileDir = path.Join(d.fileDir, f.Name)
@@ -113,6 +126,18 @@ func (d *desktop) fileView(c *ui.Context) {
 				d.selectedFile = f.Name
 				d.fileStatus = "已选择：" + f.Name
 			}
+		}
+	}
+	drop := ui.Box(c.Key("file-drop")).Height(48).Border(1, c.Theme().Border).Padding(8).Label("拖入一个文件上传")
+	drop.Children(func() { ui.Text(c, "拖入一个文件上传").FontSize(12) })
+	if files := drop.DroppedFiles(); len(files) > 0 {
+		if d.busy || d.shell == nil {
+			d.fileStatus = "请先连接后再上传"
+		} else if len(files) != 1 {
+			d.fileStatus = "每次只能拖入一个文件"
+		} else {
+			d.fileLocal = files[0]
+			d.transfer(true)
 		}
 	}
 	ui.TextInput(c.Key("local-file"), &d.fileLocal).Label("本地文件路径").Placeholder("本地文件完整路径")

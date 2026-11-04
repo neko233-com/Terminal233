@@ -151,7 +151,18 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	s.loginLimiter.success(time.Now(), loginKeys...)
 	token := newID()
 	s.mu.Lock()
-	s.sessions[token] = session{Username: normalizeUsername(input.Username), ExpiresAt: time.Now().Add(sessionTTL)}
+	now := time.Now()
+	for key, current := range s.sessions {
+		if !current.ExpiresAt.After(now) {
+			delete(s.sessions, key)
+		}
+	}
+	if len(s.sessions) >= 1024 {
+		s.mu.Unlock()
+		s.error(w, http.StatusServiceUnavailable, "session_limit", "会话数量已达上限，请稍后重试")
+		return
+	}
+	s.sessions[token] = session{Username: normalizeUsername(input.Username), ExpiresAt: now.Add(sessionTTL)}
 	s.mu.Unlock()
 	s.json(w, http.StatusOK, map[string]any{"token": token, "expiresInSeconds": int(sessionTTL.Seconds())})
 }

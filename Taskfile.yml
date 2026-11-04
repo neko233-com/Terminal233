@@ -1,5 +1,9 @@
 version: '3'
 
+env:
+  GOMAXPROCS: '1'
+  GOFLAGS: '-p=1'
+
 tasks:
   test:
     desc: 运行正在迁移的 Go 客户端与同步服务测试
@@ -9,7 +13,7 @@ tasks:
   build:client:
     desc: 编译 MyGo 原生客户端
     cmds:
-      - go -C client build -p 1 -o ../build/Terminal233.exe .
+      - go -C client tool mygo build -skip-installer -o ../build/mygo
   build:server:
     desc: 编译同步服务
     cmds:

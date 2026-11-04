@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -117,5 +118,27 @@ func TestAccountRoundTripAndUserIsolation(t *testing.T) {
 	}
 	if strings.Contains(string(disk), "ssh-secret") || strings.Contains(string(disk), "example.test") {
 		t.Fatal("store contains plaintext account")
+	}
+}
+
+func TestLoginBoundsSessionsAndPrunesExpired(t *testing.T) {
+	server := testServer(t)
+	if err := server.store.createUser("alice", "long-password"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 1024; i++ {
+		server.sessions[fmt.Sprint(i)] = session{Username: "alice", ExpiresAt: time.Now().Add(time.Hour)}
+	}
+	request := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/login", strings.NewReader(`{"username":"alice","password":"long-password"}`)))
+		return rec
+	}
+	if rec := request(); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("session limit: %d", rec.Code)
+	}
+	server.sessions["0"] = session{ExpiresAt: time.Now().Add(-time.Second)}
+	if rec := request(); rec.Code != http.StatusOK {
+		t.Fatalf("expired session not pruned: %d", rec.Code)
 	}
 }
