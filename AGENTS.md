@@ -8,7 +8,7 @@
 
 ## 平台与发布范围
 
-- 桌面端目标规划包含 Windows `x86_64-pc-windows-msvc` 与 `aarch64-pc-windows-msvc`，安装目录默认为 `C:\App\Terminal233`；当前阶段只产出和安装 Windows x86_64，Windows ARM64 桌面包暂停产出。
+- 桌面端目标规划包含 Windows `x86_64-pc-windows-msvc` 与 `aarch64-pc-windows-msvc`，安装目录默认为 `C:\App\nekossh`；当前阶段只产出和安装 Windows x86_64，Windows ARM64 桌面包暂停产出。
 - 32 位 Windows、`i686`、`i386` 及其他 32 位桌面目标明确不在范围内。产品文档中的“Windows x86”一律指 x86_64，不得新增 32 位构建、安装包、测试或发布资产。
 - 服务端只考虑 Linux `amd64` 与 `arm64`；不发布 Windows 服务端。
 - 当前本地发布候选和更新清单不得包含 Windows ARM64 桌面资产；ARM64 桌面资产只允许由未来的 GitHub Actions 发布 CI 生成。
@@ -38,8 +38,8 @@
 
 ## Windows 开发机交付
 
-- 只要 Windows 版本通过本轮验证，就必须使用命令行构建并静默安装最新的 Terminal233 到 `C:\App\Terminal233`，再核验已安装版本；禁止依赖 GUI 或电脑操控完成安装。
-- 开发机安装以当前 `main` 的最新已验证提交为准。若缺少可信 Authenticode 证书，可以安装明确标记为本机验证用途的 unsigned 构建，但禁止把它上传为正式 GitHub Release。
+- 只要 Windows 版本通过本轮验证，就必须使用命令行构建并静默安装最新的 Terminal233 到 `C:\App\nekossh`，再核验已安装版本；禁止依赖 GUI 或电脑操控完成安装。
+- 开发机安装以当前 `main` 的最新已验证提交为准。Windows 构建无需 Authenticode 签名；发布及安装时必须明确标记未签名状态。
 - 普通提交禁止触发 GitHub Actions；当前仓库不新增 `.github/workflows`。Windows x86_64 本机验证包走命令行手工流程；正式 GitHub Release 只有在用户明确说“发布”后才允许创建。
-- Windows 安装脚本必须同时验证 `Terminal233.exe --version`、Start Menu 快捷方式和当前用户卸载注册项；默认安装目录固定为 `C:\App\Terminal233`。
+- Windows 安装脚本必须同时验证 `Terminal233.exe --version`、Start Menu 快捷方式和当前用户卸载注册项；默认安装目录固定为 `C:\App\nekossh`。
 - 真实 SSH 验证只能使用用户明确提供的测试目标，并通过幂等、固定目录、自动清理的测试脚本完成；不得把密码写入仓库、日志或远端持久目录。

@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/neko233-com/Terminal233/server/internal/app"
+	"github.com/neko233-com/nekossh/server/internal/app"
 )
 
 func main() {

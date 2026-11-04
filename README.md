@@ -14,10 +14,10 @@ Terminal233 是使用 Go 1.27 与 MyGo 原生界面构建的 SSH 桌面客户端
 task test                         # Go 单元测试、SSH/SFTP 测试、HTTPS 同步联调
 task test:desktop:windows         # Windows 原生窗口与 SSH 连接，低优先级
 task build:client                 # 构建本机 MyGo 原生程序及终端库
-task package:windows:local        # 未签名 Windows 本机验证安装包
+task package:windows:local        # 未签名 Windows 安装包
 ```
 
-Windows 本机验证安装使用 `powershell -NoProfile -File client/install-local-windows.ps1`。脚本要求 `main` 干净且与远端一致，重新运行测试和打包，静默安装到 `C:\App\Terminal233`，核验版本、文件、开始菜单和卸载注册项。未签名产物仅用于本机验证，不作为正式 Release 发布。
+Windows 本机验证安装使用 `pwsh -NoProfile -File client/install-local-windows.ps1`。脚本要求 `main` 干净且与远端一致，重新运行测试和打包，静默安装到 `C:\App\nekossh`，核验版本、文件、开始菜单和卸载注册项。Windows 发布产物不带 Authenticode 签名。
 
 客户端支持密码或私钥连接，首次连接前需通过可信渠道核对 SHA256 主机指纹；云端取回的连接如指纹变化会阻止连接。连接列表支持搜索、分组、拖拽排序、右键与键盘调整，当前仅保存在进程内。SFTP 支持单文件上传、下载、拖入上传和删除确认；单文件上限 16 MiB，默认不覆盖文件。云同步目前支持密码认证的 SSH 连接，私钥文件和私钥口令不会上传。
 
@@ -30,3 +30,7 @@ task build:server
 服务默认只监听 `127.0.0.1:8787`，公网使用必须通过 HTTPS 反向代理。配置、凭据保护、备份和威胁边界见 [server/SECURITY.md](server/SECURITY.md)。服务端持有解密密钥；这不是端到端加密。SSH 密码和账户会在服务端加密保存，不应将未完成安全评估的部署用于高价值凭据。
 
 仓库禁用 GitHub Actions，构建与发布采用本机手工流程；未收到明确发布指令时不创建 Release 或发布 tag。
+
+项目仓库：[neko233-com/nekossh](https://github.com/neko233-com/nekossh)。
+
+发布资产可由 `task package:release` 在干净并已推送的 `main` 上生成，包含未签名 Windows x86_64 安装包、Linux amd64/arm64 同步服务、SHA-256 清单与源码提交清单。生成资产不会自行创建 tag 或 GitHub Release。

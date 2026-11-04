@@ -21,11 +21,11 @@ tasks:
   test:desktop:windows:
     desc: 静音验证 Windows 原生窗口和本机测试 SSH 连接
     cmds:
-      - powershell -NoProfile -ExecutionPolicy Bypass -File client/test-desktop.ps1 -Quiet
+      - pwsh -NoProfile -ExecutionPolicy Bypass -File client/test-desktop.ps1 -Quiet
   package:windows:local:
-    desc: 生成仅用于本机验证的未签名 Windows 安装包
+    desc: 生成未签名 Windows 安装包
     cmds:
-      - go -C client tool mygo build -platform windows/amd64 -o ../build/unsigned-local
+      - go -C client tool mygo build -platform windows/amd64 -o ../build/release-windows
   build:server:linux-amd64:
     desc: 构建 Linux amd64 同步服务
     env:
@@ -42,3 +42,7 @@ tasks:
       CGO_ENABLED: '0'
     cmds:
       - go -C server build -o ../build/linux-arm64/terminal233-server ./cmd/server
+  package:release:
+    desc: 从干净且已推送的 main 构建并校验发布资产
+    cmds:
+      - pwsh -NoProfile -File client/package-release.ps1

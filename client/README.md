@@ -4,6 +4,6 @@
 
 在仓库根目录执行 `task test` 或 `task build:client`。`task build:client` 通过固定版本 MyGo 打包客户端及 libghostty-vt 动态库；该任务暂不生成安装程序。
 
-Windows 桌面自动化验证：`powershell -NoProfile -File client/test-desktop.ps1 -Quiet`。它构建仅用于测试的自动化版本，在本机测试 SSH 服务上验证原生窗口与连接，不使用外部 SSH 客户端。
+Windows 桌面自动化验证：`pwsh -NoProfile -File client/test-desktop.ps1 -Quiet`。它构建仅用于测试的自动化版本，在本机测试 SSH 服务上验证原生窗口与连接，不使用外部 SSH 客户端。
 
-Windows 本机验证包：`task package:windows:local`。`powershell -NoProfile -File client/install-local-windows.ps1` 要求干净且与远端一致的 `main`，执行测试并重新打包，再静默安装至 `C:\App\Terminal233`，核验版本、文件哈希、开始菜单与卸载注册项；无签名安装仅供本机验证，不发布为正式 Release。
+Windows 安装包：`task package:windows:local`。`pwsh -NoProfile -File client/install-local-windows.ps1` 要求干净且与远端一致的 `main`，执行测试并重新打包，再静默安装至 `C:\App\nekossh`，核验版本、文件哈希、开始菜单与卸载注册项；Windows 构建不带 Authenticode 签名。

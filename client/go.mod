@@ -1,4 +1,4 @@
-module github.com/neko233-com/Terminal233/client
+module github.com/neko233-com/nekossh/client
 
 go 1.27.3
 
