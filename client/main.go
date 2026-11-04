@@ -10,11 +10,16 @@ import (
 )
 
 type desktop struct {
-	win                 *mygo.Window
-	settings            connectionSettings
-	fingerprint, status string
-	busy                bool
-	term                *terminal.Terminal
+	expectedFingerprint                                                string
+	win                                                                *mygo.Window
+	settings                                                           connectionSettings
+	fingerprint, status                                                string
+	busy                                                               bool
+	term                                                               *terminal.Terminal
+	active                                                             connectionSettings
+	cloud                                                              *cloudClient
+	cloudURL, cloudUser, cloudPassword, cloudRegistration, cloudStatus string
+	accounts                                                           []cloudAccount
 }
 
 func (d *desktop) inspect() {
@@ -35,6 +40,10 @@ func (d *desktop) inspect() {
 			}
 			if d.settings.Host != settings.Host || d.settings.Port != settings.Port || d.settings.User != settings.User {
 				d.status = "连接信息已改变，请重新获取指纹。"
+				return
+			}
+			if d.expectedFingerprint != "" && d.expectedFingerprint != fp {
+				d.status = "主机密钥已变化，已阻止连接。请通过可信渠道核实。"
 				return
 			}
 			d.fingerprint = fp
@@ -72,6 +81,7 @@ func (d *desktop) connect() {
 				_ = d.term.Close()
 			}
 			d.term = term
+			d.active = settings
 			d.status = "已连接"
 		})
 	}()
@@ -79,30 +89,34 @@ func (d *desktop) connect() {
 
 func (d *desktop) view(c *ui.Context) {
 	ui.Row(c).Fill().Children(func() {
-		ui.Column(c).Width(320).Padding(18).Gap(8).Children(func() {
-			ui.Text(c, "Terminal233").FontSize(23).Bold()
-			ui.Text(c, "SSH 连接").Bold()
-			ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(func() { d.fingerprint = "" })
-			ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(func() { d.fingerprint = "" })
-			ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(func() { d.fingerprint = "" })
-			ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password()
-			ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）")
-			ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password()
-			if ui.Button(c.Key("inspect"), "获取主机指纹").Disabled(d.busy).Clicked() {
-				d.inspect()
-			}
-			if d.fingerprint != "" {
-				ui.Text(c, d.fingerprint).FontSize(12)
-			}
-			if ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || d.fingerprint == "").Clicked() {
-				d.connect()
-			}
-			if ui.Button(c.Key("disconnect"), "断开").Disabled(d.term == nil).Clicked() {
-				_ = d.term.Close()
-				d.term = nil
-				d.status = "已断开"
-			}
-			ui.Text(c, d.status).FontSize(13)
+		ui.Scroll(c).Width(340).FillHeight().Children(func() {
+			ui.Column(c).Padding(18).Gap(8).Children(func() {
+				ui.Text(c, "Terminal233").FontSize(23).Bold()
+				ui.Text(c, "SSH 连接").Bold()
+				ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
+				ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
+				ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
+				ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password()
+				ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）")
+				ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password()
+				if ui.Button(c.Key("inspect"), "获取主机指纹").Disabled(d.busy).Clicked() {
+					d.inspect()
+				}
+				if d.fingerprint != "" {
+					ui.Text(c, d.fingerprint).FontSize(12)
+				}
+				if ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || d.fingerprint == "").Clicked() {
+					d.connect()
+				}
+				if ui.Button(c.Key("disconnect"), "断开").Disabled(d.term == nil).Clicked() {
+					_ = d.term.Close()
+					d.term = nil
+					d.active = connectionSettings{}
+					d.status = "已断开"
+				}
+				ui.Text(c, d.status).FontSize(13)
+				d.cloudView(c)
+			})
 		})
 		ui.Column(c).Grow(1).FillHeight().Children(func() {
 			if d.term == nil {

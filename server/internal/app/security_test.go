@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -68,5 +69,53 @@ func TestConfigRejectsPublicListen(t *testing.T) {
 	t.Setenv("TERMINAL233_SERVER_ADDR", "127.0.0.1:8787")
 	if _, err := ConfigFromEnv(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAccountRoundTripAndUserIsolation(t *testing.T) {
+	server := testServer(t)
+	for _, user := range []string{"alice", "bob"} {
+		if err := server.store.createUser(user, "long-password"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	login := func(user string) string {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/login", strings.NewReader(`{"username":"`+user+`","password":"long-password"}`)))
+		var body struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Token == "" {
+			t.Fatalf("login %s: %s", user, rec.Body.String())
+		}
+		return body.Token
+	}
+	alice, bob := login("alice"), login("bob")
+	payload := `{"label":"host","host":"example.test","port":22,"username":"me","password":"ssh-secret","hostKeyFingerprint":"SHA256:fixture"}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/accounts", strings.NewReader(payload))
+	request.Header.Set("Authorization", "Bearer "+alice)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, request)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, test := range []struct {
+		token      string
+		wantSecret bool
+	}{{alice, true}, {bob, false}} {
+		request = httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
+		request.Header.Set("Authorization", "Bearer "+test.token)
+		rec = httptest.NewRecorder()
+		server.ServeHTTP(rec, request)
+		if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "ssh-secret") != test.wantSecret {
+			t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	disk, err := os.ReadFile(server.cfg.DataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(disk), "ssh-secret") || strings.Contains(string(disk), "example.test") {
+		t.Fatal("store contains plaintext account")
 	}
 }
