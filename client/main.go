@@ -26,6 +26,7 @@ type desktop struct {
 	monitorCancel                                                                           context.CancelFunc
 	monitorGeneration, monitorSession                                                       int
 	monitorStatus                                                                           string
+	monitorData                                                                             monitorDisplay
 	terminalLightTheme, terminalDarkTheme                                                   *terminal.Theme
 	showFilePanel                                                                           bool
 	sidebarCollapsed                                                                        bool
@@ -543,6 +544,9 @@ func (d *desktop) view(c *ui.Context) {
 							} else {
 								ui.Text(c, d.monitorStatus).FontSize(12).Wrap()
 							}
+							if width >= 1200 && height >= 800 {
+								d.monitorGauges(c)
+							}
 						}
 						if d.quickOpen {
 							if compactAuxiliaryPanels {
@@ -680,7 +684,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.47"
+const version = "0.3.48"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

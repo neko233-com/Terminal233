@@ -22,11 +22,13 @@ const monitorOutputLimit = 64 << 10
 var errMonitorPending = errors.New("previous monitor request is still running")
 
 type monitorSample struct {
-	summary           string
-	cpuTotal, cpuIdle uint64
-	cpuOK             bool
-	network           map[string][2]uint64
-	at                time.Time
+	summary                 string
+	cpuTotal, cpuIdle       uint64
+	cpuOK                   bool
+	memoryUsed, memoryTotal uint64
+	diskUsed, diskTotal     uint64
+	network                 map[string][2]uint64
+	at                      time.Time
 }
 
 func parseMonitorSample(raw string) (monitorSample, error) {
@@ -37,6 +39,17 @@ func parseMonitorSample(raw string) (monitorSample, error) {
 	sample := monitorSample{summary: summary, network: make(map[string][2]uint64)}
 	inNetwork, inDisk, diskFound := false, false, false
 	for _, line := range strings.Split(raw, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[2] == "kB" {
+			if v, err := strconv.ParseUint(fields[1], 10, 64); err == nil {
+				switch fields[0] {
+				case "MemTotal:":
+					sample.memoryTotal = v
+				case "MemAvailable:":
+					sample.memoryUsed = v
+				}
+			}
+		}
 		if strings.TrimSpace(line) == "DISK" {
 			inNetwork, inDisk = false, true
 			continue
@@ -47,6 +60,7 @@ func parseMonitorSample(raw string) (monitorSample, error) {
 				total, totalErr := strconv.ParseUint(fields[len(fields)-5], 10, 64)
 				used, usedErr := strconv.ParseUint(fields[len(fields)-4], 10, 64)
 				if totalErr == nil && usedErr == nil && total > 0 && used <= total {
+					sample.diskTotal, sample.diskUsed = total, used
 					sample.summary += fmt.Sprintf(" · 根磁盘 %.1f / %.1f GiB", float64(used)/(1024*1024), float64(total)/(1024*1024))
 					diskFound = true
 				}
@@ -90,7 +104,7 @@ func parseMonitorSample(raw string) (monitorSample, error) {
 		}
 		name, values, found := strings.Cut(line, ":")
 		name = strings.TrimSpace(name)
-		fields := strings.Fields(values)
+		fields = strings.Fields(values)
 		if !found || name == "" || name == "lo" || len(fields) < 16 {
 			continue
 		}
@@ -100,15 +114,35 @@ func parseMonitorSample(raw string) (monitorSample, error) {
 			sample.network[name] = [2]uint64{rx, tx}
 		}
 	}
+	if sample.memoryTotal > 0 && sample.memoryUsed <= sample.memoryTotal {
+		sample.memoryUsed = sample.memoryTotal - sample.memoryUsed
+	}
 	return sample, nil
 }
 
+type monitorDisplay struct {
+	text                       string
+	cpu, memory, disk          float64
+	hasCPU, hasMemory, hasDisk bool
+}
+
 func formatMonitorSample(current, previous monitorSample) string {
-	text := current.summary
+	return makeMonitorDisplay(current, previous).text
+}
+
+func makeMonitorDisplay(current, previous monitorSample) monitorDisplay {
+	display := monitorDisplay{text: current.summary}
+	if current.memoryTotal > 0 && current.memoryUsed <= current.memoryTotal {
+		display.memory, display.hasMemory = float64(current.memoryUsed)/float64(current.memoryTotal), true
+	}
+	if current.diskTotal > 0 && current.diskUsed <= current.diskTotal {
+		display.disk, display.hasDisk = float64(current.diskUsed)/float64(current.diskTotal), true
+	}
 	if current.cpuOK && previous.cpuOK && current.cpuTotal > previous.cpuTotal && current.cpuIdle >= previous.cpuIdle {
 		total, idle := current.cpuTotal-previous.cpuTotal, current.cpuIdle-previous.cpuIdle
 		if idle <= total {
-			text += fmt.Sprintf(" · CPU %.1f%%", 100*float64(total-idle)/float64(total))
+			display.cpu, display.hasCPU = float64(total-idle)/float64(total), true
+			display.text += fmt.Sprintf(" · CPU %.1f%%", 100*display.cpu)
 		}
 	}
 	seconds := current.at.Sub(previous.at).Seconds()
@@ -135,10 +169,10 @@ func formatMonitorSample(current, previous monitorSample) string {
 			count++
 		}
 		if valid && count > 0 {
-			text += fmt.Sprintf(" · 网卡合计 ↓%.1f ↑%.1f KiB/s", float64(rx)/seconds/1024, float64(tx)/seconds/1024)
+			display.text += fmt.Sprintf(" · 网卡合计 ↓%.1f ↑%.1f KiB/s", float64(rx)/seconds/1024, float64(tx)/seconds/1024)
 		}
 	}
-	return text
+	return display
 }
 
 type boundedMonitorOutput struct{ bytes.Buffer }
@@ -257,7 +291,7 @@ func (d *desktop) stopMonitor() {
 		d.monitorCancel = nil
 	}
 	d.monitorGeneration++
-	d.monitorSession, d.monitorStatus = 0, ""
+	d.monitorSession, d.monitorStatus, d.monitorData = 0, "", monitorDisplay{}
 }
 
 func (d *desktop) toggleMonitor() {
@@ -282,18 +316,20 @@ func (d *desktop) toggleMonitor() {
 			if ctx.Err() != nil {
 				return
 			}
-			text := formatMonitorSample(sample, previous)
+			display := makeMonitorDisplay(sample, previous)
 			previous = sample
 			win.Update(func() {
 				if d.monitorGeneration != generation || d.currentSession != sessionID || d.shell != shell {
 					return
 				}
 				if errors.Is(err, errMonitorPending) {
+					d.monitorData = monitorDisplay{}
 					d.monitorStatus = "上次服务器状态请求尚未结束，请稍后关闭并重试。"
 				} else if err != nil {
+					d.monitorData = monitorDisplay{}
 					d.monitorStatus = "无法读取服务器状态；仅支持提供 /proc 的 Linux 主机。"
 				} else {
-					d.monitorStatus = text
+					d.monitorData, d.monitorStatus = display, display.text
 				}
 			})
 			if err != nil {

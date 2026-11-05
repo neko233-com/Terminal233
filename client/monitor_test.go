@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/plugins/terminal"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestMonitorOutputValidation(t *testing.T) {
@@ -127,11 +131,46 @@ func TestMonitorRootDiskParsingAndMissingDisk(t *testing.T) {
 	if err != nil || !strings.Contains(sample.summary, "根磁盘 3.0 / 10.0 GiB") {
 		t.Fatalf("disk not parsed: %s %v", sample.summary, err)
 	}
+	display := makeMonitorDisplay(sample, monitorSample{})
+	if !display.hasMemory || display.memory != 0.625 || !display.hasDisk || display.disk != 0.3 || display.hasCPU {
+		t.Fatalf("incorrect gauge values: %+v", display)
+	}
 	for _, input := range []string{base, base + "DISK\nno df available\n", strings.Replace(valid, "3145728 7340032", "99999999 0", 1), strings.Replace(valid, "30% /", "30% /other", 1)} {
 		sample, err = parseMonitorSample(input)
 		if err != nil || strings.Contains(sample.summary, "根磁盘") {
 			t.Fatalf("invalid or missing disk should be omitted: %s %v", sample.summary, err)
 		}
+	}
+}
+
+func TestMonitorGaugesFollowAvailabilityAndWindowSize(t *testing.T) {
+	left, peer := net.Pipe()
+	defer peer.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{workspace: "terminal", term: term, currentSession: 1, monitorSession: 1, monitorCancel: func() {}, monitorStatus: "状态", monitorData: monitorDisplay{cpu: 0.5, memory: 0.625, disk: 0.3, hasCPU: true, hasMemory: true, hasDisk: true}, sessions: []*workspaceSession{{id: 1, label: "local", term: term}}}
+	view := ui.NewTester(d.view, 1500, 900)
+	for _, label := range []string{"CPU 使用率 50.0%", "内存 使用率 62.5%", "根磁盘 使用率 30.0%"} {
+		if !view.HasText(label) {
+			t.Fatalf("gauge missing: %s", label)
+		}
+	}
+	d.monitorData.hasCPU = false
+	view.Frame()
+	if view.HasText("CPU 使用率 50.0%") {
+		t.Fatal("stale CPU gauge remained visible")
+	}
+	view.SetSize(640, 480)
+	if view.HasText("内存 使用率 62.5%") {
+		t.Fatal("gauges consumed space in compact layout")
+	}
+	d.stopMonitor()
+	view.SetSize(1500, 900)
+	if view.HasText("内存 使用率 62.5%") || d.monitorData.hasMemory {
+		t.Fatal("closed monitor retained gauges")
 	}
 }
 

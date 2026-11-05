@@ -42,9 +42,13 @@ func TestMonitorCommandOnWSL(t *testing.T) {
 		}
 		sample.at = time.Now()
 		if i > 0 {
-			text := formatMonitorSample(sample, previous)
+			display := makeMonitorDisplay(sample, previous)
+			text := display.text
 			if !strings.Contains(text, "CPU ") || !strings.Contains(text, "KiB/s") {
 				t.Fatalf("Linux samples did not produce rates: %s", text)
+			}
+			if !display.hasCPU || !display.hasMemory || !display.hasDisk || display.cpu < 0 || display.cpu > 1 || display.memory < 0 || display.memory > 1 || display.disk < 0 || display.disk > 1 {
+				t.Fatalf("invalid Linux gauge values: %+v", display)
 			}
 		}
 		previous = sample
