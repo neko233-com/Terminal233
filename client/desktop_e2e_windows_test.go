@@ -227,6 +227,17 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "5.0 / 8.0 GiB") || !strings.Contains(tree, "1.25") {
 		t.Fatalf("SSH monitor did not display test data: %s", tree)
 	}
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "CPU 50.0%") && strings.Contains(tree, "KiB/s") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "CPU 50.0%") || !strings.Contains(tree, "KiB/s") {
+		t.Fatalf("SSH monitor rates did not update: %s", tree)
+	}
 	call("act", map[string]any{"key": "monitor-toggle", "action": "press"})
 	// Exercise the native forwarding controls through the in-process SSH test server.
 	forwardTarget, err := net.Listen("tcp4", "127.0.0.1:0")

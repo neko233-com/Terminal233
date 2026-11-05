@@ -538,7 +538,11 @@ func (d *desktop) view(c *ui.Context) {
 						ui.Text(c, "选择连接，或打开本机终端").FontSize(18).TextColor(t.TextMuted)
 					} else {
 						if d.monitorCancel != nil {
-							ui.Text(c, d.monitorStatus).FontSize(12).Wrap()
+							if width < 900 {
+								ui.ScrollHorizontal(c).Height(20).FillWidth().Children(func() { ui.Text(c, d.monitorStatus).FontSize(12) })
+							} else {
+								ui.Text(c, d.monitorStatus).FontSize(12).Wrap()
+							}
 						}
 						if d.quickOpen {
 							if compactAuxiliaryPanels {
@@ -676,7 +680,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.44"
+const version = "0.3.45"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

@@ -55,6 +55,7 @@ func testSSHServerWithSlowSFTP(t *testing.T, slow *atomic.Bool, authorized ...ss
 		t.Fatal(err)
 	}
 	attempts := &atomic.Int32{}
+	monitorReads := &atomic.Uint64{}
 	config := &ssh.ServerConfig{PasswordCallback: func(_ ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 		attempts.Add(1)
 		if string(password) != "test-password" {
@@ -143,7 +144,8 @@ func testSSHServerWithSlowSFTP(t *testing.T, slow *atomic.Bool, authorized ...ss
 									continue
 								}
 								_ = req.Reply(true, nil)
-								_, _ = channel.Write([]byte("UP 7200.0 0\nLOAD 1.25 0.50 0.25 1/2 3\nMEM\nMemTotal: 8388608 kB\nMemAvailable: 3145728 kB\n"))
+								step := monitorReads.Add(1)
+								_, _ = fmt.Fprintf(channel, "UP 7200.0 0\nLOAD 1.25 0.50 0.25 1/2 3\nMEM\nMemTotal: 8388608 kB\nMemAvailable: 3145728 kB\nCPU cpu %d 0 %d %d 0 0 0 0\nNET\neth0: %d 0 0 0 0 0 0 0 %d 0 0 0 0 0 0 0\n", 100+25*step, 100+25*step, 800+50*step, 1024+5120*step, 2048+10240*step)
 								_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
 								return
 							case "subsystem":
