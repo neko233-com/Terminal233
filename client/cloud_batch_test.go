@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +36,7 @@ func TestCloudBatchStopsAtConflictAndRefreshes(t *testing.T) {
 	}
 	c.http.Transport, c.token, c.conditionalDeletes = server.Client().Transport, "token", true
 	rev := "2026-01-01T00:00:00Z"
-	result := deleteCloudBatch(c, []cloudAccount{{ID: "one", UpdatedAt: rev}, {ID: "two", UpdatedAt: rev}, {ID: "three", UpdatedAt: rev}})
+	result := deleteCloudBatch(context.Background(), c, []cloudAccount{{ID: "one", UpdatedAt: rev}, {ID: "two", UpdatedAt: rev}, {ID: "three", UpdatedAt: rev}})
 	if result.completed != 1 || result.mutationErr == nil || result.refreshErr != nil || len(deleted) != 2 || len(result.accounts) != 1 {
 		t.Fatalf("unexpected partial result: %+v, calls %v", result, deleted)
 	}
@@ -49,9 +50,57 @@ func TestCloudBatchStopsAtConflictAndRefreshes(t *testing.T) {
 		t.Fatal("preflight failure was presented as a possibly committed write")
 	}
 	d.accounts = []cloudAccount{{ID: "old"}}
-	d.finishCloudBatch("delete", cloudBatchResult{completed: 1})
+	d.finishCloudBatch("delete", cloudBatchResult{completed: 1, refreshDone: true})
 	if len(d.accounts) != 0 || d.cloudListStale {
 		t.Fatal("an empty successful refresh retained a deleted connection")
+	}
+}
+
+func TestCloudBatchCancelStopsBetweenRequests(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`[{"id":"two"}]`))
+			return
+		}
+		calls++
+		cancel()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	c, err := newCloudClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.http.Transport, c.token = server.Client().Transport, "token"
+	result := deleteCloudBatch(ctx, c, []cloudAccount{{ID: "one"}, {ID: "two"}})
+	if !result.cancelled || result.completed != 1 || calls != 1 || !result.refreshDone || result.refreshErr != nil {
+		t.Fatalf("cancellation did not stop after the in-flight request: %+v calls=%d", result, calls)
+	}
+	d := &desktop{}
+	d.finishCloudBatch("delete", result)
+	if d.cloudListStale || len(d.accounts) != 1 || !strings.Contains(d.status, "已取消；已确认删除 1 条") {
+		t.Fatalf("cancellation outcome not shown: %s", d.status)
+	}
+	d.accounts = []cloudAccount{{ID: "original"}}
+	d.finishCloudBatch("copy", cloudBatchResult{cancelled: true})
+	if len(d.accounts) != 1 || d.cloudListStale {
+		t.Fatal("cancel before preflight cleared existing accounts")
+	}
+}
+
+func TestCloudBatchCancelButton(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &desktop{workspace: "connections", busy: true, cloudBatchCancel: cancel}
+	view := ui.NewTester(d.view, 1400, 1400)
+	if err := view.Click("取消云端批量操作"); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() == nil || !strings.Contains(d.status, "等待当前请求") {
+		t.Fatal("cancel button did not request cancellation")
 	}
 }
 

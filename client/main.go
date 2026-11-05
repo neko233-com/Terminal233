@@ -56,6 +56,7 @@ type desktop struct {
 	confirmProfileBatchDelete                                                               bool
 	checkedCloud                                                                            map[string]cloudAccount
 	confirmCloudBatchDelete                                                                 bool
+	cloudBatchCancel                                                                        context.CancelFunc
 	profileLabel                                                                            string
 	profileFilter                                                                           string
 	profileSource                                                                           string
@@ -708,7 +709,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.58"
+const version = "0.3.59"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

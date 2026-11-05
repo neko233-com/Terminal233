@@ -48,22 +48,31 @@ func (d *desktop) selectVisibleCloudAccounts() {
 type cloudBatchResult struct {
 	completed               int
 	accounts                []cloudAccount
+	cancelled, refreshDone  bool
 	preflightErr            error
 	mutationErr, refreshErr error
 }
 
 // A network failure can leave a request's outcome unknown. Stop immediately
 // and refresh; never retry or report a partial operation as fully successful.
-func deleteCloudBatch(c *cloudClient, items []cloudAccount) cloudBatchResult {
+func deleteCloudBatch(ctx context.Context, c *cloudClient, items []cloudAccount) cloudBatchResult {
 	result := cloudBatchResult{}
 	for _, item := range items {
+		if ctx.Err() != nil {
+			result.cancelled = true
+			break
+		}
 		if err := c.removeWithRevision(item.ID, item.UpdatedAt); err != nil {
 			result.mutationErr = err
 			break
 		}
 		result.completed++
 	}
+	if result.cancelled && result.completed == 0 {
+		return result
+	}
 	result.accounts, result.refreshErr = c.list()
+	result.refreshDone = true
 	return result
 }
 
@@ -101,19 +110,23 @@ func (d *desktop) cloudBatch(action string) {
 	d.clearCloudBatch()
 	d.busy = true
 	d.status = "正在处理云端连接…"
+	ctx, cancel := context.WithCancel(context.Background())
+	d.cloudBatchCancel = cancel
 	go func() {
+		defer cancel()
 		var result cloudBatchResult
 		if action == "copy" {
 			for i := range items {
 				items[i].Label += "（副本）"
 			}
-			copied := importCloudAccounts(context.Background(), client, items)
-			result = cloudBatchResult{completed: copied.imported, accounts: copied.accounts, preflightErr: copied.preflightErr, mutationErr: copied.mutationErr, refreshErr: copied.refreshErr}
+			copied := importCloudAccounts(ctx, client, items)
+			result = cloudBatchResult{completed: copied.imported, accounts: copied.accounts, cancelled: copied.cancelled, refreshDone: copied.preflightDone, preflightErr: copied.preflightErr, mutationErr: copied.mutationErr, refreshErr: copied.refreshErr}
 		} else {
-			result = deleteCloudBatch(client, items)
+			result = deleteCloudBatch(ctx, client, items)
 		}
 		d.win.Update(func() {
 			d.busy = false
+			d.cloudBatchCancel = nil
 			d.finishCloudBatch(action, result)
 		})
 	}()
@@ -125,7 +138,7 @@ func (d *desktop) finishCloudBatch(action string, result cloudBatchResult) {
 	if action == "delete" {
 		verb = "删除"
 	}
-	if result.preflightErr == nil && result.refreshErr == nil {
+	if result.refreshDone && result.preflightErr == nil && result.refreshErr == nil {
 		d.accounts = result.accounts
 	}
 	d.confirmCloudDelete, d.confirmCloudDeleteVersion = "", ""
@@ -143,6 +156,9 @@ func (d *desktop) finishCloudBatch(action string, result cloudBatchResult) {
 	} else if result.refreshErr != nil {
 		d.cloudListStale = true
 		d.status = fmt.Sprintf("已%s %d 条，但列表刷新失败，请先刷新：%v", verb, result.completed, result.refreshErr)
+	} else if result.cancelled {
+		d.cloudListStale = false
+		d.status = fmt.Sprintf("已取消；已确认%s %d 条云端连接。", verb, result.completed)
 	} else {
 		d.cloudListStale = false
 		d.status = fmt.Sprintf("已%s %d 条云端连接", verb, result.completed)

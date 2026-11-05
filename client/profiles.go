@@ -132,6 +132,15 @@ func (d *desktop) profileView(c *ui.Context) {
 		width -= 235
 	}
 	compact := width < 600
+	if d.cloudBatchCancel != nil {
+		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+			ui.Text(c, "云端批量操作进行中；取消会等待当前请求结束。").Wrap()
+			if ui.Button(c.Key("cloud-batch-cancel"), "取消云端批量操作").Clicked() {
+				d.cloudBatchCancel()
+				d.status = "正在取消；请等待当前请求和列表刷新结束。"
+			}
+		})
+	}
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 		title := "连接列表"
 		if d.profileRecent {

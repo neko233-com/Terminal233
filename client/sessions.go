@@ -239,6 +239,9 @@ func (d *desktop) closeAllSessions() {
 	if d.archiveCancel != nil {
 		d.archiveCancel()
 	}
+	if d.cloudBatchCancel != nil {
+		d.cloudBatchCancel()
+	}
 	if d.updateCancel != nil {
 		d.updateCancel()
 	}
