@@ -52,6 +52,7 @@ func (d *desktop) activateSession(id int) {
 		d.term, d.shell, d.active = s.term, s.shell, s.active
 		d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile = s.fileDir, s.fileLocal, s.fileStatus, s.selectedFile
 		d.fileFilter = s.fileFilter
+		d.fileNewDirectory = ""
 		d.files, d.confirmDelete = s.files, ""
 		d.workspace = "terminal"
 		d.status = "当前会话：" + s.label

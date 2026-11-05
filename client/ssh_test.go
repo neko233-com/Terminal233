@@ -230,6 +230,18 @@ func TestSFTPTransferAndExplicitDelete(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "remote", "source.txt")); !os.IsNotExist(err) {
 		t.Fatalf("file still exists: %v", err)
 	}
+	if err := makeDirectory(shell, remoteDir, "新目录"); err != nil {
+		t.Fatal(err)
+	}
+	if err := makeDirectory(shell, remoteDir, "新目录"); err == nil {
+		t.Fatal("existing remote directory was replaced")
+	}
+	if err := makeDirectory(shell, remoteDir, "../outside"); err == nil {
+		t.Fatal("remote traversal accepted")
+	}
+	if info, err := os.Stat(filepath.Join(root, "remote", "新目录")); err != nil || !info.IsDir() {
+		t.Fatal("remote directory was not created")
+	}
 }
 
 func TestSFTPStreamsLargeFilesAndCleansCancelledTransfers(t *testing.T) {

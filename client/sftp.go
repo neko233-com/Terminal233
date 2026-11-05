@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/pkg/sftp"
 )
@@ -53,6 +54,25 @@ type remoteFile struct {
 	IsLink   bool
 	Size     int64
 	Modified int64
+}
+
+func validDirectoryName(name string) bool {
+	if name == "" || name == "." || name == ".." || len(name) > 255 || strings.ContainsAny(name, "/\\:\x00\r\n") || !filepath.IsLocal(name) {
+		return false
+	}
+	return strings.TrimSpace(name) == name && strings.IndexFunc(name, unicode.IsControl) == -1
+}
+
+func makeDirectory(shell *remoteShell, dir, name string) error {
+	if !validDirectoryName(name) {
+		return errors.New("请输入单个有效目录名称")
+	}
+	if shell == nil {
+		return os.Mkdir(filepath.Join(dir, name), 0700)
+	}
+	return withSFTP(shell, func(client *sftp.Client) error {
+		return client.Mkdir(path.Join(dir, name))
+	})
 }
 
 func withSFTP(shell *remoteShell, f func(*sftp.Client) error) error {

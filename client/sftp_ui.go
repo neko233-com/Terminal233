@@ -246,6 +246,41 @@ func (d *desktop) removeSelected() {
 		})
 	}()
 }
+
+func (d *desktop) createDirectory() {
+	if d.busy || d.term == nil {
+		return
+	}
+	name, shell, dir, sessionID := d.fileNewDirectory, d.shell, d.fileDir, d.currentSession
+	if !validDirectoryName(name) {
+		d.fileStatus = "请输入单个有效目录名称"
+		return
+	}
+	d.busy = true
+	d.fileStatus = "正在创建目录…"
+	go func() {
+		err := makeDirectory(shell, dir, name)
+		d.win.Update(func() {
+			d.busy = false
+			if sessionID != d.currentSession || shell != d.shell {
+				return
+			}
+			if err != nil {
+				d.fileStatus = "创建目录失败：" + transferErrorText(err)
+				return
+			}
+			if dir != d.fileDir {
+				d.fileStatus = "目录已在先前位置创建；当前目录未更改"
+				return
+			}
+			if d.fileNewDirectory == name {
+				d.fileNewDirectory = ""
+			}
+			d.fileStatus = "目录已创建：" + name
+			d.refreshFiles()
+		})
+	}()
+}
 func (d *desktop) fileView(c *ui.Context, compact bool) {
 	local := d.term != nil && d.shell == nil
 	title, help := "远程文件", "选择目录浏览，拖入单个文件上传；删除前需要再次确认。"
@@ -254,7 +289,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	}
 	ui.Text(c, title).FontSize(16).Bold()
 	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
-	ui.TextInput(c.Key("remote-dir"), &d.fileDir).Label("当前目录").Placeholder("目录路径").OnChange(func() { d.selectedFile = ""; d.confirmDelete = ""; d.files = nil })
+	ui.TextInput(c.Key("remote-dir"), &d.fileDir).Label("当前目录").Placeholder("目录路径").OnChange(func() { d.selectedFile = ""; d.confirmDelete = ""; d.fileNewDirectory = ""; d.files = nil })
 	ui.Row(c).Gap(8).Children(func() {
 		if ui.Button(c.Key("file-parent"), "上一级").Disabled(d.busy || d.term == nil).Clicked() {
 			if local {
@@ -262,7 +297,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			} else {
 				d.fileDir = path.Join(d.fileDir, "..")
 			}
-			d.selectedFile, d.confirmDelete, d.fileStatus = "", "", ""
+			d.selectedFile, d.confirmDelete, d.fileStatus, d.fileNewDirectory = "", "", "", ""
 			d.files = nil
 			d.refreshFiles()
 		}
@@ -276,6 +311,12 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		ui.Text(c, "连接 SSH 或打开本机终端后可浏览文件。").TextColor(c.Theme().TextMuted).Wrap()
 	}
 	d.fileActionsView(c, local, compact)
+	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
+		ui.TextInput(c.Key("new-directory-name"), &d.fileNewDirectory).Label("新目录名称").Placeholder("输入目录名称").Grow(1)
+		if ui.Button(c.Key("new-directory-create"), "创建目录").Disabled(d.busy || d.term == nil || d.fileNewDirectory == "").Clicked() {
+			d.createDirectory()
+		}
+	})
 	ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录")
 	if len(d.files) > 0 {
 		ui.Row(c).FillWidth().Gap(12).Padding(8, 12).Background(c.Theme().Surface).Children(func() {
@@ -318,6 +359,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			if row.Clicked() {
 				d.confirmDelete = ""
 				if f.IsDir {
+					d.fileNewDirectory = ""
 					if local {
 						d.fileDir = filepath.Join(d.fileDir, f.Name)
 					} else {

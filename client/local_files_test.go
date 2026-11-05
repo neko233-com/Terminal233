@@ -78,3 +78,21 @@ func TestCancelledLocalCopyRemovesPartialTarget(t *testing.T) {
 		t.Fatalf("partial target remains: %v", err)
 	}
 }
+
+func TestCreateLocalDirectoryRejectsTraversalAndExistingEntries(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"", ".", "..", "../outside", "a/b", `a\b`, "a:b", "bad\tname", " name "} {
+		if err := makeDirectory(nil, root, name); err == nil {
+			t.Fatalf("accepted directory name %q", name)
+		}
+	}
+	if err := makeDirectory(nil, root, "新目录"); err != nil {
+		t.Fatal(err)
+	}
+	if err := makeDirectory(nil, root, "新目录"); err == nil {
+		t.Fatal("existing directory was replaced")
+	}
+	if info, err := os.Stat(filepath.Join(root, "新目录")); err != nil || !info.IsDir() {
+		t.Fatal("directory was not created")
+	}
+}
