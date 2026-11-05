@@ -45,6 +45,9 @@ func TestPanelSizesSaveResetAndMerge(t *testing.T) {
 	}
 	d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = 68, 43, 57
 	view := ui.NewTester(d.view, 1200, 900)
+	if err := view.Click("终端设置"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("保存面板尺寸"); err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +148,9 @@ func TestTerminalThemesPersistAndApplyToExistingAndNewSessions(t *testing.T) {
 		t.Fatal("follow-interface theme did not restore defaults")
 	}
 	view.Frame()
+	if err := view.Click("终端设置"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("选择终端配色"); err != nil {
 		t.Fatal(err)
 	}

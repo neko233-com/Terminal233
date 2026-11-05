@@ -98,6 +98,9 @@ func TestGroupControlsAndLegacyProfileGroups(t *testing.T) {
 	if err := view.Click("分组：legacy"); err != nil {
 		t.Fatal(err)
 	}
+	if err := view.Click("分组管理"); err != nil {
+		t.Fatal(err)
+	}
 	if !view.HasText("server") || !view.HasText("创建子分组") {
 		t.Fatal("group selection did not show descendant or controls")
 	}
@@ -194,5 +197,19 @@ func TestGroupTreeCanCollapseAndExpand(t *testing.T) {
 	}
 	if !view.HasText("分组：parent/child") {
 		t.Fatal("expand did not restore child")
+	}
+}
+
+func TestGroupContextMenuOpensManagement(t *testing.T) {
+	d := &desktop{workspace: "connections", profileGroups: []string{"parent", "parent/child"}}
+	view := ui.NewTester(d.view, 1400, 1400)
+	if err := view.RightClick("分组：parent/child"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.ChooseMenuItem("管理分组"); err != nil {
+		t.Fatal(err)
+	}
+	if d.profileFilter != "parent/child" || !d.showGroupControls || !view.HasText("重命名当前分组") {
+		t.Fatal("group menu did not open selected group management")
 	}
 }

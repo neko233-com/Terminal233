@@ -13,6 +13,17 @@ func groupWithin(group, parent string) bool {
 	return group == parent || strings.HasPrefix(group, parent+"/")
 }
 
+func groupDepth(group string) int {
+	return min(strings.Count(group, "/"), 8)
+}
+
+func groupLeaf(group string) string {
+	if i := strings.LastIndex(group, "/"); i >= 0 && i+1 < len(group) {
+		return group[i+1:]
+	}
+	return group
+}
+
 func groupsWithChildren(groups []string) map[string]bool {
 	parents := make(map[string]bool)
 	for _, group := range groups {

@@ -11,6 +11,14 @@ import (
 )
 
 type profileID string
+
+func workspaceSidebarWidth(width float32) float32 {
+	if width < 800 {
+		return 170
+	}
+	return 235
+}
+
 type profile struct {
 	ID            profileID
 	Group, Label  string
@@ -129,7 +137,7 @@ func (d *desktop) openProfileConnection(p profile) {
 func (d *desktop) profileView(c *ui.Context) {
 	width, _ := c.Size()
 	if !d.sidebarCollapsed {
-		width -= 235
+		width -= workspaceSidebarWidth(width)
 	}
 	compact := width < 600
 	if d.cloudBatchCancel != nil {
@@ -173,7 +181,19 @@ func (d *desktop) profileView(c *ui.Context) {
 	}
 	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
 	if d.profileSource != "cloud" {
-		d.groupControls(c)
+		label := "分组管理"
+		if d.showGroupControls {
+			label = "收起分组管理"
+		}
+		ui.Row(c).FillWidth().Children(func() {
+			if ui.Button(c.Key("group-controls-toggle"), label).Clicked() {
+				d.showGroupControls = !d.showGroupControls
+				d.confirmGroupDelete = false
+			}
+		})
+		if d.showGroupControls {
+			d.groupControls(c)
+		}
 	}
 	if d.status != "" {
 		ui.Text(c, d.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
@@ -221,42 +241,53 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.profileFavorites, d.profileRecent = false, false
 		}
 	})
-	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-		for _, column := range []struct{ key, label string }{{"name", "名称排序"}, {"host", "地址排序"}} {
-			label := column.label
-			if d.profileSort == column.key && !d.profileRecent {
-				if d.profileSortDescending {
-					label += " ↓"
-				} else {
-					label += " ↑"
+	if compact {
+		label := "更多连接操作"
+		if d.showCompactProfileTools {
+			label = "收起连接操作"
+		}
+		if ui.Button(c.Key("profile-tools-toggle"), label).Clicked() {
+			d.showCompactProfileTools = !d.showCompactProfileTools
+		}
+	}
+	if !compact || d.showCompactProfileTools {
+		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+			for _, column := range []struct{ key, label string }{{"name", "名称排序"}, {"host", "地址排序"}} {
+				label := column.label
+				if d.profileSort == column.key && !d.profileRecent {
+					if d.profileSortDescending {
+						label += " ↓"
+					} else {
+						label += " ↑"
+					}
+				}
+				if ui.Button(c.Key("profile-sort-"+column.key), label).Disabled(d.profileRecent).Clicked() {
+					if d.profileSort == column.key {
+						d.profileSortDescending = !d.profileSortDescending
+					} else {
+						d.profileSort, d.profileSortDescending = column.key, false
+					}
 				}
 			}
-			if ui.Button(c.Key("profile-sort-"+column.key), label).Disabled(d.profileRecent).Clicked() {
-				if d.profileSort == column.key {
-					d.profileSortDescending = !d.profileSortDescending
-				} else {
-					d.profileSort, d.profileSortDescending = column.key, false
-				}
+			if ui.Button(c.Key("profile-sort-custom"), "自定义顺序").Disabled(d.profileRecent || d.profileSort == "").Clicked() {
+				d.profileSort, d.profileSortDescending = "", false
 			}
-		}
-		if ui.Button(c.Key("profile-sort-custom"), "自定义顺序").Disabled(d.profileRecent || d.profileSort == "").Clicked() {
-			d.profileSort, d.profileSortDescending = "", false
-		}
-	})
-	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-		if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.profileSource == "cloud" || d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
-			d.moveSelectedProfile(-1)
-		}
-		if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.profileSource == "cloud" || d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
-			d.moveSelectedProfile(1)
-		}
-		if d.profileSource != "cloud" && ui.Button(c.Key("profile-batch-select-visible"), "勾选当前显示的本机连接").Disabled(d.busy || len(d.profiles) == 0).Clicked() {
-			d.selectVisibleProfiles()
-		}
-		if d.cloud != nil && d.profileSource != "local" && ui.Button(c.Key("cloud-batch-select-visible"), "勾选当前显示的云端连接").Disabled(d.busy || d.cloudListStale).Clicked() {
-			d.selectVisibleCloudAccounts()
-		}
-	})
+		})
+		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+			if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.profileSource == "cloud" || d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
+				d.moveSelectedProfile(-1)
+			}
+			if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.profileSource == "cloud" || d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
+				d.moveSelectedProfile(1)
+			}
+			if d.profileSource != "cloud" && ui.Button(c.Key("profile-batch-select-visible"), "勾选当前显示的本机连接").Disabled(d.busy || len(d.profiles) == 0).Clicked() {
+				d.selectVisibleProfiles()
+			}
+			if d.cloud != nil && d.profileSource != "local" && ui.Button(c.Key("cloud-batch-select-visible"), "勾选当前显示的云端连接").Disabled(d.busy || d.cloudListStale).Clicked() {
+				d.selectVisibleCloudAccounts()
+			}
+		})
+	}
 	if d.profileSource != "cloud" && len(d.checkedProfiles) > 0 {
 		ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, fmt.Sprintf("已勾选 %d 个本机连接（包括筛选隐藏项）", len(d.checkedProfiles))).Wrap()
@@ -314,11 +345,18 @@ func (d *desktop) profileView(c *ui.Context) {
 	showLocal := d.profileSource != "cloud" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
 		(query == "" || strings.Contains("本机终端 local terminal powershell", query))
 	if showLocal {
-		ui.Column(c).FillWidth().Padding(16).Gap(6).Background(c.Theme().Surface).Radius(8).Children(func() {
-			ui.Text(c, "本机终端").FontSize(16).Bold()
-			ui.Text(c, "内置本机连接，通过 PowerShell 直接使用这台电脑。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-			ui.Button(c.Key("profile-local-terminal"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
-		})
+		if compact {
+			ui.Row(c).FillWidth().Padding(8, 12).Gap(8).AlignItems(ui.Center).Background(c.Theme().Surface).Radius(8).Children(func() {
+				ui.Text(c, "本机终端").Bold().Grow(1)
+				ui.Button(c.Key("profile-local-terminal"), "打开").Label("打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
+			})
+		} else {
+			ui.Column(c).FillWidth().Padding(16).Gap(6).Background(c.Theme().Surface).Radius(8).Children(func() {
+				ui.Text(c, "本机终端").FontSize(16).Bold()
+				ui.Text(c, "内置本机连接，通过 PowerShell 直接使用这台电脑。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+				ui.Button(c.Key("profile-local-terminal"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
+			})
+		}
 	}
 	if d.profileSource != "cloud" && len(d.profiles) == 0 {
 		ui.Column(c).FillWidth().Padding(28).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {

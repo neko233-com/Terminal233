@@ -9,6 +9,21 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func TestCompactConnectionListKeepsFirstConnectionVisible(t *testing.T) {
+	d := &desktop{workspace: "connections", profiles: []profile{{ID: "1", Label: "small-window-test", Settings: connectionSettings{Host: "example.test", Port: "22", User: "alice"}}}}
+	view := ui.NewTester(d.view, 640, 480)
+	row, ok := view.Find("small-window-test · example.test:22")
+	if !ok || row.Y+row.H > 480 {
+		t.Fatalf("first connection not visible in compact window: %+v", row)
+	}
+	if err := view.Click("更多连接操作"); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasText("名称排序") || !view.HasText("勾选当前显示的本机连接") {
+		t.Fatal("compact tools could not be expanded")
+	}
+}
+
 func TestTerminalRemainsVisibleWithPanelsAtMinimumWindow(t *testing.T) {
 	left, right := net.Pipe()
 	defer right.Close()
@@ -106,6 +121,9 @@ func TestSplitLayoutChoiceAndPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := ui.NewTester(d.view, 1500, 900)
+	if err := view.Click("终端设置"); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		label, id string
 		stacked   bool

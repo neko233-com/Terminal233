@@ -53,6 +53,8 @@ type desktop struct {
 	profileGroups                                                                           []string
 	foldedGroups                                                                            map[string]bool
 	profileFormat                                                                           int
+	showGroupControls, showTerminalSettings                                                 bool
+	showCompactProfileTools                                                                 bool
 	groupInput                                                                              string
 	confirmGroupDelete                                                                      bool
 	profileSearch, profileGroup, selectedProfile, quickConnect                              string
@@ -315,7 +317,7 @@ func (d *desktop) view(c *ui.Context) {
 		})
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
 			if !d.sidebarCollapsed {
-				ui.Scroll(c).Width(235).FillHeight().Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
+				ui.Scroll(c).Width(workspaceSidebarWidth(width)).FillHeight().Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
 					ui.Column(c).Padding(16).Gap(8).Children(func() {
 						ui.Text(c, "工作区").FontSize(12).TextColor(t.TextMuted)
 						if workspaceButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
@@ -337,35 +339,44 @@ func (d *desktop) view(c *ui.Context) {
 						if workspaceButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
 							d.workspace = "cloud"
 						}
-						ui.Text(c, "终端字号").FontSize(12).TextColor(t.TextMuted)
-						ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-							if ui.Button(c.Key("font-smaller"), "A−").Label("缩小终端字号").Disabled(d.currentTerminalFontSize() <= minTerminalFontSize).Clicked() {
-								d.changeTerminalFont(terminal.Zoom{Steps: -1})
-							}
-							ui.Text(c, fmt.Sprint(d.currentTerminalFontSize())).Grow(1)
-							if ui.Button(c.Key("font-larger"), "A+").Label("放大终端字号").Disabled(d.currentTerminalFontSize() >= maxTerminalFontSize).Clicked() {
-								d.changeTerminalFont(terminal.Zoom{Steps: 1})
-							}
-							if ui.Button(c.Key("font-reset"), "重置").Disabled(d.currentTerminalFontSize() == defaultTerminalFontSize).Clicked() {
-								d.changeTerminalFont(terminal.Zoom{Reset: true})
-							}
-						})
-						ui.Text(c, "终端配色").FontSize(12).TextColor(t.TextMuted)
-						selectedTheme := terminalThemeLabel(d.terminalTheme)
-						if ui.Select(c.Key("terminal-theme"), &selectedTheme, terminalThemeLabels()).Label("选择终端配色").FillWidth().Changed() {
-							d.changeTerminalTheme(terminalThemeID(selectedTheme))
+						settingsLabel := "终端设置"
+						if d.showTerminalSettings {
+							settingsLabel = "收起终端设置"
 						}
-						ui.Text(c, "终端分屏布局").FontSize(12).TextColor(t.TextMuted)
-						layout := splitLayoutLabel(d.splitLayout)
-						if ui.Select(c.Key("split-layout"), &layout, []string{"自动布局", "左右分屏", "上下分屏"}).Label("选择分屏布局").FillWidth().Changed() {
-							d.changeSplitLayout(splitLayoutID(layout))
+						if ui.Button(c.Key("terminal-settings-toggle"), settingsLabel).Clicked() {
+							d.showTerminalSettings = !d.showTerminalSettings
 						}
-						if ui.Button(c.Key("save-panel-sizes"), "保存面板尺寸").Clicked() {
-							d.savePanelSizes()
-						}
-						if ui.Button(c.Key("reset-panel-sizes"), "恢复默认面板尺寸").Clicked() {
-							d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = 0, 0, 0
-							d.savePanelSizes()
+						if d.showTerminalSettings {
+							ui.Text(c, "终端字号").FontSize(12).TextColor(t.TextMuted)
+							ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+								if ui.Button(c.Key("font-smaller"), "A−").Label("缩小终端字号").Disabled(d.currentTerminalFontSize() <= minTerminalFontSize).Clicked() {
+									d.changeTerminalFont(terminal.Zoom{Steps: -1})
+								}
+								ui.Text(c, fmt.Sprint(d.currentTerminalFontSize())).Grow(1)
+								if ui.Button(c.Key("font-larger"), "A+").Label("放大终端字号").Disabled(d.currentTerminalFontSize() >= maxTerminalFontSize).Clicked() {
+									d.changeTerminalFont(terminal.Zoom{Steps: 1})
+								}
+								if ui.Button(c.Key("font-reset"), "重置").Disabled(d.currentTerminalFontSize() == defaultTerminalFontSize).Clicked() {
+									d.changeTerminalFont(terminal.Zoom{Reset: true})
+								}
+							})
+							ui.Text(c, "终端配色").FontSize(12).TextColor(t.TextMuted)
+							selectedTheme := terminalThemeLabel(d.terminalTheme)
+							if ui.Select(c.Key("terminal-theme"), &selectedTheme, terminalThemeLabels()).Label("选择终端配色").FillWidth().Changed() {
+								d.changeTerminalTheme(terminalThemeID(selectedTheme))
+							}
+							ui.Text(c, "终端分屏布局").FontSize(12).TextColor(t.TextMuted)
+							layout := splitLayoutLabel(d.splitLayout)
+							if ui.Select(c.Key("split-layout"), &layout, []string{"自动布局", "左右分屏", "上下分屏"}).Label("选择分屏布局").FillWidth().Changed() {
+								d.changeSplitLayout(splitLayoutID(layout))
+							}
+							if ui.Button(c.Key("save-panel-sizes"), "保存面板尺寸").Clicked() {
+								d.savePanelSizes()
+							}
+							if ui.Button(c.Key("reset-panel-sizes"), "恢复默认面板尺寸").Clicked() {
+								d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = 0, 0, 0
+								d.savePanelSizes()
+							}
 						}
 						ui.Text(c, "连接").FontSize(12).TextColor(t.TextMuted)
 						connectionCount := len(d.profiles) + 1
@@ -417,6 +428,9 @@ func (d *desktop) view(c *ui.Context) {
 								continue
 							}
 							ui.Row(c).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
+								if depth := groupDepth(name); depth > 0 {
+									ui.Box(c).Width(float32(depth * 10)).Shrink(0)
+								}
 								if parents[name] {
 									label, title := "▾", "折叠分组："+name
 									if d.foldedGroups[name] {
@@ -429,7 +443,14 @@ func (d *desktop) view(c *ui.Context) {
 										d.foldedGroups[name] = !d.foldedGroups[name]
 									}
 								}
-								button := ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", name, counts[name])).Label("分组：" + name).Disabled(d.busy).Grow(1)
+								button := ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", groupLeaf(name), counts[name])).Label("分组：" + name).Disabled(d.busy).Grow(1)
+								button.ContextMenu(func(menu *ui.Menu) {
+									if menu.Item("管理分组").Chosen() {
+										d.workspace, d.editConnection, d.profileSource = "connections", false, "local"
+										d.profileFilter, d.showGroupControls, d.confirmGroupDelete = name, true, false
+										d.profileFavorites, d.profileRecent = false, false
+									}
+								})
 								if button.Clicked() {
 									d.workspace = "connections"
 									d.editConnection = false
@@ -730,7 +751,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.61"
+const version = "0.3.62"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
