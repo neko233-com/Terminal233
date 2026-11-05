@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -21,6 +22,7 @@ type Config struct {
 	OfficialToken         string
 	AllowedOrigins        map[string]struct{}
 	TrustCloudflareTunnel bool
+	EdgeHMACKey           []byte
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -58,6 +60,13 @@ func ConfigFromEnv() (Config, error) {
 			return Config{}, errors.New("TERMINAL233_TRUST_CLOUDFLARE_TUNNEL 必须是布尔值")
 		}
 		cfg.TrustCloudflareTunnel = trusted
+	}
+	if value := strings.TrimSpace(os.Getenv("TERMINAL233_EDGE_HMAC_KEY")); value != "" {
+		key, err := hex.DecodeString(value)
+		if err != nil || len(key) != 32 {
+			return Config{}, errors.New("TERMINAL233_EDGE_HMAC_KEY 必须是 32 字节密钥的十六进制编码")
+		}
+		cfg.EdgeHMACKey = key
 	}
 	cfg.AllowedOrigins = parseOrigins(os.Getenv("TERMINAL233_ALLOWED_ORIGINS"))
 	return cfg, nil

@@ -11,3 +11,5 @@
 ## Cloudflare Tunnel 模板
 
 `deploy/cloudflared.yml.example` 是单用途隧道配置模板，不包含凭据。需要专用、持续在线的源站，先在该主机运行并核验 Go 服务及 SQLite 备份，再创建或选择专用于本服务的 Cloudflare Tunnel，填入真实 UUID 与私有凭据文件，配置 `nekossh.neko233.com` 的 DNS 路由。不要覆盖其他业务的现有隧道配置。配置域名前应检查现存记录及证书状态；启用后从公网检查 HTTPS、注册、登录、团队隔离和限流，并完成重启恢复及备份恢复演练。
+
+当已有通配符 DNS 指向 Cloudflare 时，也可用 `deploy/edge-worker.mjs` 配合专用 Tunnel 和 Workers VPC，将精确域名路由至回环服务，而不修改共享网关。该 Worker 是 Cloudflare 平台的 JavaScript 传输适配器；业务服务仍为 Go。配置 VPC 服务和 `ALLOWED_HOST` 后，必须按安全文档设置独立 HMAC 密钥，并检查 Worker 路由优先级、来源认证、限流和端到端可用性。Worker 测试使用 `task test:edge`（需要 Node.js）。

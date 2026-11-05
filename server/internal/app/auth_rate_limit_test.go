@@ -1,7 +1,11 @@
 package app
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +29,44 @@ func TestAuthAttemptLimiterBlocksAndClearsOnSuccess(t *testing.T) {
 	limiter.success(now, keys...)
 	if _, ok := limiter.allow(now, keys...); !ok {
 		t.Fatal("successful authentication did not clear the limiter")
+	}
+}
+
+func TestSignedEdgeIdentityRejectsSpoofingAndStaleRequests(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	server := &Server{cfg: Config{EdgeHMACKey: key, TrustCloudflareTunnel: true}}
+	request := httptest.NewRequest("POST", "http://localhost/api/v1/login", nil)
+	request.RemoteAddr = "127.0.0.1:1234"
+	request.Header.Set("CF-Connecting-IP", "198.51.100.42")
+	sign := func(at time.Time, method, path, ip string) string {
+		ts := strconv.FormatInt(at.Unix(), 10)
+		mac := hmac.New(sha256.New, key)
+		_, _ = mac.Write([]byte(ts + "\n" + method + "\n" + path + "\n" + ip))
+		return ts + ":" + hex.EncodeToString(mac.Sum(nil))
+	}
+	if got := server.requestClientIdentity(request); got != "127.0.0.1" {
+		t.Fatal("unsigned IP was trusted")
+	}
+	request.Header.Set("X-Nekossh-Visitor-Signature", sign(time.Now(), "POST", "/api/v1/login", "198.51.100.42"))
+	if got := server.requestClientIdentity(request); got != "198.51.100.42" {
+		t.Fatalf("signed visitor not recognized: %s", got)
+	}
+	request.Header.Set("CF-Connecting-IP", "198.51.100.43")
+	if got := server.requestClientIdentity(request); got != "127.0.0.1" {
+		t.Fatal("modified IP was trusted")
+	}
+	request.Header.Set("CF-Connecting-IP", "198.51.100.42")
+	request.Header.Set("X-Nekossh-Visitor-Signature", sign(time.Now().Add(-2*time.Minute), "POST", "/api/v1/login", "198.51.100.42"))
+	if got := server.requestClientIdentity(request); got != "127.0.0.1" {
+		t.Fatal("expired signature was trusted")
+	}
+	request.Header.Set("X-Nekossh-Visitor-Signature", sign(time.Now(), "GET", "/api/v1/login", "198.51.100.42"))
+	if got := server.requestClientIdentity(request); got != "127.0.0.1" {
+		t.Fatal("signature for another method was trusted")
+	}
+	request.Header.Set("X-Nekossh-Visitor-Signature", sign(time.Now(), "POST", "/api/v1/accounts", "198.51.100.42"))
+	if got := server.requestClientIdentity(request); got != "127.0.0.1" {
+		t.Fatal("signature for another path was trusted")
 	}
 }
 
@@ -104,5 +146,14 @@ func TestTunnelTrustConfigurationIsExplicit(t *testing.T) {
 	t.Setenv("TERMINAL233_TRUST_CLOUDFLARE_TUNNEL", "invalid")
 	if _, err := ConfigFromEnv(); err == nil {
 		t.Fatal("invalid tunnel trust value was accepted")
+	}
+	t.Setenv("TERMINAL233_TRUST_CLOUDFLARE_TUNNEL", "")
+	t.Setenv("TERMINAL233_EDGE_HMAC_KEY", "invalid")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("invalid edge HMAC key was accepted")
+	}
+	t.Setenv("TERMINAL233_EDGE_HMAC_KEY", strings.Repeat("ab", 32))
+	if cfg, err := ConfigFromEnv(); err != nil || len(cfg.EdgeHMACKey) != 32 {
+		t.Fatal("valid edge HMAC key rejected")
 	}
 }

@@ -22,6 +22,10 @@ tasks:
     desc: 静音验证 Windows 原生窗口和本机测试 SSH 连接
     cmds:
       - pwsh -NoProfile -ExecutionPolicy Bypass -File client/test-desktop.ps1 -Quiet
+  test:edge:
+    desc: 验证 Cloudflare 边缘适配器的转发与签名
+    cmds:
+      - node --test server/deploy/edge-worker.test.mjs
   package:windows:local:
     desc: 生成未签名 Windows 安装包
     cmds:

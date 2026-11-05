@@ -6,6 +6,8 @@
 
 仅当本服务的唯一公网入口是本机 Cloudflare Tunnel，且本机其他用户和进程均可信时，可设置 `TERMINAL233_TRUST_CLOUDFLARE_TUNNEL=true`：服务只在连接来自回环地址、且 `CF-Connecting-IP` 是单一有效公网地址时用于分别限流。默认关闭；若同时通过普通反向代理或其他不可信本机程序接入，不得开启，否则请求头可被伪造。缺失或无效的地址会回退到连接来源。边缘仍需配置针对真实访客的限流，且应验证 Cloudflare 没有移除访客 IP 请求头。
 
+使用 `deploy/edge-worker.mjs` 和 Workers VPC 时，优先配置独立的 `TERMINAL233_EDGE_HMAC_KEY`：以 32 字节随机密钥的 64 位十六进制字符串设置服务环境变量，并以相同值设置 Worker 的 `EDGE_HMAC_KEY` 密钥。Worker 对访客 IP、时间、方法和路径签名；服务只接受回环连接上、60 秒内有效的签名。无效或缺失签名回退到回环来源，不会信任伪造的访客地址。密钥存在时，即使开启了上面的兼容选项也必须验证签名。不要将此密钥放入仓库或日志。隧道访问 127.0.0.1 的内部流量位于服务器本机，客户端至 Cloudflare 使用 HTTPS，Cloudflare 至隧道使用加密连接；该部署依赖 Workers VPC 的可用性及其当前计费政策。
+
 分别生成独立的 32 字节以上随机值并保密：`TERMINAL233_MASTER_KEY` 用于加密；`TERMINAL233_OFFICIAL_TOKEN` 用于普通注册。可选的 `TERMINAL233_ADMIN_USERNAME` 指定唯一平台管理员，必须同时设置不同于普通注册令牌的独立 `TERMINAL233_ADMIN_BOOTSTRAP_TOKEN`（至少 32 字符）。管理员首次注册时使用管理员引导令牌；其用户名不能通过普通令牌或团队邀请抢注。还须设置独立的 `TERMINAL233_ADMIN_TOTP_SECRET`：至少 20 字节随机值的 Base32 编码，并将相同密钥安全导入验证器；每次管理操作需要 6 位 TOTP 动态码。所有环境文件建议 root 拥有、服务账号可读，权限 `0640`；数据目录由专用服务账号持有，权限 `0700`。不得将令牌、密码、主密钥或备份放入源码、镜像或日志。
 
 `TERMINAL233_DATA_PATH` 指定 SQLite 数据库；为兼容既有部署，默认路径仍名为 `data/terminal233-server.json`，实际内容为 SQLite。旧加密文件升级时会留下 `.legacy-backup`，不会覆盖同名已有备份。备份数据库与独立保存的主密钥，丢失主密钥无法恢复数据，不能直接更换主密钥。管理员导出的是加密快照，导入必须使用相同主密钥并明确确认；恢复会终止全部会话。加密快照、SQLite 文件及旧版备份都必须按敏感数据保管。

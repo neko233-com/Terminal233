@@ -44,6 +44,7 @@ foreach ($arch in @('amd64','arm64')) {
             @{ Source = 'server\README.md'; Name = 'README.md'; Mode = 420 },
             @{ Source = 'server\SECURITY.md'; Name = 'SECURITY.md'; Mode = 420 },
             @{ Source = 'server\deploy\terminal233-sync.service'; Name = 'terminal233-sync.service'; Mode = 420 },
+            @{ Source = 'server\deploy\edge-worker.mjs'; Name = 'edge-worker.mjs'; Mode = 420 },
             @{ Source = 'LICENSE'; Name = 'LICENSE'; Mode = 420 }
         )) {
             $file = [IO.File]::OpenRead((Join-Path $repo $entry.Source))
