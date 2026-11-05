@@ -414,6 +414,9 @@ func (d *desktop) view(c *ui.Context) {
 					})
 				})
 			}
+			if d.workspace != "terminal" && d.monitorCancel != nil {
+				d.stopMonitor()
+			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
 				if d.workspace == "terminal" {
 					closeSessionID := 0
@@ -684,7 +687,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.48"
+const version = "0.3.49"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

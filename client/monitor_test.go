@@ -188,3 +188,22 @@ func TestMonitorStopsOnSessionSwitchAndClose(t *testing.T) {
 		t.Fatal("closing session did not cancel monitoring")
 	}
 }
+
+func TestMonitorStopsWhenLeavingTerminalWorkspace(t *testing.T) {
+	left, peer := net.Pipe()
+	defer peer.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	d := &desktop{workspace: "terminal", term: term, currentSession: 1, monitorSession: 1, monitorCancel: cancel, monitorStatus: "old", sessions: []*workspaceSession{{id: 1, label: "test", term: term}}}
+	view := ui.NewTester(d.view, 1200, 900)
+	if err := view.Click("云同步与团队"); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() == nil || d.monitorCancel != nil || d.monitorStatus != "" {
+		t.Fatal("leaving terminal left monitoring active")
+	}
+}

@@ -176,8 +176,8 @@ func TestSplitTerminalsRemainVisibleWithPanels(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
-	d := &desktop{workspace: "terminal", term: first, currentSession: 1, splitSession: 2, splitFirstSession: 1, sessions: []*workspaceSession{{id: 1, label: "first", term: first}, {id: 2, label: "second", term: second}}, quickOpen: true, terminalSearchOpen: true, showFilePanel: true, quickCommands: []quickCommand{{ID: "one", Name: "test", Command: "pwd"}}}
-	for _, size := range [][2]int{{640, 480}, {900, 650}, {900, 700}, {940, 480}, {1024, 480}, {1200, 480}, {1200, 760}, {1500, 900}} {
+	d := &desktop{workspace: "terminal", term: first, currentSession: 1, splitSession: 2, splitFirstSession: 1, sessions: []*workspaceSession{{id: 1, label: "first", term: first}, {id: 2, label: "second", term: second}}, quickOpen: true, terminalSearchOpen: true, showFilePanel: true, monitorCancel: func() {}, monitorStatus: "运行时间 2 小时 · 1 分钟负载 1.25 · 内存 5.0 / 8.0 GiB · 根磁盘 3.0 / 10.0 GiB · CPU 50% · 网卡合计 ↓1.0 ↑2.0 KiB/s", monitorData: monitorDisplay{cpu: .5, memory: .625, disk: .3, hasCPU: true, hasMemory: true, hasDisk: true}, quickCommands: []quickCommand{{ID: "one", Name: "test", Command: "pwd"}}}
+	for _, size := range [][2]int{{640, 480}, {900, 650}, {900, 700}, {940, 480}, {1024, 480}, {1200, 480}, {1200, 760}, {1200, 800}, {1500, 800}, {1500, 900}} {
 		view := ui.NewTester(d.view, size[0], size[1])
 		for _, label := range []string{"终端：first", "终端：second"} {
 			r, ok := view.Find(label)
