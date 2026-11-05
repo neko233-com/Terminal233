@@ -62,7 +62,7 @@ func TestCloudDeletePartialAndUncertainResults(t *testing.T) {
 func TestInviteLinkSurvivesTeamRefreshFailure(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/invitations") && r.Method == http.MethodPost {
-			_, _ = w.Write([]byte(`{"url":"https://example.test/#join=private"}`))
+			_, _ = w.Write([]byte(`{"token":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","url":"https://other.test/#join=wrong"}`))
 			return
 		}
 		http.Error(w, "unavailable", 503)
@@ -77,7 +77,7 @@ func TestInviteLinkSurvivesTeamRefreshFailure(t *testing.T) {
 	teams, mutationErr, refreshErr := mutateAndRefresh(func() error { var e error; invite, e = c.createInvite("password", 3600, 1); return e }, c.teams)
 	d := &desktop{}
 	d.finishTeamOperation("invite", invite, teams, mutationErr, refreshErr)
-	if d.teamInviteURL != "https://example.test/#join=private" || !strings.Contains(d.teamStatus, "邀请已创建") || !strings.Contains(d.teamStatus, "刷新失败") {
+	if d.teamInviteURL != server.URL+"/#join="+strings.Repeat("a", 48) || !strings.Contains(d.teamStatus, "邀请已创建") || !strings.Contains(d.teamStatus, "刷新失败") {
 		t.Fatal("successful invitation lost after refresh failure")
 	}
 }

@@ -27,7 +27,12 @@ func (d *desktop) teamOperation(action string) {
 		return
 	}
 	if action == "join" {
-		invite = extractInviteToken(invite)
+		var err error
+		invite, err = inviteTokenForService(invite, client.base.String())
+		if err != nil {
+			d.teamStatus = err.Error()
+			return
+		}
 	}
 	d.teamInvitePassword = ""
 	d.busy = true
@@ -223,7 +228,7 @@ func (d *desktop) teamView(c *ui.Context) {
 			ui.Text(c, "当前团队角色："+role).FontSize(12).Wrap()
 		}
 	}
-	ui.Text(c, "邀请注册：填写上方云账号和密码，再粘贴邀请链接并输入邀请密码。").FontSize(12).Wrap()
+	ui.Text(c, "邀请注册：填写上方云账号和密码，再将邀请链接粘贴到 NekoSSH 并输入邀请密码。").FontSize(12).Wrap()
 	ui.TextInput(c.Key("team-name"), &d.teamName).Label("团队名称").Placeholder("新团队名称")
 	if ui.Button(c.Key("team-create"), "创建团队").Disabled(d.busy || d.cloud == nil).Clicked() {
 		d.teamOperation("create")
@@ -248,6 +253,14 @@ func (d *desktop) teamView(c *ui.Context) {
 		}
 	}
 	ui.TextInput(c.Key("team-invite-input"), &d.teamInviteInput).Label("邀请链接或令牌").Placeholder("邀请链接或令牌")
+	if _, service, err := parseInvite(d.teamInviteInput); err == nil && service != "" {
+		ui.Text(c, "邀请所属服务："+service).FontSize(12).Wrap()
+		if d.cloud == nil && ui.Button(c.Key("team-use-invite-service"), "使用邀请链接中的服务地址").Disabled(d.busy).Clicked() {
+			d.cloudURL = service
+			d.cloudURLChanged()
+			d.teamStatus = "已使用邀请中的服务地址，请确认后注册或登录。"
+		}
+	}
 	ui.TextInput(c.Key("team-invite-password"), &d.teamInvitePassword).Label("邀请密码").Placeholder("邀请密码（至少 12 字符）").Password()
 	if ui.Button(c.Key("team-register"), "通过邀请注册并加入").Disabled(d.busy || d.cloud != nil).Clicked() {
 		d.registerWithInvite()
@@ -333,12 +346,58 @@ func (d *desktop) teamView(c *ui.Context) {
 }
 
 func extractInviteToken(invite string) string {
+	token, _, _ := parseInvite(invite)
+	return token
+}
+
+// A pasted invitation never changes the destination silently. The recipient
+// can explicitly choose its service before entering credentials.
+func parseInvite(invite string) (string, string, error) {
 	invite = strings.TrimSpace(invite)
-	if parsed, err := url.Parse(invite); err == nil && parsed.Fragment != "" {
-		values, _ := url.ParseQuery(parsed.Fragment)
-		return values.Get("join")
+	if validInviteToken(invite) {
+		return invite, "", nil
 	}
-	return invite
+	parsed, err := url.Parse(invite)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" {
+		return "", "", fmt.Errorf("邀请链接或令牌无效")
+	}
+	values, err := url.ParseQuery(parsed.Fragment)
+	if err != nil || len(values) != 1 || len(values["join"]) != 1 || !validInviteToken(values.Get("join")) {
+		return "", "", fmt.Errorf("邀请链接或令牌无效")
+	}
+	token := values.Get("join")
+	parsed.Fragment, parsed.RawFragment = "", ""
+	client, err := newCloudClient(parsed.String())
+	if err != nil {
+		return "", "", fmt.Errorf("邀请服务地址无效")
+	}
+	return token, client.base.String(), nil
+}
+
+func inviteTokenForService(invite, service string) (string, error) {
+	token, inviteService, err := parseInvite(invite)
+	if err != nil {
+		return "", err
+	}
+	if inviteService == "" {
+		return token, nil
+	}
+	current, err := newCloudClient(service)
+	if err != nil {
+		return "", err
+	}
+	wanted, _ := newCloudClient(inviteService)
+	currentPort, wantedPort := current.base.Port(), wanted.base.Port()
+	if currentPort == "443" {
+		currentPort = ""
+	}
+	if wantedPort == "443" {
+		wantedPort = ""
+	}
+	if !strings.EqualFold(current.base.Hostname(), wanted.base.Hostname()) || currentPort != wantedPort || current.base.Path != wanted.base.Path {
+		return "", fmt.Errorf("邀请属于 %s，请先切换到该同步服务后再使用。", inviteService)
+	}
+	return token, nil
 }
 func (d *desktop) registerWithInvite() {
 	if d.busy || d.cloud != nil {
@@ -349,7 +408,12 @@ func (d *desktop) registerWithInvite() {
 		d.teamStatus = err.Error()
 		return
 	}
-	user, password, token, invitePassword := d.cloudUser, d.cloudPassword, extractInviteToken(d.teamInviteInput), d.teamInvitePassword
+	token, err := inviteTokenForService(d.teamInviteInput, d.cloudURL)
+	if err != nil {
+		d.teamStatus = err.Error()
+		return
+	}
+	user, password, invitePassword := d.cloudUser, d.cloudPassword, d.teamInvitePassword
 	d.cloudPassword = ""
 	d.cloudRegistration, d.cloudRegistrationLocal = "", false
 	d.teamInvitePassword = ""

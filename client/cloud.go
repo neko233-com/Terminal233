@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -204,10 +205,26 @@ func (c *cloudClient) joinTeam(token, password string) (cloudTeam, error) {
 }
 func (c *cloudClient) createInvite(password string, seconds, uses int) (string, error) {
 	var out struct {
-		URL string `json:"url"`
+		Token string `json:"token"`
 	}
 	err := c.request(http.MethodPost, "/api/v1/teams/"+url.PathEscape(c.teamID)+"/invitations", map[string]any{"password": password, "expiresInSeconds": seconds, "uses": uses}, &out)
-	return out.URL, err
+	if err != nil {
+		return "", err
+	}
+	if !validInviteToken(out.Token) {
+		return "", errors.New("邀请已创建，但服务未返回有效令牌；请查看有效邀请")
+	}
+	link := *c.base
+	if link.Path == "" {
+		link.Path = "/"
+	}
+	link.Fragment = url.Values{"join": {out.Token}}.Encode()
+	return link.String(), nil
+}
+
+func validInviteToken(token string) bool {
+	raw, err := hex.DecodeString(token)
+	return err == nil && len(raw) == 24 && len(token) == 48
 }
 func (c *cloudClient) members() ([]cloudTeamMember, error) {
 	var members []cloudTeamMember

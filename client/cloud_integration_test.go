@@ -131,6 +131,10 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	proxyAddress, _ := url.Parse(proxy.URL)
+	if parsed.Host != proxyAddress.Host {
+		t.Fatal("self-hosted invite used another service's host")
+	}
 	fragment, err := url.ParseQuery(parsed.Fragment)
 	if err != nil {
 		t.Fatal(err)
