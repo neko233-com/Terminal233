@@ -136,6 +136,16 @@ func testSSHServerWithSlowSFTP(t *testing.T, slow *atomic.Bool, authorized ...ss
 							switch req.Type {
 							case "pty-req", "window-change":
 								_ = req.Reply(true, nil)
+							case "exec":
+								var request struct{ Command string }
+								if ssh.Unmarshal(req.Payload, &request) != nil || request.Command != monitorCommand {
+									_ = req.Reply(false, nil)
+									continue
+								}
+								_ = req.Reply(true, nil)
+								_, _ = channel.Write([]byte("UP 7200.0 0\nLOAD 1.25 0.50 0.25 1/2 3\nMEM\nMemTotal: 8388608 kB\nMemAvailable: 3145728 kB\n"))
+								_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+								return
 							case "subsystem":
 								var sub struct{ Name string }
 								if ssh.Unmarshal(req.Payload, &sub) != nil || sub.Name != "sftp" {

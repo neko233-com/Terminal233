@@ -123,6 +123,9 @@ func (d *desktop) activateSession(id int) {
 		if s.id != id {
 			continue
 		}
+		if d.currentSession != id {
+			d.stopMonitor()
+		}
 		d.saveSessionState()
 		if id == d.splitSession {
 			d.splitSession = d.currentSession
@@ -189,6 +192,9 @@ func (d *desktop) closeSession(id int) {
 		if s.id != id {
 			continue
 		}
+		if id == d.monitorSession {
+			d.stopMonitor()
+		}
 		for _, forward := range s.forwards {
 			forward.Close()
 		}
@@ -228,6 +234,7 @@ func (d *desktop) closeSession(id int) {
 }
 
 func (d *desktop) closeAllSessions() {
+	d.stopMonitor()
 	if d.archiveCancel != nil {
 		d.archiveCancel()
 	}

@@ -25,6 +25,19 @@ func TestTerminalRemainsVisibleWithPanelsAtMinimumWindow(t *testing.T) {
 			t.Errorf("terminal unusable at %dx%d: found=%v rect=%+v", size[0], size[1], ok, r)
 		}
 	}
+	d.shell = &remoteShell{}
+	remoteView := ui.NewTester(d.view, 640, 480)
+	if r, ok := remoteView.Find("Terminal"); !ok || r.H < 80 {
+		t.Fatalf("SSH terminal unusable with monitor control: %+v", r)
+	}
+	d.monitorCancel = func() {}
+	d.monitorStatus = "运行时间 2 小时 · 1 分钟负载 1.25 · 内存 5.0 / 8.0 GiB"
+	remoteView.Frame()
+	if r, ok := remoteView.Find("Terminal"); !ok || r.H < 80 {
+		t.Fatalf("SSH terminal unusable with monitor panel: %+v", r)
+	}
+	d.monitorCancel = nil
+	d.shell = nil
 	view := ui.NewTester(d.view, 640, 480)
 	panel, ok := view.Find("快速命令面板")
 	if !ok || panel.H != 90 {

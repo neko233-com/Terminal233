@@ -23,6 +23,9 @@ type desktop struct {
 	splitLayout                                                                             string
 	splitHorizontalPercent, splitVerticalPercent                                            float32
 	terminalFilePercent                                                                     float32
+	monitorCancel                                                                           context.CancelFunc
+	monitorGeneration, monitorSession                                                       int
+	monitorStatus                                                                           string
 	terminalLightTheme, terminalDarkTheme                                                   *terminal.Theme
 	showFilePanel                                                                           bool
 	sidebarCollapsed                                                                        bool
@@ -451,7 +454,9 @@ func (d *desktop) view(c *ui.Context) {
 						d.closeSession(closeSessionID)
 					}
 					ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-						ui.Text(c, "终端").FontSize(17).Bold().Grow(1)
+						if width >= 900 {
+							ui.Text(c, "终端").FontSize(17).Bold().Grow(1)
+						}
 						status := d.status
 						if terminalEnded(d.term) && !d.busy {
 							if d.shell != nil {
@@ -482,6 +487,21 @@ func (d *desktop) view(c *ui.Context) {
 						}
 						if ui.Button(c.Key("quick-toggle"), quickLabel).Disabled(d.term == nil).Clicked() {
 							d.quickOpen = !d.quickOpen
+						}
+						if d.shell != nil || d.monitorCancel != nil {
+							monitorLabel := "服务器状态"
+							if width < 900 {
+								monitorLabel = "状态"
+							}
+							if d.monitorCancel != nil {
+								monitorLabel = "关闭状态"
+								if width < 900 {
+									monitorLabel = "状态−"
+								}
+							}
+							if ui.Button(c.Key("monitor-toggle"), monitorLabel).Disabled(d.monitorCancel == nil && terminalEnded(d.term)).Clicked() {
+								d.toggleMonitor()
+							}
 						}
 						splitLabel := "分屏查看"
 						if d.splitSession != 0 {
@@ -517,6 +537,9 @@ func (d *desktop) view(c *ui.Context) {
 					if d.term == nil {
 						ui.Text(c, "选择连接，或打开本机终端").FontSize(18).TextColor(t.TextMuted)
 					} else {
+						if d.monitorCancel != nil {
+							ui.Text(c, d.monitorStatus).FontSize(12).Wrap()
+						}
 						if d.quickOpen {
 							if compactAuxiliaryPanels {
 								ui.Scroll(c.Key("quick-compact-scroll")).Label("快速命令面板").Height(90).Shrink(0).FillWidth().Children(func() { d.quickCommandsView(c) })
@@ -653,7 +676,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.43"
+const version = "0.3.44"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
