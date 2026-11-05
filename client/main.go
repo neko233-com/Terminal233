@@ -34,6 +34,7 @@ type desktop struct {
 	teams                                                                                   []cloudTeam
 	members                                                                                 []cloudTeamMember
 	teamName, teamInvitePassword, teamInviteInput, teamInviteURL, teamStatus, confirmMember string
+	selectedMember                                                                          string
 	teamInviteHours, teamInviteUses                                                         string
 	confirmCloudDelete                                                                      string
 	profiles                                                                                []profile
@@ -565,13 +566,13 @@ func (d *desktop) connectionView(c *ui.Context) {
 		} else {
 			ui.Text(c, "将新建云端连接；相同地址不会自动覆盖。").FontSize(12).Wrap()
 		}
-		ui.Button(c.Key("cloudsave-form"), "确认指纹并同步密码连接").Disabled(d.busy || d.cloudListStale || d.fingerprint == "" || d.settings.Password == "" || d.settings.KeyPath != "").OnClick(d.cloudSaveForm)
+		ui.Button(c.Key("cloudsave-form"), "确认指纹并同步密码连接").Disabled(d.busy || !d.canWriteCloudScope() || d.cloudListStale || d.fingerprint == "" || d.settings.Password == "" || d.settings.KeyPath != "").OnClick(d.cloudSaveForm)
 	}
 	ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions || d.fingerprint == "").OnClick(d.connect)
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.25"
+const version = "0.3.26"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

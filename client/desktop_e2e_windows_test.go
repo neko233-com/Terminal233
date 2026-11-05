@@ -1222,7 +1222,29 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("local terminal failed to close: %s", tree)
 	}
 	call("act", map[string]any{"key": "font-larger", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		prefs, readErr := readPreferences(filepath.Join(configDir, "NekoSSH", "preferences.json"))
+		if readErr == nil && prefs.TerminalFontSize == 14 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if prefs, readErr := readPreferences(filepath.Join(configDir, "NekoSSH", "preferences.json")); readErr != nil || prefs.TerminalFontSize != 14 {
+		t.Fatalf("terminal font change was not persisted: %+v, %v", prefs, readErr)
+	}
 	call("act", map[string]any{"key": "theme-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		prefs, readErr := readPreferences(filepath.Join(configDir, "NekoSSH", "preferences.json"))
+		if readErr == nil && prefs.Light {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if prefs, readErr := readPreferences(filepath.Join(configDir, "NekoSSH", "preferences.json")); readErr != nil || !prefs.Light {
+		t.Fatalf("theme change was not persisted: %+v, %v", prefs, readErr)
+	}
 	call("act", map[string]any{"key": "toggle-sidebar", "action": "press"})
 	var prefs workspacePreferences
 	deadline = time.Now().Add(5 * time.Second)

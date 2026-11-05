@@ -174,6 +174,10 @@ func (d *desktop) saveCloudConnection(settings connectionSettings, label, source
 	if d.busy || d.cloud == nil {
 		return
 	}
+	if !d.canWriteCloudScope() {
+		d.cloudStatus, d.status = "当前团队不可写；请联系管理员或刷新团队列表。", "当前团队不可写。"
+		return
+	}
 	if d.cloudListStale {
 		d.cloudStatus, d.status = "连接列表需要先刷新，避免重复或覆盖错误连接。", "连接列表需要先刷新。"
 		return
@@ -315,6 +319,9 @@ func (d *desktop) cloudView(c *ui.Context) {
 	ui.Text(c, "云端连接").FontSize(16).Bold()
 	if d.cloud != nil {
 		ui.Text(c, "当前同步空间："+d.cloudScopeName()).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+		if !d.canWriteCloudScope() {
+			ui.Text(c, "当前团队为只读，或角色尚未加载；请联系管理员或刷新团队列表。").FontSize(12).Wrap()
+		}
 	}
 	if d.cloud != nil && d.active.Password != "" {
 		if d.currentCloudSource() != "" {
@@ -324,13 +331,13 @@ func (d *desktop) cloudView(c *ui.Context) {
 		}
 	}
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-		if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || d.cloud == nil || d.cloudListStale || d.active.Password == "" || d.active.KeyPath != "").Clicked() {
+		if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || !d.canWriteCloudScope() || d.cloudListStale || d.active.Password == "" || d.active.KeyPath != "").Clicked() {
 			d.cloudSave()
 		}
 		if ui.Button(c.Key("cloudrefresh"), "刷新云端连接").Disabled(d.busy || d.cloud == nil).Clicked() {
 			d.cloudRefresh()
 		}
-		if ui.Button(c.Key("clouddelete"), "删除选中云端连接（需确认）").Disabled(d.busy || d.cloudListStale || d.confirmCloudDelete == "").Clicked() {
+		if ui.Button(c.Key("clouddelete"), "删除选中云端连接（需确认）").Disabled(d.busy || !d.canWriteCloudScope() || d.cloudListStale || d.confirmCloudDelete == "").Clicked() {
 			d.cloudDelete()
 		}
 	})
@@ -362,7 +369,7 @@ func (d *desktop) cloudView(c *ui.Context) {
 		account := item
 		row := ui.Button(c.Key("account-"+account.ID), account.Label).Disabled(d.busy)
 		row.ContextMenu(func(menu *ui.Menu) {
-			if menu.Item("删除…").Chosen() {
+			if d.canWriteCloudScope() && menu.Item("删除…").Chosen() {
 				d.confirmCloudDelete = account.ID
 				d.cloudStatus = "请点击删除按钮确认：" + account.Label
 			}
@@ -381,7 +388,7 @@ func (d *desktop) cloudURLChanged() {
 }
 
 func (d *desktop) cloudDelete() {
-	if d.busy || d.cloud == nil || d.cloudListStale || d.confirmCloudDelete == "" {
+	if d.busy || !d.canWriteCloudScope() || d.cloudListStale || d.confirmCloudDelete == "" {
 		return
 	}
 	id, client := d.confirmCloudDelete, d.cloud
@@ -455,7 +462,7 @@ func (d *desktop) clearCloudState() {
 	d.cloudStatus, d.teamStatus = "", ""
 	d.accounts, d.teams, d.members, d.teamInvites = nil, nil, nil, nil
 	d.teamInviteURL, d.teamInviteInput, d.teamInvitePassword = "", "", ""
-	d.confirmMember, d.confirmInvite, d.confirmCloudDelete = "", "", ""
+	d.confirmMember, d.selectedMember, d.confirmInvite, d.confirmCloudDelete = "", "", "", ""
 	d.adminUsers, d.adminTeams = nil, nil
 	d.adminConfirmTeam, d.adminConfirmUser, d.adminStatus, d.adminTOTP = "", "", "", ""
 	d.adminConfirmRestore = false

@@ -14,6 +14,10 @@ func (d *desktop) teamOperation(action string) {
 	if d.busy || d.cloud == nil {
 		return
 	}
+	if action == "invite" && !d.canManageInvites() {
+		d.teamStatus = "只有团队所有者或管理员可以管理邀请。"
+		return
+	}
 	client := d.cloud
 	name, password, invite := d.teamName, d.teamInvitePassword, d.teamInviteInput
 	hours, e1 := strconv.Atoi(d.teamInviteHours)
@@ -104,7 +108,7 @@ func (d *desktop) applyCloudScope(id string, accounts []cloudAccount, members []
 	d.cloudListStale = false
 	d.accounts, d.members = accounts, members
 	d.teamInvites = nil
-	d.confirmInvite, d.confirmMember, d.confirmCloudDelete = "", "", ""
+	d.confirmInvite, d.confirmMember, d.selectedMember, d.confirmCloudDelete = "", "", "", ""
 	d.teamInviteURL = ""
 }
 
@@ -118,6 +122,47 @@ func (d *desktop) cloudScopeName() string {
 		}
 	}
 	return "团队空间"
+}
+
+func (d *desktop) currentTeamRole() string {
+	if d.cloud == nil || d.cloud.teamID == "" {
+		return ""
+	}
+	for _, team := range d.teams {
+		if team.ID == d.cloud.teamID && !team.Disabled {
+			return team.Role
+		}
+	}
+	return ""
+}
+
+func (d *desktop) canManageInvites() bool {
+	role := d.currentTeamRole()
+	return role == "owner" || role == "admin"
+}
+
+func (d *desktop) canWriteCloudScope() bool {
+	if d.cloud == nil {
+		return false
+	}
+	if d.cloud.teamID == "" {
+		return true
+	}
+	return d.canManageInvites()
+}
+
+func (d *desktop) selectedMemberRole() string {
+	for _, member := range d.members {
+		if member.Username == d.selectedMember {
+			return member.Role
+		}
+	}
+	return ""
+}
+
+func (d *desktop) canManageSelectedMember() bool {
+	role := d.selectedMemberRole()
+	return d.currentTeamRole() == "owner" && (role == "admin" || role == "member")
 }
 func (d *desktop) refreshTeams() {
 	if d.busy || d.cloud == nil {
@@ -139,12 +184,13 @@ func (d *desktop) refreshTeams() {
 	}()
 }
 func (d *desktop) removeMember() {
-	if d.busy || d.cloud == nil || d.cloud.teamID == "" || d.confirmMember == "" {
+	if d.busy || !d.canManageSelectedMember() || d.confirmMember == "" || d.confirmMember != d.selectedMember {
 		return
 	}
 	c := d.cloud
 	user := d.confirmMember
 	d.confirmMember = ""
+	d.selectedMember = ""
 	d.busy = true
 	go func() {
 		items, mutationErr, refreshErr := mutateAndRefresh(func() error { return c.removeMember(user) }, c.members)
@@ -169,6 +215,13 @@ func (d *desktop) teamView(c *ui.Context) {
 	ui.Text(c, "团队共享").Bold()
 	if d.cloud != nil {
 		ui.Text(c, "当前同步空间："+d.cloudScopeName()).FontSize(12).Wrap()
+		if d.cloud.teamID != "" {
+			role := map[string]string{"owner": "所有者", "admin": "管理员", "member": "普通成员"}[d.currentTeamRole()]
+			if role == "" {
+				role = "未知，请刷新团队列表"
+			}
+			ui.Text(c, "当前团队角色："+role).FontSize(12).Wrap()
+		}
 	}
 	ui.Text(c, "邀请注册：填写上方云账号和密码，再粘贴邀请链接并输入邀请密码。").FontSize(12).Wrap()
 	ui.TextInput(c.Key("team-name"), &d.teamName).Label("团队名称").Placeholder("新团队名称")
@@ -204,7 +257,7 @@ func (d *desktop) teamView(c *ui.Context) {
 	}
 	ui.TextInput(c.Key("team-invite-hours"), &d.teamInviteHours).Label("邀请有效小时数").Placeholder("有效小时数")
 	ui.TextInput(c.Key("team-invite-uses"), &d.teamInviteUses).Label("邀请使用次数").Placeholder("使用次数")
-	if ui.Button(c.Key("team-invite"), "创建团队邀请").Disabled(d.busy || d.cloud == nil || d.cloud.teamID == "").Clicked() {
+	if ui.Button(c.Key("team-invite"), "创建团队邀请").Disabled(d.busy || !d.canManageInvites()).Clicked() {
 		d.teamOperation("invite")
 	}
 	if d.teamInviteURL != "" {
@@ -216,24 +269,50 @@ func (d *desktop) teamView(c *ui.Context) {
 	}
 	for _, m := range d.members {
 		member := m
-		row := ui.Button(c.Key("member-"+m.Username), m.Username+"（"+m.Role+"）")
+		role := map[string]string{"owner": "所有者", "admin": "管理员", "member": "普通成员"}[m.Role]
+		if role == "" {
+			role = m.Role
+		}
+		label := m.Username + "（" + role + "）"
+		if d.selectedMember == m.Username {
+			label += " · 已选择"
+		}
+		row := ui.Button(c.Key("member-"+m.Username), label).Disabled(d.busy)
 		row.ContextMenu(func(menu *ui.Menu) {
-			if menu.Item("移除成员…").Chosen() {
+			if menu.Item("选择成员").Chosen() {
+				d.selectedMember, d.confirmMember = member.Username, ""
+				d.teamStatus = "已选择成员：" + member.Username
+			}
+			if d.currentTeamRole() == "owner" && member.Role != "owner" && menu.Item("移除成员…").Chosen() {
+				d.selectedMember = member.Username
 				d.confirmMember = member.Username
 				d.teamStatus = "再次确认移除：" + member.Username
 			}
 		})
+		if row.Clicked() {
+			d.selectedMember, d.confirmMember = member.Username, ""
+			d.teamStatus = "已选择成员：" + member.Username
+		}
 	}
-	if ui.Button(c.Key("member-admin"), "设为团队管理员").Disabled(d.busy || d.confirmMember == "").Clicked() {
+	if ui.Button(c.Key("member-admin"), "设为团队管理员").Disabled(d.busy || !d.canManageSelectedMember() || d.selectedMemberRole() == "admin").Clicked() {
 		d.changeMemberRole("admin")
 	}
-	if ui.Button(c.Key("member-demote"), "设为普通成员").Disabled(d.busy || d.confirmMember == "").Clicked() {
+	if ui.Button(c.Key("member-demote"), "设为普通成员").Disabled(d.busy || !d.canManageSelectedMember() || d.selectedMemberRole() == "member").Clicked() {
 		d.changeMemberRole("member")
 	}
-	if ui.Button(c.Key("member-remove"), "确认移除成员").Disabled(d.busy || d.confirmMember == "").Clicked() {
-		d.removeMember()
+	removeLabel := "移除选中成员…"
+	if d.confirmMember != "" && d.confirmMember == d.selectedMember {
+		removeLabel = "确认移除成员"
 	}
-	if ui.Button(c.Key("team-invites"), "查看有效邀请").Disabled(d.busy || d.cloud == nil || d.cloud.teamID == "").Clicked() {
+	if ui.Button(c.Key("member-remove"), removeLabel).Disabled(d.busy || !d.canManageSelectedMember()).Clicked() {
+		if d.confirmMember == d.selectedMember {
+			d.removeMember()
+		} else {
+			d.confirmMember = d.selectedMember
+			d.teamStatus = "再次确认移除：" + d.selectedMember
+		}
+	}
+	if ui.Button(c.Key("team-invites"), "查看有效邀请").Disabled(d.busy || !d.canManageInvites()).Clicked() {
 		d.refreshInvites()
 	}
 	for _, i := range d.teamInvites {
@@ -247,7 +326,7 @@ func (d *desktop) teamView(c *ui.Context) {
 			}
 		})
 	}
-	if ui.Button(c.Key("invite-revoke"), "确认撤销邀请").Disabled(d.busy || d.confirmInvite == "").Clicked() {
+	if ui.Button(c.Key("invite-revoke"), "确认撤销邀请").Disabled(d.busy || !d.canManageInvites() || d.confirmInvite == "").Clicked() {
 		d.revokeInvite()
 	}
 	ui.Text(c, strings.TrimSpace(d.teamStatus)).FontSize(12)
@@ -316,10 +395,10 @@ func (d *desktop) registerWithInvite() {
 }
 
 func (d *desktop) changeMemberRole(role string) {
-	if d.busy || d.cloud == nil || d.confirmMember == "" {
+	if d.busy || !d.canManageSelectedMember() || (role != "admin" && role != "member") || d.selectedMemberRole() == role {
 		return
 	}
-	c, user := d.cloud, d.confirmMember
+	c, user := d.cloud, d.selectedMember
 	d.confirmMember = ""
 	d.busy = true
 	go func() {
@@ -342,7 +421,7 @@ func (d *desktop) changeMemberRole(role string) {
 	}()
 }
 func (d *desktop) refreshInvites() {
-	if d.busy || d.cloud == nil || d.cloud.teamID == "" {
+	if d.busy || !d.canManageInvites() {
 		return
 	}
 	c := d.cloud
@@ -361,7 +440,7 @@ func (d *desktop) refreshInvites() {
 	}()
 }
 func (d *desktop) revokeInvite() {
-	if d.busy || d.cloud == nil || d.confirmInvite == "" {
+	if d.busy || !d.canManageInvites() || d.confirmInvite == "" {
 		return
 	}
 	c, id := d.cloud, d.confirmInvite
