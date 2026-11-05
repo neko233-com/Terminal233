@@ -79,6 +79,33 @@ func TestSplitLayoutChoiceAndPersistence(t *testing.T) {
 		if !tc.stacked && b.X < a.X+a.W-1 {
 			t.Fatalf("panes not side by side: %+v %+v", a, b)
 		}
+		if tc.stacked {
+			x, y := a.X+a.W/2, a.Y+a.H
+			view.Press(x, y)
+			view.Move(x, y+45)
+			view.Release(x, y+45)
+			if d.splitVerticalPercent <= 50 {
+				t.Fatalf("vertical divider did not resize: %v", d.splitVerticalPercent)
+			}
+			before := d.splitVerticalPercent
+			view.Key(0, ui.KeyDown)
+			if d.splitVerticalPercent <= before {
+				t.Fatal("vertical divider keyboard resize failed")
+			}
+		} else {
+			x, y := a.X+a.W, a.Y+a.H/2
+			view.Press(x, y)
+			view.Move(x+45, y)
+			view.Release(x+45, y)
+			if d.splitHorizontalPercent <= 50 {
+				t.Fatalf("horizontal divider did not resize: %v", d.splitHorizontalPercent)
+			}
+			before := d.splitHorizontalPercent
+			view.Key(0, ui.KeyRight)
+			if d.splitHorizontalPercent <= before {
+				t.Fatal("horizontal divider keyboard resize failed")
+			}
+		}
 		restored := &desktop{}
 		if err := restored.loadPreferences(path); err != nil || restored.splitLayout != tc.id {
 			t.Fatalf("layout not persisted: %v", err)

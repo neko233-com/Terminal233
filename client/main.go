@@ -21,6 +21,7 @@ type desktop struct {
 	terminalFontSize                                                                        int
 	terminalTheme                                                                           string
 	splitLayout                                                                             string
+	splitHorizontalPercent, splitVerticalPercent                                            float32
 	terminalLightTheme, terminalDarkTheme                                                   *terminal.Theme
 	showFilePanel                                                                           bool
 	sidebarCollapsed                                                                        bool
@@ -624,7 +625,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.35"
+const version = "0.3.36"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

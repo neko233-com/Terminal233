@@ -259,12 +259,7 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 	}
 	focusedID := 0
 	pane := func(s *workspaceSession, current bool) {
-		container := ui.Column(c).Grow(1)
-		if stacked {
-			container.FillWidth().HeightPercent(50)
-		} else {
-			container.FillHeight().WidthPercent(50)
-		}
+		container := ui.Column(c).Fill()
 		container.Children(func() {
 			label := "切换到：" + s.label
 			if current {
@@ -295,19 +290,22 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 		terminal.View(c, d.term).Fill()
 		return
 	}
-	panes := func() {
-		if second.id == d.splitFirstSession {
-			pane(second, false)
-			pane(current, true)
-		} else {
-			pane(current, true)
-			pane(second, false)
-		}
+	first, last := current, second
+	if second.id == d.splitFirstSession {
+		first, last = second, current
+	}
+	firstPane := func() { pane(first, first.id == current.id) }
+	lastPane := func() { pane(last, last.id == current.id) }
+	if d.splitHorizontalPercent == 0 {
+		d.splitHorizontalPercent = 50
+	}
+	if d.splitVerticalPercent == 0 {
+		d.splitVerticalPercent = 50
 	}
 	if stacked {
-		ui.Column(c).Fill().Children(panes)
+		ui.SplitVerticalPercent(c.Key("terminal-split-vertical"), &d.splitVerticalPercent, firstPane, lastPane).Fill()
 	} else {
-		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(panes)
+		ui.SplitPercent(c.Key("terminal-split-horizontal"), &d.splitHorizontalPercent, firstPane, lastPane).Fill()
 	}
 	// A terminal takes keyboard focus on pointer input. Follow focus changes
 	// so the file panel and close action refer to the terminal being used.
