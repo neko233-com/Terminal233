@@ -55,7 +55,11 @@ func (d *desktop) transfer(upload bool) {
 				return
 			}
 			if dir != d.fileDir {
-				d.fileStatus = "传输已结束；当前目录已改变，请刷新"
+				if err != nil {
+					d.fileStatus = "先前目录的传输失败：" + err.Error()
+				} else {
+					d.fileStatus = "先前目录的传输已完成；当前目录已改变，请刷新"
+				}
 				return
 			}
 			if err != nil {
@@ -89,7 +93,11 @@ func (d *desktop) removeSelected() {
 				return
 			}
 			if dir != d.fileDir {
-				d.fileStatus = "删除操作已结束；当前目录已改变，请刷新"
+				if err != nil {
+					d.fileStatus = "先前目录的删除失败：" + err.Error()
+				} else {
+					d.fileStatus = "先前目录的删除已完成；当前目录已改变，请刷新"
+				}
 				return
 			}
 			if err != nil {

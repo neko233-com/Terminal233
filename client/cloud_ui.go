@@ -101,29 +101,37 @@ func (d *desktop) cloudSave() {
 	}()
 }
 func (d *desktop) cloudView(c *ui.Context) {
-	ui.Text(c, "云同步").Bold()
-	ui.TextInput(c.Key("cloudurl"), &d.cloudURL).Label("同步服务 HTTPS 地址").Placeholder("同步服务 HTTPS 地址")
-	ui.TextInput(c.Key("clouduser"), &d.cloudUser).Label("同步账号").Placeholder("同步账号")
-	ui.TextInput(c.Key("cloudpassword"), &d.cloudPassword).Label("同步密码").Placeholder("同步密码").Password()
-	ui.TextInput(c.Key("cloudregistration"), &d.cloudRegistration).Label("注册令牌").Placeholder("注册令牌（仅注册时需要）").Password()
-	if ui.Button(c.Key("cloudlogin"), "登录同步服务").Disabled(d.busy).Clicked() {
-		d.cloudLogin(false)
-	}
-	if ui.Button(c.Key("cloudregister"), "注册并登录").Disabled(d.busy).Clicked() {
-		d.cloudLogin(true)
-	}
-	if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || d.cloud == nil || d.active.Password == "").Clicked() {
-		d.cloudSave()
-	}
-	if ui.Button(c.Key("cloudrefresh"), "刷新云端连接").Disabled(d.busy || d.cloud == nil).Clicked() {
-		d.cloudRefresh()
-	}
-	if ui.Button(c.Key("cloudlogout"), "退出同步服务").Disabled(d.busy || d.cloud == nil).Clicked() {
-		d.cloudLogout()
-	}
-	if ui.Button(c.Key("clouddelete"), "删除选中云端连接（需确认）").Disabled(d.busy || d.confirmCloudDelete == "").Clicked() {
-		d.cloudDelete()
-	}
+	ui.Text(c, "跨设备访问连接信息，或与团队共享凭据。").TextColor(c.Theme().TextMuted).Wrap()
+	ui.Column(c).FillWidth().Padding(18).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
+		ui.Text(c, "同步账号").FontSize(16).Bold()
+		ui.TextInput(c.Key("cloudurl"), &d.cloudURL).Label("同步服务 HTTPS 地址").Placeholder("同步服务 HTTPS 地址").Disabled(d.busy || d.cloud != nil)
+		ui.TextInput(c.Key("clouduser"), &d.cloudUser).Label("同步账号").Placeholder("同步账号").Disabled(d.busy || d.cloud != nil)
+		ui.TextInput(c.Key("cloudpassword"), &d.cloudPassword).Label("同步密码").Placeholder("同步密码").Password().Disabled(d.busy || d.cloud != nil)
+		ui.TextInput(c.Key("cloudregistration"), &d.cloudRegistration).Label("注册令牌").Placeholder("注册令牌（仅注册时需要）").Password().Disabled(d.busy || d.cloud != nil)
+		ui.Row(c).Gap(8).Children(func() {
+			if ui.PrimaryButton(c.Key("cloudlogin"), "登录同步服务").Disabled(d.busy || d.cloud != nil).Clicked() {
+				d.cloudLogin(false)
+			}
+			if ui.Button(c.Key("cloudregister"), "注册并登录").Disabled(d.busy || d.cloud != nil).Clicked() {
+				d.cloudLogin(true)
+			}
+			if ui.Button(c.Key("cloudlogout"), "退出同步服务").Disabled(d.busy || d.cloud == nil).Clicked() {
+				d.cloudLogout()
+			}
+		})
+	})
+	ui.Text(c, "云端连接").FontSize(16).Bold()
+	ui.Row(c).Gap(8).Children(func() {
+		if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || d.cloud == nil || d.active.Password == "").Clicked() {
+			d.cloudSave()
+		}
+		if ui.Button(c.Key("cloudrefresh"), "刷新云端连接").Disabled(d.busy || d.cloud == nil).Clicked() {
+			d.cloudRefresh()
+		}
+		if ui.Button(c.Key("clouddelete"), "删除选中云端连接（需确认）").Disabled(d.busy || d.confirmCloudDelete == "").Clicked() {
+			d.cloudDelete()
+		}
+	})
 	ui.Text(c, d.cloudStatus).FontSize(12)
 	teamLabel := "展开团队管理"
 	if d.showTeams {
