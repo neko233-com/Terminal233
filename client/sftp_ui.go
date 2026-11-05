@@ -98,6 +98,23 @@ func (d *desktop) followReportedDirectory(force bool) {
 func (d *desktop) refreshFiles() { d.refreshFilesAfter("") }
 
 func (d *desktop) refreshFilesAfter(previousStatus string) {
+	d.refreshFilesWithHistory(previousStatus, -1)
+}
+
+func (d *desktop) navigateFileHistory(offset int) {
+	if d.busy || d.fileSessionUnavailable() {
+		return
+	}
+	index, dir, ok := d.fileHistory.target(offset)
+	if !ok {
+		return
+	}
+	d.fileDir, d.files = dir, nil
+	d.selectedFile, d.confirmDelete, d.fileRename, d.fileNewDirectory = "", "", "", ""
+	d.refreshFilesWithHistory("", index)
+}
+
+func (d *desktop) refreshFilesWithHistory(previousStatus string, historyIndex int) {
 	if d.busy || d.fileSessionUnavailable() {
 		return
 	}
@@ -126,6 +143,9 @@ func (d *desktop) refreshFilesAfter(previousStatus string) {
 					d.fileStatus = previousStatus + "；" + d.fileStatus
 				}
 				return
+			}
+			if historyIndex < 0 || !d.fileHistory.commitNavigation(historyIndex, dir) {
+				d.fileHistory.visit(dir)
 			}
 			d.files = files
 			d.fileStatus = fmt.Sprintf("%d 个条目", len(files))
@@ -522,7 +542,15 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		d.fileRename = ""
 		d.files = nil
 	})
-	ui.Row(c).Gap(8).Children(func() {
+	ui.Row(c).Gap(8).Wrap().Children(func() {
+		_, _, canBack := d.fileHistory.target(-1)
+		_, _, canForward := d.fileHistory.target(1)
+		if ui.Button(c.Key("file-back"), "后退").Disabled(d.busy || d.fileSessionUnavailable() || !canBack).Clicked() {
+			d.navigateFileHistory(-1)
+		}
+		if ui.Button(c.Key("file-forward"), "前进").Disabled(d.busy || d.fileSessionUnavailable() || !canForward).Clicked() {
+			d.navigateFileHistory(1)
+		}
 		if ui.Button(c.Key("file-parent"), "上一级").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			if local {
 				d.fileDir = filepath.Dir(d.fileDir)

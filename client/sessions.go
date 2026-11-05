@@ -47,6 +47,7 @@ type workspaceSession struct {
 	fileSortDescending, fileHideDotfiles, fileFollowTerminal bool
 	lastTerminalDir                                          string
 	files                                                    []remoteFile
+	fileHistory                                              fileHistory
 	refreshPending                                           bool
 	cloudSources                                             map[string]string
 	forwards                                                 []*localForward
@@ -66,6 +67,7 @@ func (d *desktop) saveSessionState() {
 		s.fileSortDescending, s.fileHideDotfiles, s.fileFollowTerminal = d.fileSortDescending, d.fileHideDotfiles, d.fileFollowTerminal
 		s.lastTerminalDir = d.lastTerminalDir
 		s.files = d.files
+		s.fileHistory = d.fileHistory
 		return
 	}
 }
@@ -93,6 +95,7 @@ func (d *desktop) activateSession(id int) {
 		d.lastTerminalDir = s.lastTerminalDir
 		d.fileNewDirectory, d.fileRename = "", ""
 		d.files, d.confirmDelete = s.files, ""
+		d.fileHistory = s.fileHistory
 		d.workspace = "terminal"
 		d.status = "当前会话：" + s.label
 		if s.refreshPending && !d.fileSessionUnavailable() && !d.busy && d.win != nil {
@@ -157,6 +160,7 @@ func (d *desktop) closeSession(id int) {
 		d.splitSession, d.splitFirstSession = 0, 0
 		d.term, d.shell, d.active = nil, nil, connectionSettings{}
 		d.files, d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile, d.confirmDelete = nil, "", "", "", "", ""
+		d.fileHistory = fileHistory{}
 		d.fileFilter, d.fileSort = "", ""
 		d.fileSortDescending, d.fileHideDotfiles, d.fileFollowTerminal = false, false, false
 		d.lastTerminalDir = ""
