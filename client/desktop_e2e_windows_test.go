@@ -245,6 +245,24 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatal("isolated local directory did not finish loading")
 	}
 	call("act", map[string]any{"key": "new-directory-name", "action": "setValue", "text": "新目录"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "new-directory-create" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				deadline = time.Time{}
+				break
+			}
+		}
+		if deadline.IsZero() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !deadline.IsZero() {
+		t.Fatal("directory create action did not become available")
+	}
 	call("act", map[string]any{"key": "new-directory-create", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

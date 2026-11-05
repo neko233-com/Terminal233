@@ -257,6 +257,7 @@ func (d *desktop) registerWithInvite() {
 	}
 	user, password, token, invitePassword := d.cloudUser, d.cloudPassword, extractInviteToken(d.teamInviteInput), d.teamInvitePassword
 	d.cloudPassword = ""
+	d.cloudRegistration, d.cloudRegistrationLocal = "", false
 	d.teamInvitePassword = ""
 	d.busy = true
 	d.teamStatus = "正在注册并加入团队…"

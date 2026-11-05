@@ -50,6 +50,7 @@ known_hosts.bak
 neko233-known_hosts
 
 # Credentials, signing material and private SSH keys must never enter source control
+*.secure
 .env
 .env.*
 !.env.example

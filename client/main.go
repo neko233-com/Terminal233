@@ -68,6 +68,7 @@ type desktop struct {
 	active                                                                                  connectionSettings
 	cloud                                                                                   *cloudClient
 	cloudURL, cloudUser, cloudPassword, cloudRegistration, cloudStatus                      string
+	cloudRegistrationLocal                                                                  bool
 	accounts                                                                                []cloudAccount
 }
 
@@ -461,6 +462,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 }
 
 const version = "0.3.1"
+const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
 	showVersion := flag.Bool("version", false, "显示版本")
@@ -469,7 +471,7 @@ func main() {
 		fmt.Println("Terminal233 " + version)
 		return
 	}
-	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息", cloudURL: "https://nekossh.neko233.com", teamInviteHours: "24", teamInviteUses: "1"}
+	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息", cloudURL: defaultCloudURL, teamInviteHours: "24", teamInviteUses: "1"}
 	if dir, err := os.UserConfigDir(); err != nil {
 		d.profileStoreBlocked = true
 		d.status = "无法找到本机配置目录：" + err.Error()

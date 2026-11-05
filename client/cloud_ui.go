@@ -12,6 +12,11 @@ func (d *desktop) cloudLogin(register bool) {
 	if d.busy {
 		return
 	}
+	if d.cloudRegistrationLocal && !localRegistrationAvailable(d.cloudURL) {
+		d.cloudRegistration, d.cloudRegistrationLocal = "", false
+		d.cloudStatus = "本机部署令牌仅可用于默认同步服务，请重新填写注册令牌。"
+		return
+	}
 	client, err := newCloudClient(d.cloudURL)
 	if err != nil {
 		d.cloudStatus = err.Error()
@@ -20,6 +25,7 @@ func (d *desktop) cloudLogin(register bool) {
 	user, password, registration := d.cloudUser, d.cloudPassword, d.cloudRegistration
 	d.cloudPassword = ""
 	d.cloudRegistration = ""
+	d.cloudRegistrationLocal = false
 	d.busy = true
 	d.cloudStatus = "正在连接同步服务…"
 	go func() {
@@ -158,10 +164,21 @@ func (d *desktop) cloudView(c *ui.Context) {
 	ui.Text(c, "跨设备访问连接信息，或与团队共享凭据。").TextColor(c.Theme().TextMuted).Wrap()
 	ui.Column(c).FillWidth().Padding(18).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
 		ui.Text(c, "同步账号").FontSize(16).Bold()
-		ui.TextInput(c.Key("cloudurl"), &d.cloudURL).Label("同步服务 HTTPS 地址").Placeholder("同步服务 HTTPS 地址").Disabled(d.busy || d.cloud != nil)
+		ui.TextInput(c.Key("cloudurl"), &d.cloudURL).Label("同步服务 HTTPS 地址").Placeholder("同步服务 HTTPS 地址").Disabled(d.busy || d.cloud != nil).OnChange(d.cloudURLChanged)
 		ui.TextInput(c.Key("clouduser"), &d.cloudUser).Label("同步账号").Placeholder("同步账号").Disabled(d.busy || d.cloud != nil)
 		ui.TextInput(c.Key("cloudpassword"), &d.cloudPassword).Label("同步密码").Placeholder("同步密码").Password().Disabled(d.busy || d.cloud != nil)
 		ui.TextInput(c.Key("cloudregistration"), &d.cloudRegistration).Label("注册令牌").Placeholder("注册令牌（仅注册时需要）").Password().Disabled(d.busy || d.cloud != nil)
+		if d.cloud == nil && localRegistrationAvailable(d.cloudURL) {
+			if ui.Button(c.Key("cloud-local-registration"), "使用本机部署注册令牌").Disabled(d.busy).Clicked() {
+				if token, err := readLocalRegistrationToken(); err != nil {
+					d.cloudStatus = err.Error()
+				} else {
+					d.cloudRegistration = token
+					d.cloudRegistrationLocal = true
+					d.cloudStatus = "已载入本机注册令牌；填写账号和密码后注册。"
+				}
+			}
+		}
 		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 			if ui.PrimaryButton(c.Key("cloudlogin"), "登录同步服务").Disabled(d.busy || d.cloud != nil).Clicked() {
 				d.cloudLogin(false)
@@ -225,6 +242,13 @@ func (d *desktop) cloudView(c *ui.Context) {
 	}
 }
 
+func (d *desktop) cloudURLChanged() {
+	if d.cloudRegistrationLocal && !localRegistrationAvailable(d.cloudURL) {
+		d.cloudRegistration, d.cloudRegistrationLocal = "", false
+		d.cloudStatus = "已清除本机注册令牌；它只能用于默认同步服务。"
+	}
+}
+
 func (d *desktop) cloudDelete() {
 	if d.busy || d.cloud == nil || d.confirmCloudDelete == "" {
 		return
@@ -283,6 +307,7 @@ func (d *desktop) clearCloudState() {
 		d.settingsFromCloud = false
 	}
 	d.cloudPassword, d.cloudRegistration = "", ""
+	d.cloudRegistrationLocal = false
 	d.cloudStatus, d.teamStatus = "", ""
 	d.accounts, d.teams, d.members, d.teamInvites = nil, nil, nil, nil
 	d.teamInviteURL, d.teamInviteInput, d.teamInvitePassword = "", "", ""
