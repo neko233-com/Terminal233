@@ -202,10 +202,14 @@ func TestLiveProjectReleaseWhenExplicitlyRequested(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	client := updateHTTPClient()
-	if token := os.Getenv("NEKOSSH_TEST_GH_TOKEN"); token != "" {
+	token, forceLimit := os.Getenv("NEKOSSH_TEST_GH_TOKEN"), os.Getenv("NEKOSSH_TEST_FORCE_RATE_LIMIT") == "1"
+	if token != "" || forceLimit {
 		client.Transport = updateRoundTrip(func(r *http.Request) (*http.Response, error) {
+			if forceLimit && r.URL.String() == updateAPI {
+				return &http.Response{StatusCode: 403, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("rate limited"))}, nil
+			}
 			copy := r.Clone(r.Context())
-			if copy.URL.Hostname() == "api.github.com" {
+			if token != "" && copy.URL.Hostname() == "api.github.com" {
 				copy.Header.Set("Authorization", "Bearer "+token)
 			}
 			return http.DefaultTransport.RoundTrip(copy)
@@ -217,5 +221,80 @@ func TestLiveProjectReleaseWhenExplicitlyRequested(t *testing.T) {
 	}
 	if err := downloadProjectUpdate(ctx, client, *candidate, filepath.Join(t.TempDir(), candidate.Name)); err != nil {
 		t.Fatalf("published installer could not be verified: %v", err)
+	}
+}
+
+func fallbackFixtureClient(manifest, sums []byte, location string) *http.Client {
+	return &http.Client{Transport: updateRoundTrip(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.String() {
+		case updateAPI:
+			return &http.Response{StatusCode: 403, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("rate limited"))}, nil
+		case updateBase + "latest":
+			return &http.Response{StatusCode: 302, Header: http.Header{"Location": []string{location}}, Body: io.NopCloser(strings.NewReader(""))}, nil
+		case updateBase + "download/v1.2.3/SHA256SUMS.txt":
+			return updateResponse(sums), nil
+		case updateBase + "download/v1.2.3/manifest.json":
+			return updateResponse(manifest), nil
+		default:
+			return nil, io.EOF
+		}
+	})}
+}
+
+func TestRateLimitedUpdateUsesVerifiedOfficialReleaseAssets(t *testing.T) {
+	_, manifest, installer := updateFixture(t)
+	sums := []byte(digestBytes(manifest) + "  manifest.json\r\n" + digestBytes(installer) + "  terminal233-setup-1.2.3-amd64.exe\r\n")
+	client := fallbackFixtureClient(manifest, sums, updateBase+"tag/v1.2.3")
+	got, err := checkProjectUpdate(context.Background(), client, "1.2.2", "windows", "amd64")
+	if err != nil || got == nil || got.SHA256 != digestBytes(installer) || got.Size != int64(len(installer)) {
+		t.Fatalf("fallback failed: %+v %v", got, err)
+	}
+	if got, err = checkProjectUpdate(context.Background(), client, "1.2.3", "windows", "amd64"); err != nil || got != nil {
+		t.Fatal("fallback offered current version")
+	}
+	if _, err = checkProjectUpdate(context.Background(), client, "1.2.2", "windows", "arm64"); err == nil {
+		t.Fatal("fallback accepted absent architecture checksum")
+	}
+	if _, err = checkProjectUpdate(context.Background(), client, "1.2.2", "windows", "386"); err == nil {
+		t.Fatal("fallback accepted unsupported architecture")
+	}
+	baseTransport := client.Transport
+	client.Transport = updateRoundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() == updateAPI {
+			return &http.Response{StatusCode: 429, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
+		}
+		return baseTransport.RoundTrip(r)
+	})
+	if got, err = checkProjectUpdate(context.Background(), client, "1.2.2", "windows", "amd64"); err != nil || got == nil {
+		t.Fatal("HTTP 429 did not use verified fallback")
+	}
+}
+
+func TestRateLimitedUpdateRejectsTamperingAndUntrustedTags(t *testing.T) {
+	_, manifest, installer := updateFixture(t)
+	good := digestBytes(manifest) + "  manifest.json\n" + digestBytes(installer) + "  terminal233-setup-1.2.3-amd64.exe\n"
+	for _, location := range []string{"https://attacker.example/v1.2.3", updateBase + "tag/v1.2.3-rc1", updateBase + "tag/v1.2.3?bad=1", updateBase + "download/v1.2.3/manifest.json"} {
+		if _, err := checkProjectUpdate(context.Background(), fallbackFixtureClient(manifest, []byte(good), location), "1.2.2", "windows", "amd64"); err == nil {
+			t.Fatalf("accepted untrusted release %q", location)
+		}
+	}
+	for _, sums := range []string{strings.Repeat("0", 64) + "  manifest.json\n" + digestBytes(installer) + "  terminal233-setup-1.2.3-amd64.exe\n", good + digestBytes(manifest) + "  manifest.json\n", digestBytes(manifest) + "  manifest.json\n" + strings.Repeat("0", 64) + "  terminal233-setup-1.2.3-amd64.exe\n", good + "bad line\n"} {
+		if _, err := checkProjectUpdate(context.Background(), fallbackFixtureClient(manifest, []byte(sums), updateBase+"tag/v1.2.3"), "1.2.2", "windows", "amd64"); err == nil {
+			t.Fatal("accepted corrupted checksum list")
+		}
+	}
+	if _, err := checkProjectUpdate(context.Background(), fallbackFixtureClient(append(manifest, ' '), []byte(good), updateBase+"tag/v1.2.3"), "1.2.2", "windows", "amd64"); err == nil {
+		t.Fatal("accepted modified fallback manifest")
+	}
+}
+
+func TestUpdateDoesNotFallbackAfterInvalidAPIRelease(t *testing.T) {
+	calls := 0
+	client := &http.Client{Transport: updateRoundTrip(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return updateResponse([]byte(`{"tag_name":"v1.2.3","draft":true}`)), nil
+	})}
+	if _, err := checkProjectUpdate(context.Background(), client, "1.0.0", "windows", "amd64"); err == nil || calls != 1 {
+		t.Fatal("invalid API metadata triggered weaker fallback")
 	}
 }

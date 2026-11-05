@@ -31,7 +31,7 @@ func (d *desktop) startUpdateCheck() {
 			}
 			d.updateAvailable = candidate
 			if candidate == nil {
-				d.updateStatus = "当前已是最新发布版本"
+				d.updateStatus = "没有可用的更新版本"
 			} else {
 				d.updateStatus = "发现新版 " + candidate.Version + "；Windows 安装包未签名。"
 			}

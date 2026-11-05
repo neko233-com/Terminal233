@@ -19,6 +19,8 @@ import (
 const updateAPI = "https://api.github.com/repos/neko233-com/nekossh/releases/latest"
 const updateBase = "https://github.com/neko233-com/nekossh/releases/"
 
+var errUpdateRateLimited = errors.New("项目发布服务暂时限制访问，请稍后重试")
+
 type updateAsset struct {
 	Name, Digest string
 	BrowserURL   string `json:"browser_download_url"`
@@ -113,7 +115,7 @@ func getUpdateBytes(ctx context.Context, client *http.Client, address string, li
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-			return nil, errors.New("项目发布服务暂时限制访问，请稍后重试")
+			return nil, errUpdateRateLimited
 		}
 		return nil, fmt.Errorf("发布服务返回 HTTP %d", resp.StatusCode)
 	}
@@ -151,6 +153,9 @@ func checkProjectUpdate(ctx context.Context, client *http.Client, current, goos,
 		return nil, err
 	}
 	data, err := getUpdateBytes(ctx, client, updateAPI, 1<<20)
+	if errors.Is(err, errUpdateRateLimited) {
+		return checkProjectUpdateFromReleaseAssets(ctx, client, currentVersion, arch)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -276,4 +281,120 @@ func downloadProjectUpdate(ctx context.Context, client *http.Client, candidate u
 		return err
 	}
 	return nil
+}
+
+// The public API can rate-limit shared IPs. In that case resolve the latest
+// official GitHub release tag and verify its manifest and installer against
+// that same release's SHA256SUMS. The API path remains preferred.
+func checkProjectUpdateFromReleaseAssets(ctx context.Context, client *http.Client, current [3]uint64, arch string) (*updateCandidate, error) {
+	tag, err := latestReleaseTag(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	versionText := strings.TrimPrefix(tag, "v")
+	parsed, err := updateVersion(versionText)
+	if err != nil {
+		return nil, err
+	}
+	base := updateBase + "download/" + tag + "/"
+	sumsData, err := getUpdateBytes(ctx, client, base+"SHA256SUMS.txt", 256<<10)
+	if err != nil {
+		return nil, err
+	}
+	sums, err := parseReleaseChecksums(sumsData)
+	if err != nil {
+		return nil, err
+	}
+	manifestBytes, err := getUpdateBytes(ctx, client, base+"manifest.json", 256<<10)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(manifestBytes)
+	if sums["manifest.json"] != hex.EncodeToString(sum[:]) {
+		return nil, errors.New("发布清单校验失败")
+	}
+	var manifest updateManifest
+	if json.Unmarshal(manifestBytes, &manifest) != nil || manifest.Version != versionText || len(manifest.SourceCommit) != 40 {
+		return nil, errors.New("发布清单内容无效")
+	}
+	if commit, err := hex.DecodeString(manifest.SourceCommit); err != nil || len(commit) != 20 {
+		return nil, errors.New("发布来源无效")
+	}
+	name := "terminal233-setup-" + versionText + "-" + arch + ".exe"
+	count := 0
+	var size int64
+	for _, item := range manifest.Artifacts {
+		if item.Name != name {
+			continue
+		}
+		count++
+		checksum, err := hex.DecodeString(item.SHA256)
+		if err != nil || len(checksum) != sha256.Size || item.Bytes <= 0 || item.Bytes > 1<<30 || strings.ToLower(item.SHA256) != sums[name] {
+			return nil, errors.New("安装包校验值不一致")
+		}
+		size = item.Bytes
+	}
+	if count != 1 {
+		return nil, errors.New("发布清单中的安装包无效")
+	}
+	if !newerUpdate(parsed, current) {
+		return nil, nil
+	}
+	return &updateCandidate{Version: versionText, Name: name, URL: base + name, SHA256: sums[name], Size: size}, nil
+}
+
+func latestReleaseTag(ctx context.Context, client *http.Client) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, updateBase+"latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "NekoSSH/"+version)
+	noRedirect := *client
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := noRedirect.Do(req)
+	if err != nil {
+		return "", errors.New("无法连接项目发布服务")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusMovedPermanently && resp.StatusCode != http.StatusSeeOther && resp.StatusCode != http.StatusTemporaryRedirect && resp.StatusCode != http.StatusPermanentRedirect {
+		return "", errors.New("无法确定项目最新发布")
+	}
+	location := resp.Header.Get("Location")
+	prefix := updateBase + "tag/"
+	if !strings.HasPrefix(location, prefix) {
+		return "", errors.New("最新发布地址不可信")
+	}
+	tag := strings.TrimPrefix(location, prefix)
+	if !strings.HasPrefix(tag, "v") {
+		return "", errors.New("发布版本无效")
+	}
+	if _, err := updateVersion(strings.TrimPrefix(tag, "v")); err != nil {
+		return "", errors.New("发布版本无效")
+	}
+	if location != prefix+tag {
+		return "", errors.New("最新发布地址不可信")
+	}
+	return tag, nil
+}
+
+func parseReleaseChecksums(data []byte) (map[string]string, error) {
+	result := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 2 || strings.ContainsAny(fields[1], "/\\") {
+			return nil, errors.New("发布校验文件格式无效")
+		}
+		raw, err := hex.DecodeString(fields[0])
+		if err != nil || len(raw) != sha256.Size {
+			return nil, errors.New("发布校验值无效")
+		}
+		if _, exists := result[fields[1]]; exists {
+			return nil, errors.New("发布校验文件包含重复条目")
+		}
+		result[fields[1]] = strings.ToLower(fields[0])
+	}
+	return result, nil
 }

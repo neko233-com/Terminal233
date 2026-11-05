@@ -538,7 +538,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.17"
+const version = "0.3.18"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
