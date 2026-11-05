@@ -83,6 +83,9 @@ type desktop struct {
 	cloud                                                                                   *cloudClient
 	cloudURL, cloudUser, cloudPassword, cloudRegistration, cloudStatus                      string
 	cloudRegistrationLocal, cloudListStale                                                  bool
+	showArchive, archiveConfirm                                                             bool
+	archivePath, archivePassword, archiveStatus                                             string
+	archiveCancel                                                                           context.CancelFunc
 	accounts                                                                                []cloudAccount
 	forwardLocalPort, forwardHost, forwardPort, forwardStatus                               string
 	updateStatus, updatePath                                                                string
@@ -601,7 +604,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.29"
+const version = "0.3.30"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

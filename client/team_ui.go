@@ -115,6 +115,7 @@ func (d *desktop) applyCloudScope(id string, accounts []cloudAccount, members []
 	d.teamInvites = nil
 	d.confirmInvite, d.confirmMember, d.selectedMember, d.confirmCloudDelete = "", "", "", ""
 	d.teamInviteURL = ""
+	d.archiveConfirm = false
 }
 
 func (d *desktop) cloudScopeName() string {

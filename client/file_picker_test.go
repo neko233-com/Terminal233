@@ -31,6 +31,11 @@ func TestPickedPathsOnlyUpdateTheirTarget(t *testing.T) {
 	if d.fileLocal != "source" || d.fileStatus == "" {
 		t.Fatal("dialog error changed the selected path or was hidden")
 	}
+	d.archiveConfirm = true
+	d.applyPickedPath("archive-open", "archive.nekobackup", nil)
+	if d.archivePath != "archive.nekobackup" || d.archiveConfirm {
+		t.Fatal("archive selection did not reset confirmation")
+	}
 }
 
 func TestBatchPickerRejectsStaleDestinationAndOversizedSelection(t *testing.T) {

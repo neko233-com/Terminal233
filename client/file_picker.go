@@ -71,6 +71,10 @@ func (d *desktop) pickLocalPath(kind string) {
 		title, defaultPath = "选择加密备份", d.adminBackupPath
 	case "backup-save":
 		title, defaultPath, save = "选择备份目标（不覆盖已有文件）", d.adminBackupPath, true
+	case "archive-open":
+		title, defaultPath = "选择加密连接备份", d.archivePath
+	case "archive-save":
+		title, defaultPath, save = "选择连接备份目标（不覆盖已有文件）", d.archivePath, true
 	default:
 		return
 	}
@@ -103,6 +107,8 @@ func (d *desktop) applyPickedPath(kind, selected string, err error) {
 			d.fileStatus = message
 		case "backup-open", "backup-save":
 			d.adminStatus = message
+		case "archive-open", "archive-save":
+			d.archiveStatus = message
 		default:
 			d.status = message
 		}
@@ -118,5 +124,7 @@ func (d *desktop) applyPickedPath(kind, selected string, err error) {
 		d.settings.KeyPath = selected
 	case "backup-open", "backup-save":
 		d.adminBackupPath, d.adminConfirmRestore = selected, false
+	case "archive-open", "archive-save":
+		d.archivePath, d.archiveConfirm = selected, false
 	}
 }

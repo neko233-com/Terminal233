@@ -1,0 +1,159 @@
+package main
+
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"golang.org/x/crypto/scrypt"
+)
+
+const cloudArchiveFormat = "nekossh-accounts-v1"
+const maxCloudArchivePlain = 2 << 20
+const maxCloudArchiveFile = 3 << 20
+const maxCloudArchiveAccounts = 1000
+
+type cloudArchiveEnvelope struct {
+	Format     string `json:"format"`
+	Salt       []byte `json:"salt"`
+	Nonce      []byte `json:"nonce"`
+	Ciphertext []byte `json:"ciphertext"`
+}
+
+type cloudArchiveDocument struct {
+	Version  int            `json:"version"`
+	Accounts []cloudAccount `json:"accounts"`
+}
+
+func validateArchivePassword(password string) error {
+	if len(password) < 12 || len(password) > 1024 {
+		return errors.New("备份密码需为 12–1024 字节")
+	}
+	return nil
+}
+
+func normalizeArchiveAccounts(accounts []cloudAccount) ([]cloudAccount, error) {
+	if len(accounts) > maxCloudArchiveAccounts {
+		return nil, errors.New("备份连接数量超过上限")
+	}
+	result := make([]cloudAccount, 0, len(accounts))
+	for i, account := range accounts {
+		settings := connectionSettings{Host: account.Host, Port: fmt.Sprint(account.Port), User: account.Username, Password: account.Password, Fingerprint: account.HostKeyFingerprint}
+		if len(account.Label) > 128 || len(account.Host) > 253 || len(account.Username) > 128 || len(account.Password) > 64<<10 || len(account.HostKeyFingerprint) > 100 || strings.ContainsAny(account.Username, "/\\@ \t\r\n") {
+			return nil, fmt.Errorf("备份第 %d 条连接无效", i+1)
+		}
+		item, err := prepareCloudAccount(settings, account.Label, nil, "")
+		if err != nil {
+			return nil, fmt.Errorf("备份第 %d 条连接无效", i+1)
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+func archiveCipher(password string, salt []byte) (cipher.AEAD, error) {
+	if err := validateArchivePassword(password); err != nil {
+		return nil, err
+	}
+	if len(salt) != 16 {
+		return nil, errors.New("备份格式无效")
+	}
+	key, err := scrypt.Key([]byte(password), salt, 1<<15, 8, 1, 32)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(key)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
+}
+
+func encodeCloudArchive(accounts []cloudAccount, password string) ([]byte, error) {
+	items, err := normalizeArchiveAccounts(accounts)
+	if err != nil {
+		return nil, err
+	}
+	plain, err := json.Marshal(cloudArchiveDocument{Version: 1, Accounts: items})
+	if err != nil || len(plain) > maxCloudArchivePlain {
+		return nil, errors.New("备份内容无法编码或过大")
+	}
+	defer clear(plain)
+	salt := make([]byte, 16)
+	if _, err = rand.Read(salt); err != nil {
+		return nil, err
+	}
+	aead, err := archiveCipher(password, salt)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err = rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	envelope := cloudArchiveEnvelope{Format: cloudArchiveFormat, Salt: salt, Nonce: nonce, Ciphertext: aead.Seal(nil, nonce, plain, []byte(cloudArchiveFormat))}
+	return json.Marshal(envelope)
+}
+
+func decodeCloudArchive(data []byte, password string) ([]cloudAccount, error) {
+	if len(data) > maxCloudArchiveFile {
+		return nil, errors.New("备份文件过大")
+	}
+	var envelope cloudArchiveEnvelope
+	if json.Unmarshal(data, &envelope) != nil || envelope.Format != cloudArchiveFormat || len(envelope.Salt) != 16 || len(envelope.Nonce) != 12 || len(envelope.Ciphertext) < 16 || len(envelope.Ciphertext) > maxCloudArchivePlain+16 {
+		return nil, errors.New("备份格式无效")
+	}
+	aead, err := archiveCipher(password, envelope.Salt)
+	if err != nil {
+		return nil, err
+	}
+	plain, err := aead.Open(nil, envelope.Nonce, envelope.Ciphertext, []byte(cloudArchiveFormat))
+	if err != nil {
+		return nil, errors.New("备份密码错误或文件已损坏")
+	}
+	defer clear(plain)
+	var document cloudArchiveDocument
+	if json.Unmarshal(plain, &document) != nil || document.Version != 1 || document.Accounts == nil {
+		return nil, errors.New("备份内容无效")
+	}
+	return normalizeArchiveAccounts(document.Accounts)
+}
+
+func writeCloudArchive(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	_, writeErr := f.Write(data)
+	if writeErr == nil {
+		writeErr = f.Sync()
+	}
+	closeErr := f.Close()
+	if writeErr != nil || closeErr != nil {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("写入失败且无法清理不完整备份：%w", err)
+		}
+		return errors.Join(writeErr, closeErr)
+	}
+	return nil
+}
+
+func readCloudArchive(path, password string) ([]cloudAccount, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxCloudArchiveFile+1))
+	if err != nil {
+		return nil, err
+	}
+	return decodeCloudArchive(data, password)
+}

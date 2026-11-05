@@ -345,6 +345,16 @@ func (d *desktop) cloudView(c *ui.Context) {
 		ui.Text(c, "连接列表可能过期，请先刷新后再修改或删除。").FontSize(12).Wrap()
 	}
 	ui.Text(c, d.cloudStatus).FontSize(12).Wrap()
+	archiveLabel := "展开连接备份"
+	if d.showArchive {
+		archiveLabel = "收起连接备份"
+	}
+	if ui.Button(c.Key("toggle-archive"), archiveLabel).Clicked() {
+		d.showArchive = !d.showArchive
+	}
+	if d.showArchive {
+		d.cloudArchiveView(c)
+	}
 	teamLabel := "展开团队管理"
 	if d.showTeams {
 		teamLabel = "收起团队管理"
@@ -454,6 +464,7 @@ func (d *desktop) clearCloudState() {
 		d.settingsFromCloud = false
 	}
 	d.cloudPassword, d.cloudRegistration = "", ""
+	d.archivePassword, d.archiveStatus, d.archiveConfirm = "", "", false
 	d.cloudRegistrationLocal, d.cloudListStale = false, false
 	d.cloudFormSources = nil
 	for _, session := range d.sessions {

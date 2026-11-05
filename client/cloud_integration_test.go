@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base32"
@@ -114,6 +115,28 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	accounts, err = client.list()
 	if err != nil || len(accounts) != 0 {
 		t.Fatalf("delete list=%v err=%v", accounts, err)
+	}
+	// The portable encrypted backup imports records as new entries without
+	// replacing an existing record in the destination scope.
+	archive, err := encodeCloudArchive([]cloudAccount{account}, "backup-password-long")
+	if err != nil {
+		t.Fatal(err)
+	}
+	portable, err := decodeCloudArchive(archive, "backup-password-long")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.save(account); err != nil {
+		t.Fatal(err)
+	}
+	result := importCloudAccounts(context.Background(), client, portable)
+	if result.mutationErr != nil || result.refreshErr != nil || result.imported != 1 || len(result.accounts) != 2 || result.accounts[0].ID == result.accounts[1].ID {
+		t.Fatal("portable import did not preserve the existing connection")
+	}
+	for _, item := range result.accounts {
+		if err := client.remove(item.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	team, err := client.createTeam("开发组")
 	if err != nil {

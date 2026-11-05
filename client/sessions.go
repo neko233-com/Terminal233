@@ -188,6 +188,9 @@ func (d *desktop) closeSession(id int) {
 }
 
 func (d *desktop) closeAllSessions() {
+	if d.archiveCancel != nil {
+		d.archiveCancel()
+	}
 	if d.updateCancel != nil {
 		d.updateCancel()
 	}
