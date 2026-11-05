@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -28,6 +30,37 @@ func TestPickedPathsOnlyUpdateTheirTarget(t *testing.T) {
 	d.applyPickedPath("download", "", errors.New("dialog failed"))
 	if d.fileLocal != "source" || d.fileStatus == "" {
 		t.Fatal("dialog error changed the selected path or was hidden")
+	}
+}
+
+func TestBatchPickerRejectsStaleDestinationAndOversizedSelection(t *testing.T) {
+	d := &desktop{term: &terminal.Terminal{}, currentSession: 1, fileDir: "old", fileStatus: "unchanged"}
+	origin := batchPickerOrigin{sessionID: 1, directory: "old"}
+	d.applyPickedBatch(origin, nil, nil)
+	if d.fileStatus != "unchanged" || d.busy {
+		t.Fatal("cancel changed the transfer state")
+	}
+	d.fileDir = "new"
+	d.applyPickedBatch(origin, []string{"source"}, nil)
+	if !strings.Contains(d.fileStatus, "已改变") || d.busy {
+		t.Fatal("stale picker destination was accepted")
+	}
+	d.fileDir = "old"
+	d.applyPickedBatch(origin, make([]string, maxBatchFiles+1), nil)
+	if !strings.Contains(d.fileStatus, "最多传输 100") || d.busy {
+		t.Fatal("oversized selection was accepted")
+	}
+	d.applyPickedBatch(origin, nil, errors.New("dialog failed"))
+	if !strings.Contains(d.fileStatus, "dialog failed") {
+		t.Fatal("picker error was hidden")
+	}
+}
+
+func TestFileWorkspaceExposesBatchPicker(t *testing.T) {
+	d := &desktop{workspace: "files", term: &terminal.Terminal{}}
+	view := ui.NewTester(d.view, 1200, 1400)
+	if !view.HasText("选择多文件并复制到此…") {
+		t.Fatal("batch file picker is missing")
 	}
 }
 

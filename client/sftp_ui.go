@@ -745,6 +745,13 @@ func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {
 		if ui.Button(c.Key("pick-upload"), "选择源文件…").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			d.pickLocalPath("upload")
 		}
+		batchLabel := "选择多文件并上传…"
+		if local {
+			batchLabel = "选择多文件并复制到此…"
+		}
+		if ui.Button(c.Key("pick-batch-upload"), batchLabel).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
+			d.pickBatchUpload()
+		}
 		if ui.Button(c.Key("pick-download"), "选择目标路径…").Disabled(d.busy || d.fileSessionUnavailable() || d.selectedFile == "").Clicked() {
 			d.pickLocalPath("download")
 		}

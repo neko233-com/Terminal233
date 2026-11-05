@@ -1,10 +1,53 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/egoist/mygo"
 )
+
+type batchPickerOrigin struct {
+	sessionID int
+	shell     *remoteShell
+	directory string
+}
+
+// The label makes clear that confirming the picker immediately starts upload.
+func (d *desktop) pickBatchUpload() {
+	if d.busy || d.win == nil || d.fileSessionUnavailable() {
+		return
+	}
+	origin := batchPickerOrigin{d.currentSession, d.shell, d.fileDir}
+	d.busy = true
+	win := d.win
+	go func() {
+		files, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: win, Title: "选择要上传或复制的文件（最多 100 个）", Multiple: true})
+		win.Update(func() {
+			d.busy = false
+			d.applyPickedBatch(origin, files, err)
+		})
+	}()
+}
+
+func (d *desktop) applyPickedBatch(origin batchPickerOrigin, files []string, err error) {
+	if err != nil {
+		d.fileStatus = "选择文件失败：" + err.Error()
+		return
+	}
+	if len(files) == 0 {
+		return
+	}
+	if len(files) > maxBatchFiles {
+		d.fileStatus = fmt.Sprintf("每次最多传输 %d 个文件", maxBatchFiles)
+		return
+	}
+	if d.busy || d.fileSessionUnavailable() || d.currentSession != origin.sessionID || d.shell != origin.shell || d.fileDir != origin.directory {
+		d.fileStatus = "文件会话或目录已改变，请重新选择文件。"
+		return
+	}
+	d.transferBatch(files)
+}
 
 // pickLocalPath opens a native picker without starting a transfer or restore.
 // Operations still create files exclusively and never overwrite a destination.
