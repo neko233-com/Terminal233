@@ -599,7 +599,7 @@ func TestDroppedFilesWithoutConnectionGivesFeedback(t *testing.T) {
 	if err := test.Click("远程文件"); err != nil {
 		t.Fatal(err)
 	}
-	zone, ok := test.Find("拖入一个文件上传")
+	zone, ok := test.Find("拖入文件上传（最多 100 个）")
 	if !ok {
 		t.Fatal("drop zone missing")
 	}

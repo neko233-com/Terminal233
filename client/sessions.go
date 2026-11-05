@@ -96,7 +96,7 @@ func (d *desktop) activateSession(id int) {
 		d.status = "当前会话：" + s.label
 		if s.refreshPending && !d.fileSessionUnavailable() && !d.busy && d.win != nil {
 			s.refreshPending = false
-			d.refreshFiles()
+			d.refreshFilesAfter(d.fileStatus)
 			return
 		}
 		if d.showFilePanel && !d.fileSessionUnavailable() && d.shell == nil && d.files == nil && d.fileStatus == "" && d.win != nil {

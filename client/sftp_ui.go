@@ -95,7 +95,9 @@ func (d *desktop) followReportedDirectory(force bool) {
 	}
 }
 
-func (d *desktop) refreshFiles() {
+func (d *desktop) refreshFiles() { d.refreshFilesAfter("") }
+
+func (d *desktop) refreshFilesAfter(previousStatus string) {
 	if d.busy || d.fileSessionUnavailable() {
 		return
 	}
@@ -120,10 +122,16 @@ func (d *desktop) refreshFiles() {
 			}
 			if err != nil {
 				d.fileStatus = fmt.Sprintf("读取文件失败：%v", err)
+				if previousStatus != "" {
+					d.fileStatus = previousStatus + "；" + d.fileStatus
+				}
 				return
 			}
 			d.files = files
 			d.fileStatus = fmt.Sprintf("%d 个条目", len(files))
+			if previousStatus != "" {
+				d.fileStatus = previousStatus + "；" + d.fileStatus
+			}
 		})
 	}()
 }
@@ -179,23 +187,27 @@ func transferUpdatesDirectory(shell *remoteShell, dir, local string, upload bool
 }
 
 func (d *desktop) finishTransfer(sessionID int, shell *remoteShell, dir string, refresh bool, err error) {
-	d.busy = false
-	d.cancelTransfer = nil
-	d.transferSessionID = 0
 	status := "传输完成"
 	if errors.Is(err, context.Canceled) {
 		status = "传输已取消；未完成的目标文件已清理"
 	} else if err != nil {
 		status = "传输失败：" + transferErrorText(err)
 	}
+	d.finishTransferStatus(sessionID, shell, dir, status, refresh && err == nil)
+}
+
+func (d *desktop) finishTransferStatus(sessionID int, shell *remoteShell, dir, status string, refresh bool) {
+	d.busy = false
+	d.cancelTransfer = nil
+	d.transferSessionID = 0
 	if sessionID == d.currentSession && shell == d.shell {
 		if dir != d.fileDir {
 			d.fileStatus = "先前目录的" + status + "；当前目录未更改"
 			return
 		}
 		d.fileStatus = status
-		if refresh && err == nil && d.win != nil {
-			d.refreshFiles()
+		if refresh && d.win != nil {
+			d.refreshFilesAfter(status)
 		}
 		return
 	}
@@ -207,13 +219,64 @@ func (d *desktop) finishTransfer(sessionID int, shell *remoteShell, dir string, 
 			session.fileStatus = "先前目录的" + status + "；当前目录未更改"
 		} else {
 			session.fileStatus = status
-			if refresh && err == nil {
+			if refresh {
 				session.files = nil
 				session.refreshPending = true
 			}
 		}
 		return
 	}
+}
+
+func (d *desktop) transferBatch(files []string) {
+	if d.busy || d.fileSessionUnavailable() || len(files) == 0 {
+		return
+	}
+	if len(files) > maxBatchFiles {
+		d.fileStatus = fmt.Sprintf("每次最多传输 %d 个文件", maxBatchFiles)
+		return
+	}
+	if strings.TrimSpace(d.fileDir) == "" {
+		d.fileStatus = "请先填写当前目录"
+		return
+	}
+	files = append([]string(nil), files...)
+	shell, dir, sessionID := d.shell, d.fileDir, d.currentSession
+	d.busy = true
+	d.fileStatus = fmt.Sprintf("正在传输 0/%d…", len(files))
+	ctx, cancel := context.WithCancel(context.Background())
+	d.cancelTransfer, d.transferSessionID = cancel, sessionID
+	go func() {
+		defer cancel()
+		result := runBatchUpload(ctx, files, func(local string, progress func(int64)) error {
+			if shell != nil {
+				return uploadFileContext(ctx, shell, local, dir, progress)
+			}
+			target, err := localItemPath(dir, filepath.Base(local))
+			if err != nil {
+				return err
+			}
+			return copyLocalFileContext(ctx, local, target, progress)
+		}, func(index, total int, name string, read int64) {
+			d.win.Update(func() {
+				if ctx.Err() != nil || d.cancelTransfer == nil || d.transferSessionID != sessionID {
+					return
+				}
+				status := fmt.Sprintf("正在传输 %d/%d · %s · 已读取 %s", index, total, name, fileSizeLabel(remoteFile{Size: read}))
+				if sessionID == d.currentSession && d.shell == shell && d.fileDir == dir {
+					d.fileStatus = status
+					return
+				}
+				for _, s := range d.sessions {
+					if s.id == sessionID && s.shell == shell && s.fileDir == dir {
+						s.fileStatus = status
+						return
+					}
+				}
+			})
+		})
+		d.win.Update(func() { d.finishTransferStatus(sessionID, shell, dir, result.status(), result.succeeded > 0) })
+	}()
 }
 
 func (d *desktop) transfer(upload bool) {
@@ -440,9 +503,9 @@ func (d *desktop) setFileSort(order string) {
 
 func (d *desktop) fileView(c *ui.Context, compact bool) {
 	local := d.term != nil && d.shell == nil
-	title, help := "远程文件", "选择目录浏览，拖入单个文件上传；删除前需要再次确认。"
+	title, help := "远程文件", "选择目录浏览，拖入文件上传；删除前需要再次确认。"
 	if local {
-		title, help = "本机文件", "选择目录浏览，拖入单个文件复制；删除前需要再次确认。"
+		title, help = "本机文件", "选择目录浏览，拖入文件复制；删除前需要再次确认。"
 	}
 	ui.Text(c, title).FontSize(16).Bold()
 	for _, session := range d.sessions {
@@ -630,20 +693,20 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 }
 
 func (d *desktop) fileDropView(c *ui.Context, local bool) {
-	dropLabel := "拖入一个文件上传"
+	dropLabel := "拖入文件上传（最多 100 个）"
 	if local {
-		dropLabel = "拖入一个文件复制到当前目录"
+		dropLabel = "拖入文件复制到当前目录（最多 100 个）"
 	}
 	drop := ui.Box(c.Key("file-drop")).Height(48).Border(1, c.Theme().Border).Padding(8).Label(dropLabel)
 	drop.Children(func() { ui.Text(c, dropLabel).FontSize(12) })
 	if files := drop.DroppedFiles(); len(files) > 0 {
 		if d.busy || d.fileSessionUnavailable() {
 			d.fileStatus = "请先连接后再上传"
-		} else if len(files) != 1 {
-			d.fileStatus = "每次只能拖入一个文件"
-		} else {
+		} else if len(files) == 1 {
 			d.fileLocal = files[0]
 			d.transfer(true)
+		} else {
+			d.transferBatch(files)
 		}
 	}
 }
