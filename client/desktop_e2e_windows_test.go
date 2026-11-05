@@ -132,17 +132,24 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if attempts.Load() != 1 {
 		t.Fatalf("authentication attempts: %d", attempts.Load())
 	}
-	call("act", map[string]any{"key": "disconnect", "action": "press"})
+	// Let the initial SFTP directory read finish before opening another tab.
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "已断开") {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "local-terminal" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				deadline = time.Time{}
+				break
+			}
+		}
+		if deadline.IsZero() {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "已断开") {
-		t.Fatalf("desktop failed to disconnect")
+	if !deadline.IsZero() {
+		t.Fatal("initial file refresh did not finish")
 	}
 	call("act", map[string]any{"key": "local-terminal", "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
@@ -155,6 +162,54 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if !strings.Contains(tree, "本机终端已打开") {
 		t.Fatalf("local PowerShell terminal failed to start: %s", tree)
+	}
+	call("act", map[string]any{"key": "local-terminal", "action": "press"})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "session-1") && strings.Contains(tree, "session-2") && strings.Contains(tree, "session-3") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "session-1") || !strings.Contains(tree, "session-2") || !strings.Contains(tree, "session-3") {
+		t.Fatalf("multiple terminal tabs missing: %s", tree)
+	}
+	call("act", map[string]any{"key": "session-2", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "当前会话：本机终端 2") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "当前会话：本机终端 2") {
+		t.Fatalf("failed to switch terminal tabs: %s", tree)
+	}
+	call("act", map[string]any{"key": "disconnect", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "已关闭会话；当前：本机终端 3") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "已关闭会话；当前：本机终端 3") {
+		t.Fatalf("closing one tab lost the remaining session: %s", tree)
+	}
+	call("act", map[string]any{"key": "disconnect", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "session-1") && !strings.Contains(tree, "session-3") && strings.Contains(tree, "已关闭会话；当前：") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "session-1") || strings.Contains(tree, "session-3") {
+		t.Fatalf("SSH session disappeared or local tab remained: %s", tree)
 	}
 	call("act", map[string]any{"key": "disconnect", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)

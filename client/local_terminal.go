@@ -10,7 +10,7 @@ import (
 
 // openLocalTerminal starts a local interactive shell, without an SSH client or server.
 func (d *desktop) openLocalTerminal() {
-	if d.busy || d.term != nil {
+	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
 		return
 	}
 	options := terminal.Options{NoClipboardWrite: true, ImageLimit: -1, Env: []string{"TERM=xterm-256color", "COLORTERM=truecolor"}}
@@ -27,15 +27,6 @@ func (d *desktop) openLocalTerminal() {
 		d.status = fmt.Sprintf("本机终端启动失败：%v", err)
 		return
 	}
-	if d.term != nil {
-		_ = d.term.Close()
-	}
-	d.term = t
-	d.workspace = "terminal"
-	d.shell = nil
-	d.files = nil
-	d.selectedFile = ""
-	d.confirmDelete = ""
-	d.active = connectionSettings{}
+	d.addSession(t, nil, connectionSettings{}, fmt.Sprintf("本机终端 %d", d.nextSession+1))
 	d.status = "本机终端已打开；命令颜色由本机 shell 提供。"
 }

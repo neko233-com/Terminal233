@@ -16,6 +16,8 @@ type desktop struct {
 	workspace                                                                               string
 	editConnection                                                                          bool
 	lightTheme                                                                              bool
+	sessions                                                                                []*workspaceSession
+	currentSession, nextSession                                                             int
 	showTeams, showAdmin                                                                    bool
 	teamInvites                                                                             []cloudInvite
 	confirmInvite                                                                           string
@@ -111,7 +113,7 @@ func (d *desktop) inspect() {
 }
 
 func (d *desktop) connect() {
-	if d.busy || d.term != nil || d.fingerprint == "" {
+	if d.busy || len(d.sessions) >= maxWorkspaceSessions || d.fingerprint == "" {
 		return
 	}
 	d.busy = true
@@ -135,16 +137,8 @@ func (d *desktop) connect() {
 				d.status = fmt.Sprintf("连接失败：%v", err)
 				return
 			}
-			if d.term != nil {
-				_ = d.term.Close()
-			}
-			d.term = term
-			d.shell = shell
-			d.fileDir = "."
-			d.files = nil
-			d.selectedFile = ""
+			d.addSession(term, shell, settings, settings.User+"@"+settings.Host)
 			d.refreshFiles()
-			d.active = settings
 			d.status = "已连接"
 			for i, p := range d.profiles {
 				if string(p.ID) == d.selectedProfile && p.Settings.Host == settings.Host && p.Settings.Port == settings.Port && p.Settings.User == settings.User {
@@ -178,15 +172,9 @@ func (d *desktop) view(c *ui.Context) {
 			if ui.Button(c.Key("theme-toggle"), themeLabel).Clicked() {
 				d.lightTheme = !d.lightTheme
 			}
-			ui.Button(c.Key("local-terminal"), "本机终端").Disabled(d.busy || d.term != nil).OnClick(d.openLocalTerminal)
-			if ui.Button(c.Key("disconnect"), "断开").Disabled(d.term == nil).Clicked() {
-				_ = d.term.Close()
-				d.term = nil
-				d.shell = nil
-				d.files = nil
-				d.active = connectionSettings{}
-				d.workspace = "connections"
-				d.status = "已断开"
+			ui.Button(c.Key("local-terminal"), "本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
+			if ui.Button(c.Key("disconnect"), "关闭当前会话").Disabled(d.busy || d.term == nil).Clicked() {
+				d.closeCurrentSession()
 			}
 		})
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
@@ -235,6 +223,14 @@ func (d *desktop) view(c *ui.Context) {
 			})
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
 				if d.workspace == "terminal" {
+					ui.ScrollHorizontal(c).FillWidth().Padding(8, 12).Gap(6).Children(func() {
+						for _, session := range d.sessions {
+							s := session
+							if workspaceButton(c, fmt.Sprintf("session-%d", s.id), s.label, s.id == d.currentSession).Disabled(d.busy).Clicked() {
+								d.activateSession(s.id)
+							}
+						}
+					})
 					ui.Row(c).FillWidth().Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 						ui.Text(c, "终端").FontSize(17).Bold().Grow(1)
 						ui.Text(c, d.status).FontSize(12).TextColor(t.TextMuted)
@@ -297,7 +293,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	if d.fingerprint != "" {
 		ui.Text(c, d.fingerprint).FontSize(12)
 	}
-	ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || d.term != nil || d.fingerprint == "").OnClick(d.connect)
+	ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions || d.fingerprint == "").OnClick(d.connect)
 	ui.Text(c, d.status).FontSize(13)
 }
 
@@ -321,11 +317,7 @@ func main() {
 	mygo.Theme.SetSource(mygo.ThemeDark)
 	mygo.App.WhenReady(func() {
 		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH", Width: 1200, Height: 760, Content: ui.View(d.view)})
-		d.win.OnClosed(func() {
-			if d.term != nil {
-				_ = d.term.Close()
-			}
-		})
+		d.win.OnClosed(d.closeAllSessions)
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
