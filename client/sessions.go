@@ -13,17 +13,18 @@ const maxWorkspaceSessions = 12
 // Each tab owns its terminal and remote file selection. Credentials stay in
 // memory and are never part of the persisted connection list.
 type workspaceSession struct {
-	id                                           int
-	label                                        string
-	term                                         *terminal.Terminal
-	shell                                        *remoteShell
-	active                                       connectionSettings
-	fileDir, fileLocal, fileStatus, selectedFile string
-	fileFilter, fileSort                         string
-	fileSortDescending, fileHideDotfiles         bool
-	files                                        []remoteFile
-	refreshPending                               bool
-	forwards                                     []*localForward
+	id                                                       int
+	label                                                    string
+	term                                                     *terminal.Terminal
+	shell                                                    *remoteShell
+	active                                                   connectionSettings
+	fileDir, fileLocal, fileStatus, selectedFile             string
+	fileFilter, fileSort                                     string
+	fileSortDescending, fileHideDotfiles, fileFollowTerminal bool
+	lastTerminalDir                                          string
+	files                                                    []remoteFile
+	refreshPending                                           bool
+	forwards                                                 []*localForward
 }
 
 func (d *desktop) canSwitchSession() bool {
@@ -37,7 +38,8 @@ func (d *desktop) saveSessionState() {
 		}
 		s.fileDir, s.fileLocal, s.fileStatus, s.selectedFile = d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile
 		s.fileFilter, s.fileSort = d.fileFilter, d.fileSort
-		s.fileSortDescending, s.fileHideDotfiles = d.fileSortDescending, d.fileHideDotfiles
+		s.fileSortDescending, s.fileHideDotfiles, s.fileFollowTerminal = d.fileSortDescending, d.fileHideDotfiles, d.fileFollowTerminal
+		s.lastTerminalDir = d.lastTerminalDir
 		s.files = d.files
 		return
 	}
@@ -62,7 +64,8 @@ func (d *desktop) activateSession(id int) {
 		d.term, d.shell, d.active = s.term, s.shell, s.active
 		d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile = s.fileDir, s.fileLocal, s.fileStatus, s.selectedFile
 		d.fileFilter, d.fileSort = s.fileFilter, s.fileSort
-		d.fileSortDescending, d.fileHideDotfiles = s.fileSortDescending, s.fileHideDotfiles
+		d.fileSortDescending, d.fileHideDotfiles, d.fileFollowTerminal = s.fileSortDescending, s.fileHideDotfiles, s.fileFollowTerminal
+		d.lastTerminalDir = s.lastTerminalDir
 		d.fileNewDirectory, d.fileRename = "", ""
 		d.files, d.confirmDelete = s.files, ""
 		d.workspace = "terminal"
@@ -130,7 +133,8 @@ func (d *desktop) closeSession(id int) {
 		d.term, d.shell, d.active = nil, nil, connectionSettings{}
 		d.files, d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile, d.confirmDelete = nil, "", "", "", "", ""
 		d.fileFilter, d.fileSort = "", ""
-		d.fileSortDescending, d.fileHideDotfiles = false, false
+		d.fileSortDescending, d.fileHideDotfiles, d.fileFollowTerminal = false, false, false
+		d.lastTerminalDir = ""
 		if len(d.sessions) == 0 {
 			d.workspace, d.status = "connections", "已断开"
 			return

@@ -56,7 +56,8 @@ type desktop struct {
 	shell                                                                                   *remoteShell
 	fileDir, fileLocal, fileStatus, selectedFile, confirmDelete                             string
 	fileFilter, fileNewDirectory, fileRename, fileSort                                      string
-	fileSortDescending, fileHideDotfiles                                                    bool
+	fileSortDescending, fileHideDotfiles, fileFollowTerminal                                bool
+	lastTerminalDir                                                                         string
 	files                                                                                   []remoteFile
 	expectedFingerprint, changedFingerprint                                                 string
 	win                                                                                     *mygo.Window
@@ -220,6 +221,9 @@ func (d *desktop) connect() {
 
 func (d *desktop) view(c *ui.Context) {
 	d.workspaceShortcuts(c)
+	if (d.workspace == "files" || d.workspace == "terminal") && d.fileFollowTerminal {
+		d.followReportedDirectory(false)
+	}
 	width, _ := c.Size()
 	if d.lightTheme {
 		c.SetTheme(workspaceLightTheme)
@@ -503,7 +507,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.10"
+const version = "0.3.11"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

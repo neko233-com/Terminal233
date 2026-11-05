@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -37,6 +38,61 @@ func fileModifiedLabel(f remoteFile) string {
 		return "—"
 	}
 	return time.Unix(f.Modified, 0).Local().Format("2006-01-02 15:04")
+}
+
+func terminalDirectory(reported string, local bool) (string, error) {
+	if reported == "" || strings.IndexFunc(reported, unicode.IsControl) >= 0 {
+		return "", errors.New("终端尚未报告有效目录（需要 shell 支持 OSC 7）")
+	}
+	if !local {
+		if !path.IsAbs(reported) {
+			return "", errors.New("终端报告的远程目录不是绝对路径")
+		}
+		return path.Clean(reported), nil
+	}
+	if runtime.GOOS == "windows" && len(reported) >= 4 && reported[0] == '/' && reported[2] == ':' && reported[3] == '/' {
+		reported = reported[1:]
+	}
+	reported = filepath.FromSlash(reported)
+	if !filepath.IsAbs(reported) || (runtime.GOOS == "windows" && strings.HasPrefix(reported, `\\`)) {
+		return "", errors.New("终端报告的本机目录不是有效的本地绝对路径")
+	}
+	return filepath.Clean(reported), nil
+}
+
+// Follow only changes reported by the shell, so a manual browse stays put
+// until the shell itself reports a different working directory.
+func (d *desktop) applyTerminalDirectory(reported string, force bool) bool {
+	if d.busy || d.term == nil {
+		return false
+	}
+	dir, err := terminalDirectory(reported, d.shell == nil)
+	if err != nil {
+		if force {
+			d.fileStatus = err.Error()
+		}
+		return false
+	}
+	if !force && dir == d.lastTerminalDir {
+		return false
+	}
+	d.lastTerminalDir = dir
+	if !force && dir == d.fileDir {
+		return false
+	}
+	d.fileDir, d.fileStatus = dir, "正在定位终端目录…"
+	d.selectedFile, d.confirmDelete, d.fileRename, d.fileNewDirectory = "", "", "", ""
+	d.files = nil
+	if d.win != nil {
+		d.refreshFiles()
+	}
+	return true
+}
+
+func (d *desktop) followReportedDirectory(force bool) {
+	if d.term != nil {
+		d.applyTerminalDirectory(d.term.Dir(), force)
+	}
 }
 
 func (d *desktop) refreshFiles() {
@@ -414,11 +470,25 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			d.files = nil
 			d.refreshFiles()
 		}
+		if ui.Button(c.Key("file-terminal-dir"), "定位终端目录").Disabled(d.busy || d.term == nil).Clicked() {
+			d.followReportedDirectory(true)
+		}
 		if ui.Button(c.Key("file-refresh"), "打开目录").Disabled(d.busy || d.term == nil).Clicked() {
 			d.selectedFile, d.confirmDelete, d.fileRename = "", "", ""
 			d.refreshFiles()
 		}
 	})
+	label := "跟随终端目录：关"
+	if d.fileFollowTerminal {
+		label = "跟随终端目录：开"
+	}
+	if ui.Button(c.Key("file-follow-terminal"), label).Disabled(d.busy || d.term == nil).Clicked() {
+		d.fileFollowTerminal = !d.fileFollowTerminal
+		d.lastTerminalDir = ""
+		if d.fileFollowTerminal {
+			d.followReportedDirectory(true)
+		}
+	}
 	if d.term == nil {
 		ui.Text(c, "连接 SSH 或打开本机终端后可浏览文件。").TextColor(c.Theme().TextMuted).Wrap()
 	}
