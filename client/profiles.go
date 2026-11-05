@@ -156,7 +156,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.settingsFromCloud = false
 			d.cloudFormSources = nil
 			d.cloudFormVersions = nil
-			d.profileGroup = ""
+			d.profileGroup = d.profileFilter
 			d.profileLabel = ""
 			d.fingerprint = ""
 			d.changedFingerprint = ""
@@ -172,6 +172,9 @@ func (d *desktop) profileView(c *ui.Context) {
 		help = "正在按所选列排序；切换到自定义顺序后可拖动或移动连接。"
 	}
 	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
+	if d.profileSource != "cloud" {
+		d.groupControls(c)
+	}
 	if d.status != "" {
 		ui.Text(c, d.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
@@ -562,7 +565,7 @@ func (d *desktop) profileView(c *ui.Context) {
 }
 
 func (d *desktop) profileVisible(p profile) bool {
-	if d.profileSource == "cloud" || (d.profileRecent && p.LastConnected <= 0) || (d.profileFavorites && !p.Favorite) || (d.profileFilter != "" && d.profileFilter != p.Group) {
+	if d.profileSource == "cloud" || (d.profileRecent && p.LastConnected <= 0) || (d.profileFavorites && !p.Favorite) || (d.profileFilter != "" && !groupWithin(p.Group, d.profileFilter)) {
 		return false
 	}
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))

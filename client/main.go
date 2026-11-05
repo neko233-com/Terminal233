@@ -50,6 +50,9 @@ type desktop struct {
 	confirmCloudDelete                                                                      string
 	confirmCloudDeleteVersion                                                               string
 	profiles                                                                                []profile
+	profileGroups                                                                           []string
+	groupInput                                                                              string
+	confirmGroupDelete                                                                      bool
 	profileSearch, profileGroup, selectedProfile, quickConnect                              string
 	confirmProfileDelete                                                                    profileID
 	checkedProfiles                                                                         map[profileID]bool
@@ -374,8 +377,7 @@ func (d *desktop) view(c *ui.Context) {
 							d.profileFavorites = false
 							d.profileRecent = false
 						}
-						counts := make(map[string]int)
-						var groups []string
+						groups, counts := d.groupTree()
 						favorites := 0
 						recent := 0
 						for _, p := range d.profiles {
@@ -384,12 +386,6 @@ func (d *desktop) view(c *ui.Context) {
 							}
 							if p.LastConnected > 0 {
 								recent++
-							}
-							if p.Group != "" {
-								if counts[p.Group] == 0 {
-									groups = append(groups, p.Group)
-								}
-								counts[p.Group]++
 							}
 						}
 						if ui.Button(c.Key("group-favorites"), fmt.Sprintf("收藏的连接  %d", favorites)).Clicked() {
@@ -414,15 +410,20 @@ func (d *desktop) view(c *ui.Context) {
 						}
 						for _, group := range groups {
 							name := group
-							if ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", name, counts[name])).Clicked() {
+							button := ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", name, counts[name])).Label("分组：" + name).Disabled(d.busy)
+							if button.Clicked() {
 								d.workspace = "connections"
 								d.editConnection = false
 								d.profileFilter = name
+								d.confirmGroupDelete = false
 								d.profileFavorites = false
 								d.profileRecent = false
 								if d.profileSource == "cloud" {
 									d.profileSource = "local"
 								}
+							}
+							if dragged, ok := ui.Drop[profileID](button); ok && !d.busy {
+								d.moveProfileToGroup(dragged, name)
 							}
 						}
 						ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
@@ -709,7 +710,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.59"
+const version = "0.3.60"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
