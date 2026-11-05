@@ -50,6 +50,9 @@ func (d *desktop) activateSession(id int) {
 		d.files, d.confirmDelete = s.files, ""
 		d.workspace = "terminal"
 		d.status = "当前会话：" + s.label
+		if d.showFilePanel && d.term != nil && d.shell == nil && d.files == nil && d.fileStatus == "" && d.win != nil {
+			d.refreshFiles()
+		}
 		return
 	}
 }

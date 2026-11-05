@@ -17,6 +17,7 @@ type desktop struct {
 	workspace                                                                               string
 	editConnection                                                                          bool
 	lightTheme                                                                              bool
+	showFilePanel                                                                           bool
 	sessions                                                                                []*workspaceSession
 	currentSession, nextSession                                                             int
 	showTeams, showAdmin                                                                    bool
@@ -274,11 +275,28 @@ func (d *desktop) view(c *ui.Context) {
 					ui.Row(c).FillWidth().Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 						ui.Text(c, "终端").FontSize(17).Bold().Grow(1)
 						ui.Text(c, d.status).FontSize(12).TextColor(t.TextMuted)
+						label := "打开文件面板"
+						if d.showFilePanel {
+							label = "收起文件面板"
+						}
+						if ui.Button(c.Key("toggle-file-panel"), label).Disabled(d.term == nil || d.busy).Clicked() {
+							d.showFilePanel = !d.showFilePanel
+							if d.showFilePanel && d.shell == nil && d.files == nil {
+								d.refreshFiles()
+							}
+						}
 					})
 					if d.term == nil {
 						ui.Text(c, "选择连接，或打开本机终端").FontSize(18).TextColor(t.TextMuted)
 					} else {
-						terminal.View(c, d.term).Fill()
+						ui.Row(c).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
+							ui.Column(c).Grow(1).FillHeight().Children(func() { terminal.View(c, d.term).Fill() })
+							if d.showFilePanel {
+								ui.Scroll(c).Width(380).Shrink(0).FillHeight().BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
+									ui.Column(c).Padding(14).Gap(8).Children(func() { d.fileView(c, true) })
+								})
+							}
+						})
 					}
 					return
 				}
@@ -287,7 +305,7 @@ func (d *desktop) view(c *ui.Context) {
 						switch d.workspace {
 						case "files":
 							ui.Text(c, "文件管理").FontSize(22).Bold()
-							d.fileView(c)
+							d.fileView(c, false)
 						case "cloud":
 							ui.Text(c, "云端工作区").FontSize(22).Bold()
 							d.cloudView(c)

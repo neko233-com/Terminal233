@@ -193,6 +193,28 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !deadline.IsZero() {
 		t.Fatal("local directory read did not finish")
 	}
+	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "toggle-file-panel") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "toggle-file-panel", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "收起文件面板") && strings.Contains(tree, "本机文件") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "收起文件面板") || !strings.Contains(tree, "本机文件") {
+		t.Fatalf("terminal file panel missing: %s", tree)
+	}
+	call("act", map[string]any{"key": "toggle-file-panel", "action": "press"})
 	call("act", map[string]any{"key": "local-terminal", "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {

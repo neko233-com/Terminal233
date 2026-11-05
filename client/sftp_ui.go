@@ -159,7 +159,7 @@ func (d *desktop) removeSelected() {
 		})
 	}()
 }
-func (d *desktop) fileView(c *ui.Context) {
+func (d *desktop) fileView(c *ui.Context, compact bool) {
 	local := d.term != nil && d.shell == nil
 	title, help := "远程文件", "选择目录浏览，拖入单个文件上传；删除前需要再次确认。"
 	if local {
@@ -192,9 +192,13 @@ func (d *desktop) fileView(c *ui.Context) {
 	if len(d.files) > 0 {
 		ui.Row(c).FillWidth().Gap(12).Padding(8, 12).Background(c.Theme().Surface).Children(func() {
 			ui.Text(c, "名称").Grow(1).TextColor(c.Theme().TextMuted)
-			ui.Text(c, "类型").Width(60).TextColor(c.Theme().TextMuted)
+			if !compact {
+				ui.Text(c, "类型").Width(60).TextColor(c.Theme().TextMuted)
+			}
 			ui.Text(c, "大小").Width(90).TextColor(c.Theme().TextMuted)
-			ui.Text(c, "修改时间").Width(150).TextColor(c.Theme().TextMuted)
+			if !compact {
+				ui.Text(c, "修改时间").Width(150).TextColor(c.Theme().TextMuted)
+			}
 		})
 	}
 	query := strings.ToLower(strings.TrimSpace(d.fileFilter))
@@ -244,9 +248,13 @@ func (d *desktop) fileView(c *ui.Context) {
 			} else if f.IsLink {
 				kind = "链接"
 			}
-			ui.Text(c, kind).Width(60).TextColor(c.Theme().TextMuted)
+			if !compact {
+				ui.Text(c, kind).Width(60).TextColor(c.Theme().TextMuted)
+			}
 			ui.Text(c, fileSizeLabel(f)).Width(90).TextColor(c.Theme().TextMuted)
-			ui.Text(c, fileModifiedLabel(f)).Width(150).TextColor(c.Theme().TextMuted)
+			if !compact {
+				ui.Text(c, fileModifiedLabel(f)).Width(150).TextColor(c.Theme().TextMuted)
+			}
 		})
 	}
 	if len(d.files) > 0 && shown == 0 {
