@@ -330,6 +330,14 @@ func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {
 		}
 	}
 	ui.TextInput(c.Key("local-file"), &d.fileLocal).Label("本地文件路径").Placeholder("本地文件完整路径")
+	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+		if ui.Button(c.Key("pick-upload"), "选择源文件…").Disabled(d.busy || d.term == nil).Clicked() {
+			d.pickLocalPath("upload")
+		}
+		if ui.Button(c.Key("pick-download"), "选择目标路径…").Disabled(d.busy || d.term == nil || d.selectedFile == "").Clicked() {
+			d.pickLocalPath("download")
+		}
+	})
 	uploadLabel, downloadLabel := "上传本地文件", "下载选中文件"
 	if local {
 		uploadLabel, downloadLabel = "复制文件到当前目录", "复制选中文件到指定路径"

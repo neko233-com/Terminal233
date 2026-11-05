@@ -164,6 +164,14 @@ func (d *desktop) adminView(c *ui.Context) {
 		d.adminAction("enable-team")
 	}
 	ui.TextInput(c.Key("admin-backup-path"), &d.adminBackupPath).Label("加密备份路径").Placeholder("加密备份文件路径").OnChange(func() { d.adminConfirmRestore = false })
+	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+		if ui.Button(c.Key("backup-pick-open"), "选择待恢复备份…").Disabled(d.busy || d.cloud == nil).Clicked() {
+			d.pickLocalPath("backup-open")
+		}
+		if ui.Button(c.Key("backup-pick-save"), "选择备份保存位置…").Disabled(d.busy || d.cloud == nil).Clicked() {
+			d.pickLocalPath("backup-save")
+		}
+	})
 	if ui.Button(c.Key("admin-export"), "导出加密备份").Disabled(d.busy || d.cloud == nil).Clicked() {
 		d.adminAction("export")
 	}
