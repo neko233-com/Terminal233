@@ -38,13 +38,26 @@ func TestQuickConnectionInput(t *testing.T) {
 }
 
 func TestQuickConnectionButtonOpensForm(t *testing.T) {
-	d := &desktop{workspace: "connections", quickConnect: "ssh alice@example.test -p 2222"}
+	d := &desktop{workspace: "connections", profileSearch: "ssh alice@example.test -p 2222"}
 	view := ui.NewTester(d.view, 1200, 1600)
 	if err := view.Click("填写连接信息"); err != nil {
 		t.Fatal(err)
 	}
 	if !d.editConnection || d.settings.Host != "example.test" || d.settings.Port != "2222" || d.fingerprint != "" {
 		t.Fatal("quick connection did not open an untrusted connection form")
+	}
+}
+
+func TestSearchEnterOpensQuickConnection(t *testing.T) {
+	d := &desktop{workspace: "connections"}
+	view := ui.NewTester(d.view, 1200, 1600)
+	if err := view.Click("搜索连接或快速连接"); err != nil {
+		t.Fatal(err)
+	}
+	view.Type("ssh alice@example.test -p 2222")
+	view.Key(0, ui.KeyEnter)
+	if !d.editConnection || d.settings.Host != "example.test" || d.settings.Port != "2222" || d.fingerprint != "" || d.profileSearch != "" {
+		t.Fatal("Enter did not open the untrusted connection form")
 	}
 }
 

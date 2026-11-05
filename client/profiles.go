@@ -182,11 +182,14 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		}
 	}
-	ui.TextInput(c.Key("quick-connect"), &d.quickConnect).Label("SSH 快速连接").Placeholder("ssh 用户@主机 -p 端口")
-	if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy).Clicked() {
-		d.openQuickConnection()
-	}
-	ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接").Placeholder("搜索连接或分组")
+	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
+		ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接或快速连接").Placeholder("搜索连接，或输入 ssh 用户@主机 -p 端口").Grow(1).OnSubmit(d.submitConnectionSearch)
+		if looksLikeQuickConnection(d.profileSearch) {
+			if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy).Clicked() {
+				d.submitConnectionSearch()
+			}
+		}
+	})
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 		if workspaceButton(c, "profile-source-all", "全部来源", d.profileSource == "").Clicked() {
 			d.profileSource = ""

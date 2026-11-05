@@ -9,6 +9,22 @@ import (
 
 var errQuickConnection = errors.New("请输入 用户@主机 或 ssh 用户@主机 -p 端口；不支持密码和其他选项")
 
+func looksLikeQuickConnection(input string) bool {
+	input = strings.TrimSpace(input)
+	return strings.HasPrefix(input, "ssh ") || strings.Contains(input, "@")
+}
+
+func (d *desktop) submitConnectionSearch() {
+	if d.busy || !looksLikeQuickConnection(d.profileSearch) {
+		return
+	}
+	d.quickConnect = d.profileSearch
+	d.openQuickConnection()
+	if d.editConnection {
+		d.profileSearch = ""
+	}
+}
+
 // parseQuickConnection treats the input as data, never as a shell command.
 func parseQuickConnection(input string) (connectionSettings, error) {
 	if len(input) > 512 || strings.ContainsAny(input, "\r\n\x00") {
@@ -66,6 +82,7 @@ func parseQuickConnection(input string) (connectionSettings, error) {
 func (d *desktop) openQuickConnection() {
 	settings, err := parseQuickConnection(d.quickConnect)
 	if err != nil {
+		d.quickConnect = ""
 		d.status = err.Error()
 		return
 	}
