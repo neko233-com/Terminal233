@@ -229,6 +229,9 @@ func (d *desktop) cloudLogout() {
 		d.win.Update(func() {
 			d.busy = false
 			d.cloud = nil
+			if d.profileSource == "cloud" {
+				d.profileSource = ""
+			}
 			d.accounts = nil
 			d.teams = nil
 			d.members = nil

@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"net"
+
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"sort"
 	"strings"
@@ -183,6 +186,19 @@ func (d *desktop) profileView(c *ui.Context) {
 	}
 	ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接").Placeholder("搜索连接或分组")
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+		if workspaceButton(c, "profile-source-all", "全部来源", d.profileSource == "").Clicked() {
+			d.profileSource = ""
+		}
+		if workspaceButton(c, "profile-source-local", "本地仓库", d.profileSource == "local").Clicked() {
+			d.profileSource = "local"
+		}
+		if workspaceButton(c, "profile-source-cloud", "云端仓库", d.profileSource == "cloud").Disabled(d.cloud == nil).Clicked() {
+			d.profileSource = "cloud"
+			d.profileFilter = ""
+			d.profileFavorites, d.profileRecent = false, false
+		}
+	})
+	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 		for _, column := range []struct{ key, label string }{{"name", "名称排序"}, {"host", "地址排序"}} {
 			label := column.label
 			if d.profileSort == column.key && !d.profileRecent {
@@ -213,7 +229,7 @@ func (d *desktop) profileView(c *ui.Context) {
 		}
 	})
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
-	showLocal := d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
+	showLocal := d.profileSource != "cloud" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
 		(query == "" || strings.Contains("本机终端 local terminal powershell", query))
 	if showLocal {
 		ui.Column(c).FillWidth().Padding(16).Gap(6).Background(c.Theme().Surface).Radius(8).Children(func() {
@@ -222,19 +238,19 @@ func (d *desktop) profileView(c *ui.Context) {
 			ui.Button(c.Key("profile-local-terminal"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
 		})
 	}
-	if len(d.profiles) == 0 {
+	if d.profileSource != "cloud" && len(d.profiles) == 0 {
 		ui.Column(c).FillWidth().Padding(28).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
 			ui.Text(c, "还没有本机 SSH 连接").FontSize(18).Bold()
 			ui.Text(c, "创建连接后，可在这里快速查找和管理。也可以打开本机终端。").TextColor(c.Theme().TextMuted).Wrap()
 		})
-	} else {
+	} else if d.profileSource != "cloud" {
 		ui.Row(c).FillWidth().Padding(8, 12).Gap(12).Background(c.Theme().Surface).Children(func() {
 			ui.Text(c, "名称 / 分组").Grow(1).TextColor(c.Theme().TextMuted)
 			if !compact {
 				ui.Text(c, "地址").Width(220).TextColor(c.Theme().TextMuted)
 			}
 			if !compact {
-				ui.Text(c, "操作").Width(132).TextColor(c.Theme().TextMuted)
+				ui.Text(c, "操作").Width(220).TextColor(c.Theme().TextMuted)
 			}
 		})
 	}
@@ -259,6 +275,9 @@ func (d *desktop) profileView(c *ui.Context) {
 		})
 	}
 	for _, item := range items {
+		if d.profileSource == "cloud" {
+			break
+		}
 		p := item
 		if d.profileRecent && p.LastConnected <= 0 {
 			continue
@@ -286,6 +305,10 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 			if ui.Button(c.Key("profile-edit-"+string(p.ID)), "编辑").Width(60).Clicked() {
 				d.loadProfile(p)
+			}
+			if ui.Button(c.Key("profile-copy-"+string(p.ID)), "复制地址").Label("复制地址：" + p.Label).Clicked() {
+				mygo.Clipboard.WriteText(net.JoinHostPort(p.Settings.Host, p.Settings.Port))
+				d.status = "已复制地址：" + p.Label
 			}
 		}
 		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
@@ -376,7 +399,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		}
 	}
-	if d.cloud != nil && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent {
+	if d.cloud != nil && d.profileSource != "local" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent {
 		ui.Text(c, "云端连接 · "+d.cloudScopeName()).FontSize(16).Bold()
 		accounts := d.accounts
 		if d.profileSort != "" {
@@ -400,9 +423,15 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 			shown++
 			label := account.Label + " · " + account.Username + "@" + account.Host
-			if ui.Button(c.Key("profile-cloud-"+account.ID), label).Disabled(d.busy).Clicked() {
-				d.loadCloudAccount(account)
-			}
+			ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
+				if ui.Button(c.Key("profile-cloud-"+account.ID), label).Grow(1).Disabled(d.busy).Clicked() {
+					d.loadCloudAccount(account)
+				}
+				if ui.Button(c.Key("profile-cloud-copy-"+account.ID), "复制地址").Label("复制云端地址：" + account.Label).Clicked() {
+					mygo.Clipboard.WriteText(net.JoinHostPort(account.Host, fmt.Sprint(account.Port)))
+					d.status = "已复制地址：" + account.Label
+				}
+			})
 		}
 	}
 	if (len(d.profiles) > 0 || d.cloud != nil || query != "") && shown == 0 && !showLocal {

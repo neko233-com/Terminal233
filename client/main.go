@@ -40,6 +40,7 @@ type desktop struct {
 	confirmProfileDelete                                                                    profileID
 	profileLabel                                                                            string
 	profileFilter                                                                           string
+	profileSource                                                                           string
 	profileFavorites                                                                        bool
 	profileRecent                                                                           bool
 	profileSort                                                                             string
@@ -281,6 +282,9 @@ func (d *desktop) view(c *ui.Context) {
 							d.profileFilter = ""
 							d.profileFavorites = true
 							d.profileRecent = false
+							if d.profileSource == "cloud" {
+								d.profileSource = "local"
+							}
 						}
 						if ui.Button(c.Key("group-recent"), fmt.Sprintf("最近连接  %d", recent)).Clicked() {
 							d.workspace = "connections"
@@ -288,6 +292,9 @@ func (d *desktop) view(c *ui.Context) {
 							d.profileFilter = ""
 							d.profileFavorites = false
 							d.profileRecent = true
+							if d.profileSource == "cloud" {
+								d.profileSource = "local"
+							}
 						}
 						for _, group := range groups {
 							name := group
@@ -297,6 +304,9 @@ func (d *desktop) view(c *ui.Context) {
 								d.profileFilter = name
 								d.profileFavorites = false
 								d.profileRecent = false
+								if d.profileSource == "cloud" {
+									d.profileSource = "local"
+								}
 							}
 						}
 						ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
