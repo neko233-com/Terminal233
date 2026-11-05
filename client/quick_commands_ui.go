@@ -116,8 +116,16 @@ func (d *desktop) quickCommandsView(c *ui.Context) {
 			ui.Text(c, d.quickStatus).FontSize(12).Wrap()
 		}
 		if len(d.quickCommands) > 0 {
+			ui.TextInput(c.Key("quick-filter"), &d.quickFilter).Label("搜索快速命令").Placeholder("按名称或命令内容搜索")
+			visible := filterQuickCommands(d.quickCommands, d.quickFilter)
+			if len(visible) == 0 {
+				ui.Text(c, "没有匹配的快速命令").FontSize(12).TextColor(c.Theme().TextMuted)
+			}
+			if len(visible) == 0 {
+				return
+			}
 			ui.Scroll(c.Key("quick-list")).Height(150).FillWidth().Children(func() {
-				for _, command := range d.quickCommands {
+				for _, command := range visible {
 					item := command
 					ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, fmt.Sprintf("%s · %s", item.Name, item.Command)).Grow(1).Wrap()

@@ -87,3 +87,55 @@ func TestQuickCommandSendsOnlyToSelectedTerminal(t *testing.T) {
 		t.Fatal("quick command editor or plaintext warning missing")
 	}
 }
+
+func TestQuickCommandSearchFiltersByNameAndContent(t *testing.T) {
+	items := []quickCommand{{ID: "one", Name: "磁盘", Command: "df -h"}, {ID: "two", Name: "日志", Command: "journalctl -xe"}}
+	if got := filterQuickCommands(items, " DF "); len(got) != 1 || got[0].Name != "磁盘" {
+		t.Fatalf("content filter failed: %#v", got)
+	}
+	if got := filterQuickCommands(items, "日志"); len(got) != 1 || got[0].Command != "journalctl -xe" {
+		t.Fatalf("name filter failed: %#v", got)
+	}
+	if got := filterQuickCommands(items, "absent"); len(got) != 0 {
+		t.Fatal("unknown query returned a result")
+	}
+	if len(items) != 2 {
+		t.Fatal("filter changed the saved list")
+	}
+	left, right := net.Pipe()
+	defer right.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{workspace: "terminal", term: term, quickOpen: true, quickCommands: items}
+	view := ui.NewTester(d.view, 1200, 900)
+	if err := view.Click("搜索快速命令"); err != nil {
+		t.Fatal(err)
+	}
+	view.Type("journal")
+	if !view.HasText("日志 · journalctl -xe") || view.HasText("磁盘 · df -h") {
+		t.Fatal("search input did not filter the command list")
+	}
+}
+
+func TestQuickCommandReachesVerifiedSSHSession(t *testing.T) {
+	settings, fingerprint, _ := testSSHServer(t)
+	settings.Fingerprint = fingerprint
+	shell, term, err := openSSHSession(settings, terminal.Options{NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{term: term, shell: shell}
+	d.sendQuickCommand(quickCommand{Name: "测试", Command: "echo NEKO_QUICK_SSH"}, true)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(term.Text(), "echo NEKO_QUICK_SSH") {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("SSH test shell did not echo the command: %q", term.Text())
+}

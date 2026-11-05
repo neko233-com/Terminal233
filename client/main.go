@@ -65,7 +65,7 @@ type desktop struct {
 	terminalSearchOpen                                                                      bool
 	terminalSearchText                                                                      string
 	quickOpen                                                                               bool
-	quickPath, quickName, quickText, quickStatus, quickConfirm                              string
+	quickPath, quickName, quickText, quickStatus, quickConfirm, quickFilter                 string
 	quickCommands                                                                           []quickCommand
 	quickEdit                                                                               *quickCommand
 	expectedFingerprint, changedFingerprint                                                 string
@@ -571,7 +571,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.23"
+const version = "0.3.24"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

@@ -413,6 +413,25 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if quickRunKey == "" {
 		t.Fatalf("saved quick command missing: %v", call("tree"))
 	}
+	call("act", map[string]any{"key": "quick-filter", "action": "setValue", "text": "not-a-match"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "没有匹配的快速命令") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "没有匹配的快速命令") {
+		t.Fatal("quick command search did not filter the native list")
+	}
+	call("act", map[string]any{"key": "quick-filter", "action": "setValue", "text": "验证"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), quickRunKey) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	call("act", map[string]any{"key": quickRunKey, "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {

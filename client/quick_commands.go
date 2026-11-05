@@ -28,6 +28,17 @@ type quickCommandFile struct {
 	Items   []quickCommand `json:"items"`
 }
 
+func filterQuickCommands(items []quickCommand, query string) []quickCommand {
+	query = strings.ToLower(strings.TrimSpace(query))
+	result := make([]quickCommand, 0, len(items))
+	for _, item := range items {
+		if query == "" || strings.Contains(strings.ToLower(item.Name), query) || strings.Contains(strings.ToLower(item.Command), query) {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
 func validateQuickCommand(name, command string) error {
 	if !utf8.ValidString(name) || !utf8.ValidString(command) || strings.TrimSpace(name) == "" || strings.TrimSpace(command) == "" || len(name) > 120 || len(command) > 4096 || strings.IndexFunc(name, unicode.IsControl) >= 0 || strings.IndexFunc(command, unicode.IsControl) >= 0 {
 		return errors.New("请输入名称和单行命令；名称最多 120 字节，命令最多 4096 字节")
