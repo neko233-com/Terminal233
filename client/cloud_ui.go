@@ -82,6 +82,7 @@ func (d *desktop) cloudRefresh() {
 				return
 			}
 			d.accounts = accounts
+			d.selectedCloudProfile = ""
 			d.cloudListStale = false
 			d.confirmCloudDelete = ""
 			d.cloudStatus = "已刷新连接列表"
@@ -434,6 +435,9 @@ func (d *desktop) finishCloudDelete(id string, accounts []cloudAccount, mutation
 		d.cloudStatus = "删除请求未确认，可能已生效；请先刷新：" + mutationErr.Error()
 		return
 	}
+	if d.selectedCloudProfile == id {
+		d.selectedCloudProfile = ""
+	}
 	if refreshErr != nil {
 		kept := d.accounts[:0]
 		for _, account := range d.accounts {
@@ -475,6 +479,7 @@ func (d *desktop) clearCloudState() {
 		d.cloud.token, d.cloud.adminTOTP = "", ""
 	}
 	d.cloud = nil
+	d.selectedCloudProfile = ""
 	if d.profileSource == "cloud" {
 		d.profileSource = ""
 	}

@@ -359,6 +359,7 @@ func (d *desktop) profileView(c *ui.Context) {
 				d.openProfileConnection(p)
 			} else if row.Clicked() {
 				d.selectedProfile = string(p.ID)
+				d.selectedCloudProfile = ""
 				d.confirmProfileDelete = ""
 			}
 			if !d.profileRecent && d.profileSort == "" {
@@ -439,7 +440,19 @@ func (d *desktop) profileView(c *ui.Context) {
 			shown++
 			label := account.Label + " · " + account.Username + "@" + account.Host
 			ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
-				if ui.Button(c.Key("profile-cloud-"+account.ID), label).Grow(1).Disabled(d.busy).Clicked() {
+				row := workspaceButton(c, "profile-cloud-"+account.ID, label, d.selectedCloudProfile == account.ID).Grow(1).Disabled(d.busy)
+				row.ContextMenu(func(menu *ui.Menu) {
+					if menu.Item("连接").Disabled(d.busy).Chosen() {
+						d.loadCloudAccount(account)
+					}
+				})
+				if row.DoubleClicked() {
+					d.loadCloudAccount(account)
+				} else if row.Clicked() {
+					d.selectedCloudProfile = account.ID
+					d.selectedProfile = ""
+				}
+				if ui.Button(c.Key("profile-cloud-connect-"+account.ID), "连接").Label("连接云端：" + account.Label).Disabled(d.busy).Clicked() {
 					d.loadCloudAccount(account)
 				}
 				if ui.Button(c.Key("profile-cloud-copy-"+account.ID), "复制地址").Label("复制云端地址：" + account.Label).Clicked() {

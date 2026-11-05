@@ -121,18 +121,24 @@ func TestConnectionListShowsCurrentCloudScopeWithoutTrustingIt(t *testing.T) {
 	if err := view.Click("测试机 · alice@example.test"); err != nil {
 		t.Fatal(err)
 	}
+	if d.selectedCloudProfile != "cloud-1" || d.editConnection || d.settings.Password != "" {
+		t.Fatal("single click did not safely select cloud connection")
+	}
+	if err := view.Click("测试机 · alice@example.test"); err != nil {
+		t.Fatal(err)
+	}
 	if d.settings.Host != "example.test" || d.fingerprint != "" || d.expectedFingerprint != "SHA256:cloud" || d.trustedProfileFingerprint() != "" {
 		t.Fatal("cloud connection was not loaded safely")
 	}
 }
 
 func TestSwitchCloudScopeClearsOldTeamActions(t *testing.T) {
-	d := &desktop{workspace: "cloud", showTeams: true, cloud: &cloudClient{teamID: "old"}, teams: []cloudTeam{{ID: "old", Name: "旧团队"}, {ID: "new", Name: "新团队", Role: "admin"}}, teamInviteURL: "https://example.test/#join=secret", confirmMember: "alice", confirmInvite: "invite-old", confirmCloudDelete: "account-old", teamInvites: []cloudInvite{{ID: "invite-old"}}}
+	d := &desktop{workspace: "cloud", showTeams: true, selectedCloudProfile: "account-old", cloud: &cloudClient{teamID: "old"}, teams: []cloudTeam{{ID: "old", Name: "旧团队"}, {ID: "new", Name: "新团队", Role: "admin"}}, teamInviteURL: "https://example.test/#join=secret", confirmMember: "alice", confirmInvite: "invite-old", confirmCloudDelete: "account-old", teamInvites: []cloudInvite{{ID: "invite-old"}}}
 	d.applyCloudScope("new", []cloudAccount{{ID: "account-new"}}, []cloudTeamMember{{Username: "bob"}})
 	if d.cloud.teamID != "new" || len(d.accounts) != 1 || d.accounts[0].ID != "account-new" || len(d.members) != 1 || d.members[0].Username != "bob" {
 		t.Fatal("scope did not switch to the new team's data")
 	}
-	if d.confirmMember != "" || d.confirmInvite != "" || d.confirmCloudDelete != "" || d.teamInviteURL != "" || len(d.teamInvites) != 0 {
+	if d.confirmMember != "" || d.confirmInvite != "" || d.confirmCloudDelete != "" || d.teamInviteURL != "" || d.selectedCloudProfile != "" || len(d.teamInvites) != 0 {
 		t.Fatal("previous team's actions or invite survived the scope change")
 	}
 	view := ui.NewTester(d.view, 1200, 2200)

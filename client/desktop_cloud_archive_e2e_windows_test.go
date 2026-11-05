@@ -152,6 +152,19 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	call("act", map[string]any{"key": "cloudpassword", "action": "setValue", "text": "test-cloud-password"})
 	call("act", map[string]any{"key": "cloudlogin", "action": "press"})
 	waitText("同步服务已登录")
+	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	waitText("隔离测试连接 · alice@example.test")
+	stored, err := client.list()
+	if err != nil || len(stored) != 1 {
+		t.Fatal("isolated cloud connection missing")
+	}
+	call("act", map[string]any{"key": "profile-cloud-connect-" + stored[0].ID, "action": "press"})
+	waitText("已载入连接，请重新获取并核对主机指纹")
+	if strings.Contains(fmt.Sprint(call("tree")), "connect-trusted") {
+		t.Fatal("cloud fingerprint was silently trusted")
+	}
+	call("act", map[string]any{"key": "nav-cloud", "action": "press"})
+	waitText("toggle-archive")
 	call("act", map[string]any{"key": "toggle-archive", "action": "press"})
 	waitText("archive-path")
 	backupPath := filepath.Join(temp, "connections.nekobackup")
