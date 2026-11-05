@@ -8,8 +8,11 @@ import (
 func TestNativeViewLoadsSyncedAccountWithoutTrustingIt(t *testing.T) {
 	d := &desktop{settings: connectionSettings{Port: "22"}, accounts: []cloudAccount{{ID: "test", Label: "示例服务器", Host: "example.test", Port: 22, Username: "alice", Password: "secret", HostKeyFingerprint: "SHA256:old"}}}
 	test := ui.NewTester(d.view, 1200, 3200)
-	if !test.HasText("SSH 连接") || !test.HasText("远程文件（测试中）") || !test.HasText("连接列表（仅本次运行）") {
+	if !test.HasText("SSH 连接") || !test.HasText("远程文件") || !test.HasText("连接列表") {
 		t.Fatalf("missing native controls: %v", test.Texts())
+	}
+	if err := test.Click("云同步与团队"); err != nil {
+		t.Fatal(err)
 	}
 	if err := test.Click("示例服务器"); err != nil {
 		t.Fatal(err)
@@ -48,6 +51,47 @@ func TestConnectionListSearchAndContextMenu(t *testing.T) {
 	}
 }
 
+func TestConnectionGroupNavigation(t *testing.T) {
+	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice"}, profileGroup: "工作"}
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	d.settings.Host, d.profileGroup = "two.test", "个人"
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	test := ui.NewTester(d.view, 1200, 1200)
+	if err := test.Click("工作  1"); err != nil {
+		t.Fatal(err)
+	}
+	if !test.HasText("工作 / alice@one.test") || test.HasText("个人 / alice@two.test") {
+		t.Fatalf("group filter failed: %v", test.Texts())
+	}
+	if err := test.Click("全部连接  2"); err != nil {
+		t.Fatal(err)
+	}
+	if !test.HasText("个人 / alice@two.test") {
+		t.Fatal("all-connections navigation failed")
+	}
+}
+
+func TestThemeSwitchKeepsWorkspaceUsable(t *testing.T) {
+	d := &desktop{}
+	test := ui.NewTester(d.view, 1200, 900)
+	if err := test.Click("浅色"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.lightTheme || !test.HasText("深色") || !test.HasText("连接列表") {
+		t.Fatal("light theme did not keep the workspace available")
+	}
+	if err := test.Click("深色"); err != nil {
+		t.Fatal(err)
+	}
+	if d.lightTheme || !test.HasText("浅色") {
+		t.Fatal("dark theme was not restored")
+	}
+}
+
 func TestConnectionListDragOrder(t *testing.T) {
 	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice"}}
 	if err := d.addProfile(); err != nil {
@@ -83,6 +127,9 @@ func TestConnectionListDragOrder(t *testing.T) {
 func TestDroppedFilesWithoutConnectionGivesFeedback(t *testing.T) {
 	d := &desktop{settings: connectionSettings{Port: "22"}}
 	test := ui.NewTester(d.view, 1200, 2200)
+	if err := test.Click("远程文件"); err != nil {
+		t.Fatal(err)
+	}
 	zone, ok := test.Find("拖入一个文件上传")
 	if !ok {
 		t.Fatal("drop zone missing")

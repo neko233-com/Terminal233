@@ -47,6 +47,8 @@ func (d *desktop) moveProfile(from, to profileID) {
 	d.profiles[b] = item
 }
 func (d *desktop) loadProfile(p profile) {
+	d.workspace = "connections"
+	d.editConnection = true
 	d.settings = p.Settings
 	d.expectedFingerprint = p.Settings.Fingerprint
 	d.fingerprint = ""
@@ -54,29 +56,49 @@ func (d *desktop) loadProfile(p profile) {
 	d.status = "已载入连接，请输入密码并核对指纹。"
 }
 func (d *desktop) profileView(c *ui.Context) {
-	ui.Text(c, "连接列表（仅本次运行）").Bold()
-	ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接").Placeholder("搜索连接或分组")
-	ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("分组（可选）")
-	if ui.Button(c.Key("profile-add"), "添加当前连接").Disabled(d.busy).Clicked() {
-		if err := d.addProfile(); err != nil {
-			d.status = err.Error()
-		} else {
-			d.status = "连接已添加（不保存密码）"
+	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+		title := "连接列表"
+		if d.profileFilter != "" {
+			title = "分组 / " + d.profileFilter
 		}
+		ui.Text(c, title).FontSize(22).Bold().Grow(1)
+		if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Clicked() {
+			d.settings = connectionSettings{Port: "22"}
+			d.fingerprint = ""
+			d.expectedFingerprint = ""
+			d.selectedProfile = ""
+			d.editConnection = true
+		}
+	})
+	ui.Text(c, "搜索、分组和管理 SSH 连接。右键可移除，拖动可调整顺序。").TextColor(c.Theme().TextMuted).Wrap()
+	if d.status != "" {
+		ui.Text(c, d.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
-	if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.selectedProfile == "").Clicked() {
-		d.moveSelectedProfile(-1)
-	}
-	if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.selectedProfile == "").Clicked() {
-		d.moveSelectedProfile(1)
-	}
+	ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接").Placeholder("搜索连接或分组")
+	ui.Row(c).Gap(8).Children(func() {
+		if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.selectedProfile == "").Clicked() {
+			d.moveSelectedProfile(-1)
+		}
+		if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.selectedProfile == "").Clicked() {
+			d.moveSelectedProfile(1)
+		}
+	})
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
+	if len(d.profiles) == 0 {
+		ui.Text(c, "还没有 SSH 连接").FontSize(18).Bold()
+		ui.Text(c, "创建连接后，可在这里快速查找和管理。也可以打开本机终端。").TextColor(c.Theme().TextMuted).Wrap()
+	}
 	var moveFrom, moveTo profileID
+	shown := 0
 	for _, item := range d.profiles {
 		p := item
+		if d.profileFilter != "" && d.profileFilter != p.Group {
+			continue
+		}
 		if query != "" && !strings.Contains(strings.ToLower(p.Label+" "+p.Group), query) {
 			continue
 		}
+		shown++
 		label := p.Label
 		if p.Group != "" {
 			label = p.Group + " / " + label
@@ -93,7 +115,11 @@ func (d *desktop) profileView(c *ui.Context) {
 						break
 					}
 				}
-				d.status = "连接已移除"
+				if err := d.saveProfiles(); err != nil {
+					d.status = "连接已移除，但本机保存失败：" + err.Error()
+				} else {
+					d.status = "连接已移除"
+				}
 			}
 		})
 		if row.Clicked() {
@@ -103,9 +129,16 @@ func (d *desktop) profileView(c *ui.Context) {
 			moveFrom, moveTo = dragged, p.ID
 		}
 	}
+	if len(d.profiles) > 0 && shown == 0 {
+		ui.Text(c, "没有匹配的连接").TextColor(c.Theme().TextMuted)
+	}
 	if moveFrom != "" {
 		d.moveProfile(moveFrom, moveTo)
-		d.status = "连接顺序已调整"
+		if err := d.saveProfiles(); err != nil {
+			d.status = "排序已调整，但本机保存失败：" + err.Error()
+		} else {
+			d.status = "连接顺序已调整"
+		}
 		c.Invalidate()
 	}
 }
@@ -116,7 +149,11 @@ func (d *desktop) moveSelectedProfile(offset int) {
 			j := i + offset
 			if j >= 0 && j < len(d.profiles) {
 				d.moveProfile(p.ID, d.profiles[j].ID)
-				d.status = "连接顺序已调整"
+				if err := d.saveProfiles(); err != nil {
+					d.status = "排序已调整，但本机保存失败：" + err.Error()
+				} else {
+					d.status = "连接顺序已调整"
+				}
 			}
 			return
 		}

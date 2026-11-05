@@ -83,8 +83,20 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("native window not found: %v", windows)
 	}
 	tree := fmt.Sprint(call("tree"))
-	if !strings.Contains(tree, "主机地址") || !strings.Contains(tree, "SSH 密码") || !strings.Contains(tree, "连接列表（仅本次运行）") {
+	if !strings.Contains(tree, "连接列表") {
 		t.Fatalf("missing native fields: %s", tree)
+	}
+	call("act", map[string]any{"key": "connection-new", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "主机地址") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "主机地址") || !strings.Contains(tree, "SSH 密码") {
+		t.Fatalf("missing connection fields: %s", tree)
 	}
 	settings, fingerprint, attempts := testSSHServer(t)
 	for key, value := range map[string]string{"host": settings.Host, "port": settings.Port, "user": settings.User, "password": settings.Password} {

@@ -10,7 +10,7 @@ import (
 
 // openLocalTerminal starts a local interactive shell, without an SSH client or server.
 func (d *desktop) openLocalTerminal() {
-	if d.busy {
+	if d.busy || d.term != nil {
 		return
 	}
 	options := terminal.Options{NoClipboardWrite: true, ImageLimit: -1, Env: []string{"TERM=xterm-256color", "COLORTERM=truecolor"}}
@@ -31,6 +31,7 @@ func (d *desktop) openLocalTerminal() {
 		_ = d.term.Close()
 	}
 	d.term = t
+	d.workspace = "terminal"
 	d.shell = nil
 	d.files = nil
 	d.selectedFile = ""

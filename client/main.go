@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/terminal"
@@ -11,6 +13,9 @@ import (
 )
 
 type desktop struct {
+	workspace                                                                               string
+	editConnection                                                                          bool
+	lightTheme                                                                              bool
 	showTeams, showAdmin                                                                    bool
 	teamInvites                                                                             []cloudInvite
 	confirmInvite                                                                           string
@@ -26,6 +31,9 @@ type desktop struct {
 	confirmCloudDelete                                                                      string
 	profiles                                                                                []profile
 	profileSearch, profileGroup, selectedProfile                                            string
+	profileFilter                                                                           string
+	profilePath                                                                             string
+	profileStoreBlocked                                                                     bool
 	nextProfileID                                                                           int
 	shell                                                                                   *remoteShell
 	fileDir, fileLocal, fileStatus, selectedFile, confirmDelete                             string
@@ -40,6 +48,36 @@ type desktop struct {
 	cloud                                                                                   *cloudClient
 	cloudURL, cloudUser, cloudPassword, cloudRegistration, cloudStatus                      string
 	accounts                                                                                []cloudAccount
+}
+
+var workspaceTheme = func() *ui.Theme {
+	t := ui.DarkTheme()
+	t.Background = ui.Hex("#111418")
+	t.Surface = ui.Hex("#1a1f24")
+	t.SurfaceHover = ui.Hex("#252c32")
+	t.SurfacePressed = ui.Hex("#303940")
+	t.Border = ui.Hex("#303840")
+	t.Accent = ui.Hex("#26885e")
+	t.AccentHover = ui.Hex("#2fa775")
+	t.AccentPressed = ui.Hex("#1c6948")
+	t.Focus = ui.Hex("#6ad9a4")
+	return t
+}()
+
+var workspaceLightTheme = func() *ui.Theme {
+	t := ui.LightTheme()
+	t.Accent = ui.Hex("#197a50")
+	t.AccentHover = ui.Hex("#238f60")
+	t.AccentPressed = ui.Hex("#135e3e")
+	t.Focus = ui.Hex("#197a50")
+	return t
+}()
+
+func workspaceButton(c *ui.Context, key, label string, active bool) ui.Element {
+	if active {
+		return ui.PrimaryButton(c.Key(key), label)
+	}
+	return ui.Button(c.Key(key), label)
 }
 
 func (d *desktop) inspect() {
@@ -73,7 +111,7 @@ func (d *desktop) inspect() {
 }
 
 func (d *desktop) connect() {
-	if d.busy || d.fingerprint == "" {
+	if d.busy || d.term != nil || d.fingerprint == "" {
 		return
 	}
 	d.busy = true
@@ -108,53 +146,153 @@ func (d *desktop) connect() {
 			d.refreshFiles()
 			d.active = settings
 			d.status = "已连接"
+			d.workspace = "terminal"
 		})
 	}()
 }
 
 func (d *desktop) view(c *ui.Context) {
-	ui.Row(c).Fill().Children(func() {
-		ui.Scroll(c).Width(340).FillHeight().Children(func() {
-			ui.Column(c).Padding(18).Gap(8).Children(func() {
-				ui.Text(c, "NekoSSH").FontSize(23).Bold()
-				ui.Button(c.Key("local-terminal"), "本机终端").Disabled(d.busy).OnClick(d.openLocalTerminal)
-				ui.Text(c, "SSH 连接").Bold()
-				ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
-				ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
-				ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
-				ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password()
-				ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）")
-				ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password()
-				ui.Button(c.Key("inspect"), "获取主机指纹").Disabled(d.busy).OnClick(d.inspect)
-				if d.fingerprint != "" {
-					ui.Text(c, d.fingerprint).FontSize(12)
-				}
-				ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || d.fingerprint == "").OnClick(d.connect)
-				if ui.Button(c.Key("disconnect"), "断开").Disabled(d.term == nil).Clicked() {
-					_ = d.term.Close()
-					d.term = nil
-					d.shell = nil
-					d.files = nil
-					d.active = connectionSettings{}
-					d.status = "已断开"
-				}
-				ui.Text(c, d.status).FontSize(13)
-				d.profileView(c)
-				d.fileView(c)
-				d.cloudView(c)
-			})
-		})
-		ui.Column(c).Grow(1).FillHeight().Children(func() {
-			if d.term == nil {
-				ui.Text(c, "连接服务器后显示终端").FontSize(18)
-			} else {
-				terminal.View(c, d.term).Fill()
+	if d.lightTheme {
+		c.SetTheme(workspaceLightTheme)
+	} else {
+		c.SetTheme(workspaceTheme)
+	}
+	t := c.Theme()
+	ui.Column(c).Fill().Children(func() {
+		ui.Row(c).FillWidth().Padding(10, 16).Gap(12).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+			ui.Text(c, "NekoSSH").FontSize(21).Bold()
+			ui.Text(c, "安全连接 · 本地与云端").FontSize(12).TextColor(t.TextMuted).Grow(1)
+			themeLabel := "浅色"
+			if d.lightTheme {
+				themeLabel = "深色"
 			}
+			if ui.Button(c.Key("theme-toggle"), themeLabel).Clicked() {
+				d.lightTheme = !d.lightTheme
+			}
+			ui.Button(c.Key("local-terminal"), "本机终端").Disabled(d.busy || d.term != nil).OnClick(d.openLocalTerminal)
+			if ui.Button(c.Key("disconnect"), "断开").Disabled(d.term == nil).Clicked() {
+				_ = d.term.Close()
+				d.term = nil
+				d.shell = nil
+				d.files = nil
+				d.active = connectionSettings{}
+				d.workspace = "connections"
+				d.status = "已断开"
+			}
+		})
+		ui.Row(c).Grow(1).FillWidth().Children(func() {
+			ui.Scroll(c).Width(235).FillHeight().Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
+				ui.Column(c).Padding(16).Gap(8).Children(func() {
+					ui.Text(c, "工作区").FontSize(12).TextColor(t.TextMuted)
+					if workspaceButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
+						d.workspace = "connections"
+						d.editConnection = false
+					}
+					if workspaceButton(c, "nav-terminal", "终端", d.workspace == "terminal").Clicked() {
+						d.workspace = "terminal"
+					}
+					if workspaceButton(c, "nav-files", "远程文件", d.workspace == "files").Clicked() {
+						d.workspace = "files"
+					}
+					if workspaceButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
+						d.workspace = "cloud"
+					}
+					ui.Text(c, "连接").FontSize(12).TextColor(t.TextMuted)
+					if ui.Button(c.Key("group-all"), fmt.Sprintf("全部连接  %d", len(d.profiles))).Clicked() {
+						d.workspace = "connections"
+						d.editConnection = false
+						d.profileFilter = ""
+					}
+					counts := make(map[string]int)
+					var groups []string
+					for _, p := range d.profiles {
+						if p.Group != "" {
+							if counts[p.Group] == 0 {
+								groups = append(groups, p.Group)
+							}
+							counts[p.Group]++
+						}
+					}
+					for _, group := range groups {
+						name := group
+						if ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", name, counts[name])).Clicked() {
+							d.workspace = "connections"
+							d.editConnection = false
+							d.profileFilter = name
+						}
+					}
+					ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
+				})
+			})
+			ui.Column(c).Grow(1).FillHeight().Children(func() {
+				if d.workspace == "terminal" {
+					ui.Row(c).FillWidth().Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+						ui.Text(c, "终端").FontSize(17).Bold().Grow(1)
+						ui.Text(c, d.status).FontSize(12).TextColor(t.TextMuted)
+					})
+					if d.term == nil {
+						ui.Text(c, "选择连接，或打开本机终端").FontSize(18).TextColor(t.TextMuted)
+					} else {
+						terminal.View(c, d.term).Fill()
+					}
+					return
+				}
+				ui.Scroll(c).Grow(1).FillWidth().Children(func() {
+					ui.Column(c).Padding(24).Gap(10).Children(func() {
+						switch d.workspace {
+						case "files":
+							ui.Text(c, "文件管理").FontSize(22).Bold()
+							d.fileView(c)
+						case "cloud":
+							ui.Text(c, "云端工作区").FontSize(22).Bold()
+							d.cloudView(c)
+						default:
+							if d.editConnection {
+								d.connectionView(c)
+							} else {
+								d.profileView(c)
+							}
+						}
+					})
+				})
+			})
 		})
 	})
 }
 
-const version = "0.3.0"
+func (d *desktop) connectionView(c *ui.Context) {
+	ui.Text(c, "SSH 连接").FontSize(22).Bold()
+	ui.Text(c, "填写连接信息，核对主机指纹后连接。可将连接保存到列表。").TextColor(c.Theme().TextMuted).Wrap()
+	if ui.Button(c.Key("connection-back"), "返回连接列表").Clicked() {
+		d.editConnection = false
+	}
+	ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
+	ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
+	ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
+	ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password()
+	ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）")
+	ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password()
+	ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("分组（可选）")
+	if ui.Button(c.Key("profile-add"), "保存到连接列表").Disabled(d.busy).Clicked() {
+		if err := d.addProfile(); err != nil {
+			d.status = err.Error()
+		} else {
+			if err := d.saveProfiles(); err != nil {
+				d.status = "连接已添加，但本机保存失败：" + err.Error()
+			} else {
+				d.status = "连接已保存（不保存密码）"
+			}
+		}
+	}
+	ui.Button(c.Key("inspect"), "获取主机指纹").Disabled(d.busy).OnClick(d.inspect)
+	if d.fingerprint != "" {
+		ui.Text(c, d.fingerprint).FontSize(12)
+	}
+	ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || d.term != nil || d.fingerprint == "").OnClick(d.connect)
+	ui.Text(c, d.status).FontSize(13)
+}
+
+const version = "0.3.1"
 
 func main() {
 	showVersion := flag.Bool("version", false, "显示版本")
@@ -164,6 +302,14 @@ func main() {
 		return
 	}
 	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息", cloudURL: "https://nekossh.neko233.com", teamInviteHours: "24", teamInviteUses: "1"}
+	if dir, err := os.UserConfigDir(); err != nil {
+		d.profileStoreBlocked = true
+		d.status = "无法找到本机配置目录：" + err.Error()
+	} else if err = d.loadProfiles(filepath.Join(dir, "NekoSSH", "profiles.json")); err != nil {
+		d.profileStoreBlocked = true
+		d.status = "读取本机连接失败（未覆盖原文件）：" + err.Error()
+	}
+	mygo.Theme.SetSource(mygo.ThemeDark)
 	mygo.App.WhenReady(func() {
 		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH", Width: 1200, Height: 760, Content: ui.View(d.view)})
 		d.win.OnClosed(func() {
