@@ -20,6 +20,25 @@ type cloudInitialState struct {
 	accountErr, teamErr, memberErr error
 }
 
+type cloudScopeState struct {
+	accounts              []cloudAccount
+	members               []cloudTeamMember
+	accountErr, memberErr error
+}
+
+// The connection list determines whether the scope can be selected. Members
+// are a separate read and a temporary failure must not hide usable accounts.
+func loadCloudScope(client *cloudClient, id string) cloudScopeState {
+	next := *client
+	next.teamID = id
+	state := cloudScopeState{}
+	state.accounts, state.accountErr = next.list()
+	if state.accountErr == nil && id != "" {
+		state.members, state.memberErr = next.members()
+	}
+	return state
+}
+
 // A successful login remains usable even if either independent read fails.
 func loadCloudInitialState(c *cloudClient, selectSoleTeam bool) cloudInitialState {
 	var state cloudInitialState

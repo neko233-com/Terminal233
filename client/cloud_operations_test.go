@@ -108,6 +108,44 @@ func TestLoginStateKeepsSessionWhenAccountListFails(t *testing.T) {
 	}
 }
 
+func TestScopeSelectionKeepsAccountsWhenMembersFail(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/teams/new/accounts":
+			_, _ = w.Write([]byte(`[{"id":"shared","label":"team connection"}]`))
+		case "/api/v1/teams/new/members":
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		default:
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		}
+	}))
+	defer server.Close()
+	c, err := newCloudClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.http.Transport, c.token, c.teamID = server.Client().Transport, "token", "old"
+	state := loadCloudScope(c, "new")
+	if c.teamID != "old" || state.accountErr != nil || state.memberErr == nil {
+		t.Fatal("scope read modified current scope or lost partial error")
+	}
+	d := &desktop{cloud: c, accounts: []cloudAccount{{ID: "old"}}, members: []cloudTeamMember{{Username: "old"}}, confirmMember: "old", confirmCloudDelete: "old", teamInviteURL: "old-link"}
+	d.finishCloudScopeSelection("new", state)
+	if c.teamID != "new" || len(d.accounts) != 1 || d.accounts[0].ID != "shared" || len(d.members) != 0 || d.confirmMember != "" || d.confirmCloudDelete != "" || d.teamInviteURL != "" || !strings.Contains(d.teamStatus, "成员列表加载失败") {
+		t.Fatalf("partial scope result applied incorrectly: %s", d.teamStatus)
+	}
+	d.workspace, d.showTeams = "cloud", true
+	view := ui.NewTester(d.view, 1200, 2000)
+	if !view.HasText("team connection") || !strings.Contains(strings.Join(view.Texts(), " "), "成员列表加载失败") {
+		t.Fatal("partial result and member warning were not visible together")
+	}
+	state = loadCloudScope(c, "missing")
+	d.finishCloudScopeSelection("missing", state)
+	if c.teamID != "new" || len(d.accounts) != 1 || d.accounts[0].ID != "shared" || !strings.Contains(d.teamStatus, "无法切换") {
+		t.Fatal("failed account read replaced the previous scope")
+	}
+}
+
 func TestSavedIDLinksOnlyUnchangedFormAcrossScopes(t *testing.T) {
 	c := &cloudClient{teamID: "personal"}
 	settings := connectionSettings{Host: "example.test", Port: "22", User: "alice", Password: "secret"}

@@ -78,24 +78,24 @@ func (d *desktop) selectTeam(id string) {
 	client := d.cloud
 	d.busy = true
 	go func() {
-		// Only change the selected scope after both reads succeed.
-		next := *client
-		next.teamID = id
-		accounts, err := next.list()
-		var members []cloudTeamMember
-		if err == nil && id != "" {
-			members, err = next.members()
-		}
+		state := loadCloudScope(client, id)
 		d.win.Update(func() {
 			d.busy = false
-			if err != nil {
-				d.teamStatus = err.Error()
-				return
-			}
-			d.applyCloudScope(id, accounts, members)
-			d.teamStatus = "已切换同步空间"
+			d.finishCloudScopeSelection(id, state)
 		})
 	}()
+}
+
+func (d *desktop) finishCloudScopeSelection(id string, state cloudScopeState) {
+	if state.accountErr != nil {
+		d.teamStatus = "无法切换同步空间，连接列表加载失败：" + state.accountErr.Error()
+		return
+	}
+	d.applyCloudScope(id, state.accounts, state.members)
+	d.teamStatus = "已切换同步空间"
+	if state.memberErr != nil {
+		d.teamStatus += "；成员列表加载失败，请重新选择团队刷新：" + state.memberErr.Error()
+	}
 }
 
 // Pending confirmations and invitation links belong to the previous scope.

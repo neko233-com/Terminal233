@@ -154,6 +154,38 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	if err = bob.save(account); err == nil {
 		t.Fatal("team member modified credentials")
 	}
+	secondTeam, err := client.createTeam("运维组")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.teamID = secondTeam.ID
+	secondAccount := account
+	secondAccount.Label, secondAccount.Password = "other team", "second-team-secret"
+	if err = client.save(secondAccount); err != nil {
+		t.Fatal(err)
+	}
+	secondInvite, err := client.createInvite("second-invite-pass", 3600, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = bob.joinTeam(extractInviteToken(secondInvite), "second-invite-pass"); err != nil {
+		t.Fatal(err)
+	}
+	teams, err := bob.teams()
+	if err != nil || len(teams) != 2 {
+		t.Fatalf("one account did not join two teams: %d %v", len(teams), err)
+	}
+	bob.teamID = secondTeam.ID
+	shared, err = bob.list()
+	if err != nil || len(shared) != 1 || shared[0].Password != "second-team-secret" {
+		t.Fatal("second team did not return its own credentials")
+	}
+	bob.teamID = team.ID
+	shared, err = bob.list()
+	if err != nil || len(shared) != 1 || shared[0].Password != "ssh-password" {
+		t.Fatal("returning to first team mixed up credential scopes")
+	}
+	client.teamID = team.ID
 	if err = client.removeMember("bobby"); err != nil {
 		t.Fatal(err)
 	}
