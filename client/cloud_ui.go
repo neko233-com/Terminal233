@@ -157,6 +157,8 @@ func (d *desktop) cloudView(c *ui.Context) {
 		if row.Clicked() {
 			d.workspace = "connections"
 			d.editConnection = true
+			d.selectedProfile = ""
+			d.profileGroup = ""
 			d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
 			d.fingerprint = ""
 			d.expectedFingerprint = account.HostKeyFingerprint

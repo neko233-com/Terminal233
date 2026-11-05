@@ -3,11 +3,12 @@ package main
 import "testing"
 
 func TestProfilesDoNotRetainSecretsAndReorder(t *testing.T) {
-	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice", Password: "password", Passphrase: "phrase"}, fingerprint: "SHA256:key", profileGroup: "工作"}
+	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice", Password: "password", Passphrase: "phrase"}, active: connectionSettings{Host: "one.test", Port: "22", User: "alice", Fingerprint: "SHA256:key"}, profileGroup: "工作"}
 	if err := d.addProfile(); err != nil {
 		t.Fatal(err)
 	}
 	d.settings.Host = "two.test"
+	d.selectedProfile = ""
 	if err := d.addProfile(); err != nil {
 		t.Fatal(err)
 	}
@@ -21,5 +22,33 @@ func TestProfilesDoNotRetainSecretsAndReorder(t *testing.T) {
 	d.loadProfile(d.profiles[1])
 	if d.expectedFingerprint != "SHA256:key" || d.fingerprint != "" {
 		t.Fatal("loaded profile bypassed host verification")
+	}
+}
+
+func TestProfileEditPreservesOnlyPreviouslyTrustedKey(t *testing.T) {
+	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice"}, fingerprint: "SHA256:unverified", profileGroup: "工作"}
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	if d.profiles[0].Settings.Fingerprint != "" {
+		t.Fatal("inspection was treated as trust")
+	}
+	d.profiles[0].Settings.Fingerprint = "SHA256:trusted"
+	d.loadProfile(d.profiles[0])
+	if d.profileGroup != "工作" {
+		t.Fatal("editing lost group")
+	}
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.profiles) != 1 || d.profiles[0].Settings.Fingerprint != "SHA256:trusted" {
+		t.Fatal("editing duplicated the profile or lost its trusted key")
+	}
+	d.settings.Host = "other.test"
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	if d.profiles[0].Settings.Fingerprint != "" {
+		t.Fatal("trusted key retained for a changed endpoint")
 	}
 }

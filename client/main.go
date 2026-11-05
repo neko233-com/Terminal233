@@ -146,6 +146,15 @@ func (d *desktop) connect() {
 			d.refreshFiles()
 			d.active = settings
 			d.status = "已连接"
+			for i, p := range d.profiles {
+				if string(p.ID) == d.selectedProfile && p.Settings.Host == settings.Host && p.Settings.Port == settings.Port && p.Settings.User == settings.User {
+					d.profiles[i].Settings.Fingerprint = settings.Fingerprint
+					if err := d.saveProfiles(); err != nil {
+						d.status = "已连接，但主机指纹未保存：" + err.Error()
+					}
+					break
+				}
+			}
 			d.workspace = "terminal"
 		})
 	}()

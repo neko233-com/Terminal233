@@ -28,6 +28,7 @@ func TestConnectionListSearchAndContextMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.settings.Host = "two.test"
+	d.selectedProfile = ""
 	if err := d.addProfile(); err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +58,7 @@ func TestConnectionGroupNavigation(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.settings.Host, d.profileGroup = "two.test", "个人"
+	d.selectedProfile = ""
 	if err := d.addProfile(); err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +100,7 @@ func TestConnectionListDragOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.settings.Host = "two.test"
+	d.selectedProfile = ""
 	if err := d.addProfile(); err != nil {
 		t.Fatal(err)
 	}

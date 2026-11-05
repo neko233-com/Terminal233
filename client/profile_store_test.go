@@ -9,7 +9,7 @@ import (
 
 func TestProfileStoreRoundTripDoesNotWriteCredentials(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
-	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice", Password: "private-password", Passphrase: "private-passphrase"}, fingerprint: "SHA256:test", profileGroup: "工作"}
+	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice", Password: "private-password", Passphrase: "private-passphrase"}, active: connectionSettings{Host: "one.test", Port: "22", User: "alice", Fingerprint: "SHA256:test"}, profileGroup: "工作"}
 	if err := d.loadProfiles(path); err != nil {
 		t.Fatal(err)
 	}
@@ -27,6 +27,7 @@ func TestProfileStoreRoundTripDoesNotWriteCredentials(t *testing.T) {
 		t.Fatal("credential written to profile store")
 	}
 	d.settings.Host = "two.test"
+	d.selectedProfile = ""
 	if err := d.addProfile(); err != nil {
 		t.Fatal(err)
 	}

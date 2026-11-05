@@ -17,12 +17,29 @@ func (d *desktop) addProfile() error {
 	if _, err := d.settings.address(); err != nil {
 		return err
 	}
-	d.nextProfileID++
 	safe := d.settings
 	safe.Password = ""
 	safe.Passphrase = ""
-	safe.Fingerprint = d.fingerprint
-	d.profiles = append(d.profiles, profile{ID: profileID(fmt.Sprint(d.nextProfileID)), Group: strings.TrimSpace(d.profileGroup), Label: safe.User + "@" + safe.Host, Settings: safe})
+	// Inspection alone does not mean the user trusted a host key. Retain
+	// a verified key only for the same endpoint or a completed session.
+	safe.Fingerprint = ""
+	if d.active.Host == safe.Host && d.active.Port == safe.Port && d.active.User == safe.User {
+		safe.Fingerprint = d.active.Fingerprint
+	}
+	for i, old := range d.profiles {
+		if string(old.ID) != d.selectedProfile {
+			continue
+		}
+		if safe.Fingerprint == "" && old.Settings.Host == safe.Host && old.Settings.Port == safe.Port && old.Settings.User == safe.User {
+			safe.Fingerprint = old.Settings.Fingerprint
+		}
+		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: safe.User + "@" + safe.Host, Settings: safe}
+		return nil
+	}
+	d.nextProfileID++
+	id := profileID(fmt.Sprint(d.nextProfileID))
+	d.profiles = append(d.profiles, profile{ID: id, Group: strings.TrimSpace(d.profileGroup), Label: safe.User + "@" + safe.Host, Settings: safe})
+	d.selectedProfile = string(id)
 	return nil
 }
 func (d *desktop) moveProfile(from, to profileID) {
@@ -50,6 +67,7 @@ func (d *desktop) loadProfile(p profile) {
 	d.workspace = "connections"
 	d.editConnection = true
 	d.settings = p.Settings
+	d.profileGroup = p.Group
 	d.expectedFingerprint = p.Settings.Fingerprint
 	d.fingerprint = ""
 	d.selectedProfile = string(p.ID)
@@ -64,6 +82,7 @@ func (d *desktop) profileView(c *ui.Context) {
 		ui.Text(c, title).FontSize(22).Bold().Grow(1)
 		if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Clicked() {
 			d.settings = connectionSettings{Port: "22"}
+			d.profileGroup = ""
 			d.fingerprint = ""
 			d.expectedFingerprint = ""
 			d.selectedProfile = ""
