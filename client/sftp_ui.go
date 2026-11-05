@@ -188,6 +188,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if d.term == nil {
 		ui.Text(c, "连接 SSH 或打开本机终端后可浏览文件。").TextColor(c.Theme().TextMuted).Wrap()
 	}
+	d.fileActionsView(c, local, compact)
 	ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录")
 	if len(d.files) > 0 {
 		ui.Row(c).FillWidth().Gap(12).Padding(8, 12).Background(c.Theme().Surface).Children(func() {
@@ -260,6 +261,9 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if len(d.files) > 0 && shown == 0 {
 		ui.Text(c, "没有匹配的文件").TextColor(c.Theme().TextMuted)
 	}
+}
+
+func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {
 	dropLabel := "拖入一个文件上传"
 	if local {
 		dropLabel = "拖入一个文件复制到当前目录"
@@ -281,14 +285,25 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if local {
 		uploadLabel, downloadLabel = "复制文件到当前目录", "复制选中文件到指定路径"
 	}
-	if ui.Button(c.Key("upload"), uploadLabel).Disabled(d.busy || d.term == nil).Clicked() {
-		d.transfer(true)
+	uploadShort, downloadShort, deleteShort := uploadLabel, downloadLabel, "删除选中文件（需确认）"
+	if compact {
+		if local {
+			uploadShort, downloadShort = "复制到此", "复制选中"
+		} else {
+			uploadShort, downloadShort = "上传", "下载"
+		}
+		deleteShort = "删除"
 	}
-	if ui.Button(c.Key("download"), downloadLabel).Disabled(d.busy || d.term == nil || d.selectedFile == "").Clicked() {
-		d.transfer(false)
-	}
-	if ui.Button(c.Key("delete"), "删除选中文件（需确认）").Disabled(d.busy || d.term == nil || d.selectedFile == "").Clicked() {
-		d.removeSelected()
-	}
+	ui.Row(c).Gap(6).Children(func() {
+		if ui.Button(c.Key("upload"), uploadShort).Label(uploadLabel).Disabled(d.busy || d.term == nil).Clicked() {
+			d.transfer(true)
+		}
+		if ui.Button(c.Key("download"), downloadShort).Label(downloadLabel).Disabled(d.busy || d.term == nil || d.selectedFile == "").Clicked() {
+			d.transfer(false)
+		}
+		if ui.Button(c.Key("delete"), deleteShort).Label("删除选中文件（需确认）").Disabled(d.busy || d.term == nil || d.selectedFile == "").Clicked() {
+			d.removeSelected()
+		}
+	})
 	ui.Text(c, d.fileStatus).FontSize(12)
 }
