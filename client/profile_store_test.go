@@ -62,3 +62,34 @@ func TestProfileStoreRejectsCorruptFileWithoutOverwrite(t *testing.T) {
 		t.Fatalf("corrupt file changed: %q %v", data, err)
 	}
 }
+
+func TestProfileStoreRejectsStaleWindowWithoutLosingData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	a := &desktop{settings: connectionSettings{Host: "first.test", Port: "22", User: "alice"}}
+	b := &desktop{settings: connectionSettings{Host: "second.test", Port: "22", User: "bob"}}
+	if err := a.loadProfiles(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.loadProfiles(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveProfiles(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.saveProfiles(); err == nil {
+		t.Fatal("stale window overwrote a newer connection list")
+	}
+	var restored desktop
+	if err := restored.loadProfiles(path); err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.profiles) != 1 || restored.profiles[0].Settings.Host != "first.test" {
+		t.Fatalf("saved data was lost: %+v", restored.profiles)
+	}
+}

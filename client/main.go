@@ -40,6 +40,8 @@ type desktop struct {
 	profileRecent                                                                           bool
 	profilePath                                                                             string
 	profileStoreBlocked                                                                     bool
+	profileExists                                                                           bool
+	profileRevision                                                                         [32]byte
 	nextProfileID                                                                           int
 	shell                                                                                   *remoteShell
 	fileDir, fileLocal, fileStatus, selectedFile, confirmDelete                             string

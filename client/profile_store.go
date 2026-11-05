@@ -1,11 +1,14 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/gofrs/flock"
 )
 
 // diskProfile is deliberately a whitelist: SSH passwords and private-key
@@ -25,6 +28,8 @@ func (d *desktop) loadProfiles(path string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		d.profilePath = path
+		d.profileExists = false
+		d.profileRevision = [32]byte{}
 		return nil
 	}
 	if err != nil {
@@ -49,6 +54,7 @@ func (d *desktop) loadProfiles(path string) error {
 		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Group: p.Group, Label: p.Label, Favorite: p.Favorite, LastConnected: p.LastConnected, Settings: settings})
 	}
 	d.profiles, d.nextProfileID, d.profilePath = profiles, len(profiles), path
+	d.profileExists, d.profileRevision = true, sha256.Sum256(data)
 	return nil
 }
 
@@ -72,6 +78,25 @@ func (d *desktop) saveProfiles() error {
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
+	// Serialize cooperating writers and reject stale snapshots. Without both
+	// checks, two windows can silently erase each other's connection edits.
+	lock := flock.New(d.profilePath + ".lock")
+	locked, err := lock.TryLock()
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return errors.New("另一个窗口正在保存连接，请稍后重试")
+	}
+	defer lock.Unlock()
+	current, err := os.ReadFile(d.profilePath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	exists := err == nil
+	if exists != d.profileExists || (exists && sha256.Sum256(current) != d.profileRevision) {
+		return errors.New("连接文件已被其他窗口更改，当前更改尚未保存；请先处理其他窗口并重新启动")
+	}
 	f, err := os.CreateTemp(dir, ".profiles-*.tmp")
 	if err != nil {
 		return err
@@ -90,5 +115,9 @@ func (d *desktop) saveProfiles() error {
 	if closeErr != nil {
 		return closeErr
 	}
-	return os.Rename(f.Name(), d.profilePath)
+	if err := os.Rename(f.Name(), d.profilePath); err != nil {
+		return err
+	}
+	d.profileExists, d.profileRevision = true, sha256.Sum256(data)
+	return nil
 }
