@@ -18,6 +18,7 @@ type desktop struct {
 	workspace                                                                               string
 	editConnection                                                                          bool
 	lightTheme                                                                              bool
+	terminalFontSize                                                                        int
 	showFilePanel                                                                           bool
 	sidebarCollapsed                                                                        bool
 	sessions                                                                                []*workspaceSession
@@ -178,6 +179,7 @@ func (d *desktop) connect() {
 	d.busy = true
 	d.status = "正在建立安全连接…"
 	settings := d.settings
+	options := d.terminalOptions()
 	settings.Fingerprint = d.fingerprint
 	profileID := d.selectedProfile
 	d.settings.Password = ""
@@ -186,7 +188,8 @@ func (d *desktop) connect() {
 		shell, err := connectShell(settings)
 		var term *terminal.Terminal
 		if err == nil {
-			term, err = terminal.New(terminal.Options{Conn: shell, NoClipboardWrite: true, ImageLimit: -1})
+			options.Conn = shell
+			term, err = terminal.New(options)
 			if err != nil {
 				_ = shell.Close()
 			}
@@ -277,6 +280,19 @@ func (d *desktop) view(c *ui.Context) {
 						if workspaceButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
 							d.workspace = "cloud"
 						}
+						ui.Text(c, "终端字号").FontSize(12).TextColor(t.TextMuted)
+						ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+							if ui.Button(c.Key("font-smaller"), "A−").Label("缩小终端字号").Disabled(d.currentTerminalFontSize() <= minTerminalFontSize).Clicked() {
+								d.changeTerminalFont(terminal.Zoom{Steps: -1})
+							}
+							ui.Text(c, fmt.Sprint(d.currentTerminalFontSize())).Grow(1)
+							if ui.Button(c.Key("font-larger"), "A+").Label("放大终端字号").Disabled(d.currentTerminalFontSize() >= maxTerminalFontSize).Clicked() {
+								d.changeTerminalFont(terminal.Zoom{Steps: 1})
+							}
+							if ui.Button(c.Key("font-reset"), "重置").Disabled(d.currentTerminalFontSize() == defaultTerminalFontSize).Clicked() {
+								d.changeTerminalFont(terminal.Zoom{Reset: true})
+							}
+						})
 						ui.Text(c, "连接").FontSize(12).TextColor(t.TextMuted)
 						connectionCount := len(d.profiles) + 1
 						if d.cloud != nil {
@@ -487,7 +503,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.9"
+const version = "0.3.10"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

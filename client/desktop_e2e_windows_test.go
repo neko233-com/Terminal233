@@ -253,6 +253,17 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatal("stopped forward still listening")
 	}
 	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "profile-local-terminal") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "profile-local-terminal") {
+		t.Fatalf("connection list did not load: %s", tree)
+	}
 	call("act", map[string]any{"key": "profile-local-terminal", "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -926,18 +937,19 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "已断开") {
 		t.Fatalf("local terminal failed to close: %s", tree)
 	}
+	call("act", map[string]any{"key": "font-larger", "action": "press"})
 	call("act", map[string]any{"key": "theme-toggle", "action": "press"})
 	call("act", map[string]any{"key": "toggle-sidebar", "action": "press"})
 	var prefs workspacePreferences
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		prefs, err = readPreferences(filepath.Join(configDir, "NekoSSH", "preferences.json"))
-		if err == nil && prefs.Light && prefs.SidebarCollapsed {
+		if err == nil && prefs.Light && prefs.SidebarCollapsed && prefs.TerminalFontSize == 14 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if err != nil || !prefs.Light || !prefs.SidebarCollapsed {
+	if err != nil || !prefs.Light || !prefs.SidebarCollapsed || prefs.TerminalFontSize != 14 {
 		t.Fatalf("native appearance controls did not persist: %+v, %v", prefs, err)
 	}
 }

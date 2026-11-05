@@ -13,7 +13,8 @@ func (d *desktop) openLocalTerminal() {
 	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
 		return
 	}
-	options := terminal.Options{NoClipboardWrite: true, ImageLimit: -1, Env: []string{"TERM=xterm-256color", "COLORTERM=truecolor"}}
+	options := d.terminalOptions()
+	options.Env = []string{"TERM=xterm-256color", "COLORTERM=truecolor"}
 	if runtime.GOOS == "windows" {
 		shell, err := exec.LookPath("pwsh.exe")
 		if err != nil {

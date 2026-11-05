@@ -81,6 +81,9 @@ func (d *desktop) activateSession(id int) {
 
 func (d *desktop) addSession(term *terminal.Terminal, shell *remoteShell, active connectionSettings, label string) {
 	d.saveSessionState()
+	if term != nil {
+		term.SetFont(terminal.Font{Size: float32(d.currentTerminalFontSize())})
+	}
 	d.nextSession++
 	s := &workspaceSession{id: d.nextSession, label: label, term: term, shell: shell, active: active}
 	if shell != nil {
