@@ -238,6 +238,12 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 		return
 	}
 	stacked := width < 1100 || (d.showFilePanel && width < 1450)
+	// Two vertically stacked terminals become too short in a shallow window.
+	// Keep both usable side by side until there is enough vertical space.
+	_, height := c.Size()
+	if height < 650 {
+		stacked = false
+	}
 	focusedID := 0
 	pane := func(s *workspaceSession, current bool) {
 		container := ui.Column(c).Grow(1)
