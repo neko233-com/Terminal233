@@ -14,6 +14,8 @@ SSH 工作区支持本机端口转发：只监听 `127.0.0.1`，通过已验证�
 
 Windows 下可用 `Ctrl+Shift+1` 至 `Ctrl+Shift+4` 切换工作区，`Ctrl+Shift+T` 新建本机终端。
 
+Windows 原生 OLE 批量拖放验证：`task test:desktop:drop`，使用 MyGo 的原生拖放测试钩子和临时文件，不需要操作真实用户文件。
+
 Windows 桌面自动化验证：`pwsh -NoProfile -File client/test-desktop.ps1 -Quiet`。它构建仅用于测试的自动化版本，在本机测试 SSH 服务上验证原生窗口与连接，不使用外部 SSH 客户端。
 
 Windows 安装包：`task package:windows:local`。`pwsh -NoProfile -File client/install-local-windows.ps1` 要求干净且与远端一致的 `main`，执行测试并重新打包，再静默安装至 `C:\App\nekossh`，核验版本、文件哈希、开始菜单与卸载注册项；Windows 构建不带 Authenticode 签名。
