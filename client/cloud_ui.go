@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/egoist/mygo/ui"
 	"strconv"
+	"strings"
+
+	"github.com/egoist/mygo/ui"
 )
 
 func (d *desktop) cloudLogin(register bool) {
@@ -74,25 +76,50 @@ func (d *desktop) cloudRefresh() {
 	}()
 }
 func (d *desktop) cloudSave() {
-	if d.busy || d.cloud == nil || d.active.Password == "" {
-		return
+	d.saveCloudConnection(d.active, "")
+}
+
+func (d *desktop) cloudSaveForm() {
+	settings := d.settings
+	settings.Fingerprint = d.fingerprint
+	d.saveCloudConnection(settings, d.profileLabel)
+}
+
+func prepareCloudAccount(settings connectionSettings, label string, existing []cloudAccount) (cloudAccount, error) {
+	if _, err := settings.address(); err != nil {
+		return cloudAccount{}, err
 	}
-	active := d.active
-	port, err := strconv.Atoi(active.Port)
-	if err != nil {
-		d.cloudStatus = "端口无效"
-		return
+	if settings.KeyPath != "" || settings.Password == "" || !strings.HasPrefix(settings.Fingerprint, "SHA256:") {
+		return cloudAccount{}, fmt.Errorf("仅支持同步已核对指纹的密码连接")
 	}
-	account := cloudAccount{Label: active.User + "@" + active.Host, Host: active.Host, Port: port, Username: active.User, Password: active.Password, HostKeyFingerprint: active.Fingerprint}
-	for _, existing := range d.accounts {
-		if existing.Host == account.Host && existing.Port == account.Port && existing.Username == account.Username {
-			account.ID = existing.ID
+	port, _ := strconv.Atoi(strings.TrimSpace(settings.Port))
+	label = strings.TrimSpace(label)
+	if label == "" {
+		label = settings.User + "@" + settings.Host
+	}
+	account := cloudAccount{Label: label, Host: strings.TrimSpace(settings.Host), Port: port, Username: strings.TrimSpace(settings.User), Password: settings.Password, HostKeyFingerprint: settings.Fingerprint}
+	for _, item := range existing {
+		if item.Host == account.Host && item.Port == account.Port && item.Username == account.Username {
+			account.ID = item.ID
 			break
 		}
+	}
+	return account, nil
+}
+
+func (d *desktop) saveCloudConnection(settings connectionSettings, label string) {
+	if d.busy || d.cloud == nil {
+		return
+	}
+	account, err := prepareCloudAccount(settings, label, d.accounts)
+	if err != nil {
+		d.cloudStatus, d.status = err.Error(), err.Error()
+		return
 	}
 	client := d.cloud
 	d.busy = true
 	d.cloudStatus = "正在加密传输连接信息…"
+	d.status = d.cloudStatus
 	go func() {
 		err := client.save(account)
 		var accounts []cloudAccount
@@ -103,10 +130,12 @@ func (d *desktop) cloudSave() {
 			d.busy = false
 			if err != nil {
 				d.cloudStatus = err.Error()
+				d.status = "同步失败：" + err.Error()
 				return
 			}
 			d.accounts = accounts
 			d.cloudStatus = "连接信息已同步"
+			d.status = d.cloudStatus
 		})
 	}()
 }
@@ -150,7 +179,7 @@ func (d *desktop) cloudView(c *ui.Context) {
 		ui.Text(c, "当前同步空间："+d.cloudScopeName()).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-		if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || d.cloud == nil || d.active.Password == "").Clicked() {
+		if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || d.cloud == nil || d.active.Password == "" || d.active.KeyPath != "").Clicked() {
 			d.cloudSave()
 		}
 		if ui.Button(c.Key("cloudrefresh"), "刷新云端连接").Disabled(d.busy || d.cloud == nil).Clicked() {

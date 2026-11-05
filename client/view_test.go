@@ -158,6 +158,14 @@ func TestChangedHostKeyRequiresExplicitVerification(t *testing.T) {
 	}
 }
 
+func TestConnectionFormNamesCloudSyncDestination(t *testing.T) {
+	d := &desktop{workspace: "connections", editConnection: true, cloud: &cloudClient{teamID: "team"}, teams: []cloudTeam{{ID: "team", Name: "研发"}}, settings: connectionSettings{Host: "example.test", Port: "22", User: "alice", Password: "secret"}, fingerprint: "SHA256:verified"}
+	view := ui.NewTester(d.view, 1200, 1800)
+	if !view.HasText("同步目标：研发；团队空间的成员可访问共享连接。") || !view.HasText("确认指纹并同步密码连接") {
+		t.Fatal("connection form did not clearly identify the sync destination")
+	}
+}
+
 func TestConnectionSourcesFilterLocalAndCloud(t *testing.T) {
 	d := &desktop{cloud: &cloudClient{}, profiles: []profile{{ID: "local", Label: "本地测试机", Settings: connectionSettings{Host: "local.example", Port: "22", User: "a"}}}, accounts: []cloudAccount{{ID: "cloud", Label: "云端测试机", Host: "cloud.example", Port: 22, Username: "b"}}}
 	view := ui.NewTester(d.view, 1200, 2200)

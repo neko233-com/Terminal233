@@ -449,6 +449,10 @@ func (d *desktop) connectionView(c *ui.Context) {
 	if d.fingerprint != "" {
 		ui.Text(c, d.fingerprint).FontSize(12)
 	}
+	if d.cloud != nil {
+		ui.Text(c, "同步目标："+d.cloudScopeName()+"；团队空间的成员可访问共享连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+		ui.Button(c.Key("cloudsave-form"), "确认指纹并同步密码连接").Disabled(d.busy || d.fingerprint == "" || d.settings.Password == "" || d.settings.KeyPath != "").OnClick(d.cloudSaveForm)
+	}
 	ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions || d.fingerprint == "").OnClick(d.connect)
 	ui.Text(c, d.status).FontSize(13)
 }

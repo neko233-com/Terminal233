@@ -13,6 +13,25 @@ func TestCloudRequiresHTTPSAndRefusesCredentialURLs(t *testing.T) {
 		}
 	}
 }
+
+func TestPrepareCloudAccountRequiresVerifiedPasswordConnection(t *testing.T) {
+	valid := connectionSettings{Host: "example.test", Port: "22", User: "alice", Password: "secret", Fingerprint: "SHA256:verified"}
+	stored := []cloudAccount{{ID: "same", Host: "example.test", Port: 22, Username: "alice"}, {ID: "other", Host: "other.test", Port: 22, Username: "alice"}}
+	account, err := prepareCloudAccount(valid, "工作机", stored)
+	if err != nil || account.ID != "same" || account.Label != "工作机" || account.Password != "secret" || account.HostKeyFingerprint != "SHA256:verified" {
+		t.Fatalf("could not prepare update to selected scope: %#v %v", account, err)
+	}
+	for _, invalid := range []connectionSettings{
+		{Host: valid.Host, Port: valid.Port, User: valid.User, Password: valid.Password},
+		{Host: valid.Host, Port: valid.Port, User: valid.User, Password: valid.Password, Fingerprint: valid.Fingerprint, KeyPath: "private-key"},
+		{Host: valid.Host, Port: "0", User: valid.User, Password: valid.Password, Fingerprint: valid.Fingerprint},
+		{Host: valid.Host, Port: valid.Port, User: valid.User, Fingerprint: valid.Fingerprint},
+	} {
+		if _, err := prepareCloudAccount(invalid, "", nil); err == nil {
+			t.Fatal("accepted unverified or unsupported credentials")
+		}
+	}
+}
 func TestCloudLoginAndAuthenticatedList(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
