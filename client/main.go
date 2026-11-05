@@ -60,6 +60,8 @@ type desktop struct {
 	lastTerminalDir                                                                         string
 	files                                                                                   []remoteFile
 	fileHistory                                                                             fileHistory
+	fileBatchErrors                                                                         []string
+	fileBatchDetails                                                                        bool
 	expectedFingerprint, changedFingerprint                                                 string
 	win                                                                                     *mygo.Window
 	settings                                                                                connectionSettings
@@ -539,7 +541,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.20"
+const version = "0.3.21"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

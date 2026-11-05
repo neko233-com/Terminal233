@@ -248,6 +248,21 @@ func (d *desktop) finishTransferStatus(sessionID int, shell *remoteShell, dir, s
 	}
 }
 
+// Batch results follow their originating session even if another tab is active.
+func (d *desktop) setBatchFailures(sessionID int, shell *remoteShell, failures []string) {
+	failures = append([]string(nil), failures...)
+	if sessionID == d.currentSession && shell == d.shell {
+		d.fileBatchErrors, d.fileBatchDetails = failures, false
+		return
+	}
+	for _, session := range d.sessions {
+		if session.id == sessionID && session.shell == shell {
+			session.fileBatchErrors, session.fileBatchDetails = failures, false
+			return
+		}
+	}
+}
+
 func (d *desktop) transferBatch(files []string) {
 	if d.busy || d.fileSessionUnavailable() || len(files) == 0 {
 		return
@@ -262,6 +277,7 @@ func (d *desktop) transferBatch(files []string) {
 	}
 	files = append([]string(nil), files...)
 	shell, dir, sessionID := d.shell, d.fileDir, d.currentSession
+	d.fileBatchErrors, d.fileBatchDetails = nil, false
 	d.busy = true
 	d.fileStatus = fmt.Sprintf("正在传输 0/%d…", len(files))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -295,7 +311,10 @@ func (d *desktop) transferBatch(files []string) {
 				}
 			})
 		})
-		d.win.Update(func() { d.finishTransferStatus(sessionID, shell, dir, result.status(), result.succeeded > 0) })
+		d.win.Update(func() {
+			d.setBatchFailures(sessionID, shell, result.errors)
+			d.finishTransferStatus(sessionID, shell, dir, result.status(), result.succeeded > 0)
+		})
 	}()
 }
 
@@ -588,6 +607,22 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	d.fileDropView(c, local)
 	if d.fileStatus != "" {
 		ui.Text(c, d.fileStatus).FontSize(12).Wrap()
+	}
+	if len(d.fileBatchErrors) > 0 {
+		label := fmt.Sprintf("查看最近批量传输失败详情（%d）", len(d.fileBatchErrors))
+		if d.fileBatchDetails {
+			label = "收起批量传输失败详情"
+		}
+		if ui.Button(c.Key("batch-failures-toggle"), label).Clicked() {
+			d.fileBatchDetails = !d.fileBatchDetails
+		}
+		if d.fileBatchDetails {
+			ui.Scroll(c.Key("batch-failures-list")).Height(120).FillWidth().Children(func() {
+				for _, failure := range d.fileBatchErrors {
+					ui.Text(c, failure).FontSize(12).Wrap()
+				}
+			})
+		}
 	}
 	ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录").OnChange(func() {
 		d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""

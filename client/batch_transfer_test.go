@@ -60,11 +60,46 @@ func TestBatchCancellationCleansPartialAndSkipsRemaining(t *testing.T) {
 	if !result.cancelled || result.succeeded != 0 || result.failed != 0 || result.skipped != 1 {
 		t.Fatalf("unexpected cancellation: %+v", result)
 	}
+	if result.cancelledFile != "a" || !strings.Contains(result.status(), "已取消当前文件：a") {
+		t.Fatal("cancelled in-flight file was not identified")
+	}
 	if _, err := os.Stat(filepath.Join(destination, "a")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("partial file was not cleaned")
 	}
 	if _, err := os.Stat(filepath.Join(destination, "b")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("unprocessed file was created")
+	}
+}
+
+func TestBatchFailuresRemainAccessibleInTheirSession(t *testing.T) {
+	files := []string{"one", "two", "three"}
+	result := runBatchUpload(context.Background(), files, func(name string, _ func(int64)) error {
+		if name != "two" {
+			return errors.New("denied")
+		}
+		return nil
+	}, nil)
+	if result.succeeded != 1 || result.failed != 2 || len(result.errors) != 2 || !strings.Contains(result.errors[0], "one") || !strings.Contains(result.errors[1], "three") {
+		t.Fatalf("missing per-file failures: %+v", result)
+	}
+	d := &desktop{workspace: "files", currentSession: 2, sessions: []*workspaceSession{{id: 1}, {id: 2}}}
+	d.setBatchFailures(1, nil, result.errors)
+	if len(d.fileBatchErrors) != 0 || len(d.sessions[0].fileBatchErrors) != 2 {
+		t.Fatal("background failures appeared in the wrong session")
+	}
+	d.activateSession(1)
+	d.workspace = "files"
+	view := ui.NewTester(d.view, 1200, 1500)
+	if err := view.Click("查看最近批量传输失败详情（2）"); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasText("one：denied") || !view.HasText("three：denied") {
+		t.Fatal("not all failed files were visible")
+	}
+	d.activateSession(2)
+	d.activateSession(1)
+	if !d.fileBatchDetails || len(d.fileBatchErrors) != 2 {
+		t.Fatal("failure details were lost when switching sessions")
 	}
 }
 
