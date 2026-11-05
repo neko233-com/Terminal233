@@ -163,6 +163,36 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "本机终端已打开") {
 		t.Fatalf("local PowerShell terminal failed to start: %s", tree)
 	}
+	call("act", map[string]any{"key": "nav-files", "action": "press"})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "本机文件") && strings.Contains(tree, "file-filter") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "本机文件") {
+		t.Fatalf("local file workspace missing: %s", tree)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "local-terminal" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				deadline = time.Time{}
+				break
+			}
+		}
+		if deadline.IsZero() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !deadline.IsZero() {
+		t.Fatal("local directory read did not finish")
+	}
 	call("act", map[string]any{"key": "local-terminal", "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {

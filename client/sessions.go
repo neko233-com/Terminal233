@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/egoist/mygo/plugins/terminal"
 )
@@ -59,6 +60,11 @@ func (d *desktop) addSession(term *terminal.Terminal, shell *remoteShell, active
 	s := &workspaceSession{id: d.nextSession, label: label, term: term, shell: shell, active: active}
 	if shell != nil {
 		s.fileDir = "."
+	} else {
+		s.fileDir, _ = os.UserHomeDir()
+		if s.fileDir == "" {
+			s.fileDir = "."
+		}
 	}
 	d.sessions = append(d.sessions, s)
 	d.currentSession = 0

@@ -201,6 +201,9 @@ func (d *desktop) view(c *ui.Context) {
 					}
 					if workspaceButton(c, "nav-files", "远程文件", d.workspace == "files").Clicked() {
 						d.workspace = "files"
+						if d.term != nil && d.shell == nil && d.files == nil && !d.busy {
+							d.refreshFiles()
+						}
 					}
 					if workspaceButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
 						d.workspace = "cloud"
