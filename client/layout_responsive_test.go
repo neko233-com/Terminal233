@@ -158,4 +158,17 @@ func TestSplitSessionButtonFocusesSelectedTerminal(t *testing.T) {
 	if d.currentSession != 2 || !view.Focused("终端：second") {
 		t.Fatalf("tab selected session=%d, second terminal focused=%v", d.currentSession, view.Focused("终端：second"))
 	}
+	view.Key(ui.Cmd, ui.KeyTab)
+	if d.currentSession != 1 || !view.Focused("终端：first") {
+		t.Fatalf("next shortcut selected session=%d, first terminal focused=%v", d.currentSession, view.Focused("终端：first"))
+	}
+	view.Key(ui.Cmd|ui.Shift, ui.KeyTab)
+	if d.currentSession != 2 || !view.Focused("终端：second") {
+		t.Fatalf("previous shortcut selected session=%d, second terminal focused=%v", d.currentSession, view.Focused("终端：second"))
+	}
+	d.busy = true
+	view.Key(ui.Cmd, ui.KeyTab)
+	if d.currentSession != 2 {
+		t.Fatal("shortcut switched session while an operation is busy")
+	}
 }

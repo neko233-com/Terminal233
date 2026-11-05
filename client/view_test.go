@@ -666,6 +666,31 @@ func TestSplitSessionSwitchAndClosePreservesIndependentState(t *testing.T) {
 	}
 }
 
+func TestAdjacentSessionSelectionWrapsAndPreservesSessionState(t *testing.T) {
+	d := &desktop{workspace: "terminal", currentSession: 2, fileDir: "/two", sessions: []*workspaceSession{
+		{id: 1, label: "one", fileDir: "/one"},
+		{id: 2, label: "two", fileDir: "/two"},
+		{id: 3, label: "three", fileDir: "/three"},
+	}}
+	d.selectAdjacentSession(1)
+	if d.currentSession != 3 || d.fileDir != "/three" {
+		t.Fatal("next session state was not restored")
+	}
+	d.selectAdjacentSession(1)
+	if d.currentSession != 1 || d.fileDir != "/one" {
+		t.Fatal("next session did not wrap")
+	}
+	d.selectAdjacentSession(-1)
+	if d.currentSession != 3 || d.fileDir != "/three" {
+		t.Fatal("previous session did not wrap")
+	}
+	d.busy = true
+	d.selectAdjacentSession(-1)
+	if d.currentSession != 3 {
+		t.Fatal("busy operation did not prevent switching")
+	}
+}
+
 func TestFileSortFilterAndHiddenSelection(t *testing.T) {
 	files := []remoteFile{{Name: "large", Size: 200, Modified: 10}, {Name: ".hidden", Size: 20, Modified: 30}, {Name: "folder", IsDir: true}, {Name: "small", Size: 3, Modified: 20}}
 	d := &desktop{workspace: "files", files: files, selectedFile: ".hidden", fileRename: ".hidden"}

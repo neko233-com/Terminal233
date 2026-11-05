@@ -133,6 +133,10 @@ func workspaceButton(c *ui.Context, key, label string, active bool) ui.Element {
 func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	mods := ui.Cmd | ui.Shift
 	switch {
+	case d.workspace == "terminal" && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(ui.Cmd, ui.KeyTab):
+		d.selectAdjacentSession(1)
+	case d.workspace == "terminal" && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(mods, ui.KeyTab):
+		d.selectAdjacentSession(-1)
 	case c.Shortcut(mods, ui.Key1):
 		d.workspace, d.editConnection = "connections", false
 	case c.Shortcut(mods, ui.Key2):
@@ -398,7 +402,7 @@ func (d *desktop) view(c *ui.Context) {
 							}
 						}
 						ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
-						ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端\nCtrl+Shift+F 查找终端输出").FontSize(11).TextColor(t.TextMuted).Wrap()
+						ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端\nCtrl+Shift+F 查找终端输出\nCtrl+Tab / Ctrl+Shift+Tab 切换会话").FontSize(11).TextColor(t.TextMuted).Wrap()
 						d.updateView(c)
 					})
 				})
@@ -620,7 +624,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.34"
+const version = "0.3.35"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

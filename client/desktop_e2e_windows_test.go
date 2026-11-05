@@ -1096,6 +1096,30 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "切换到：本机终端 2") {
 		t.Fatalf("split pane switch failed: %s", tree)
 	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "key", "key": "Ctrl+Tab"}}})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "当前会话：本机终端 2") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "当前会话：本机终端 2") {
+		t.Fatalf("next session shortcut failed: %s", tree)
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "key", "key": "Ctrl+Shift+Tab"}}})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "切换到：本机终端 2") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "切换到：本机终端 2") {
+		t.Fatalf("previous session shortcut failed: %s", tree)
+	}
 	call("act", map[string]any{"key": "toggle-split", "action": "press"})
 	call("act", map[string]any{"key": "session-2", "action": "press"})
 	call("act", map[string]any{"key": "session-close-1", "action": "press"})

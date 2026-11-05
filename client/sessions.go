@@ -366,3 +366,16 @@ func (d *desktop) selectSession(id int) {
 		d.pendingTerminalFocus = id
 	}
 }
+
+func (d *desktop) selectAdjacentSession(delta int) {
+	if !d.canSwitchSession() || len(d.sessions) < 2 {
+		return
+	}
+	for index, session := range d.sessions {
+		if session.id == d.currentSession {
+			next := (index + delta + len(d.sessions)) % len(d.sessions)
+			d.selectSession(d.sessions[next].id)
+			return
+		}
+	}
+}
