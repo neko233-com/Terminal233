@@ -562,6 +562,57 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "split-focus-2") || !strings.Contains(tree, "split-focus-1") {
 		t.Fatalf("split terminal panes missing: %s", tree)
 	}
+	// Focusing the inactive terminal must also change the current session.
+	result := call("tree")["result"].(map[string]any)
+	var terminalID string
+	for _, value := range result["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["label"] == "终端："+settings.User+"@"+settings.Host {
+			terminalID, _ = node["id"].(string)
+			break
+		}
+	}
+	if terminalID == "" {
+		t.Fatalf("inactive terminal not exposed: %s", tree)
+	}
+	call("act", map[string]any{"id": terminalID, "action": "focus"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "切换到：本机终端 2") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "切换到：本机终端 2") {
+		t.Fatalf("terminal focus did not select its session: %s", tree)
+	}
+	result = call("tree")["result"].(map[string]any)
+	var bounds map[string]any
+	for _, value := range result["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["label"] == "终端：本机终端 2" {
+			bounds, _ = node["bounds"].(map[string]any)
+			break
+		}
+	}
+	if bounds == nil {
+		t.Fatalf("local terminal bounds missing: %s", tree)
+	}
+	x := bounds["x"].(float64) + bounds["width"].(float64)/2
+	y := bounds["y"].(float64) + bounds["height"].(float64)/2
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "x": x, "y": y}, map[string]any{"type": "pointerMove", "x": 1, "y": 1}}})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "当前会话：本机终端 2") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "当前会话：本机终端 2") {
+		t.Fatalf("clicking terminal did not select it: %s", tree)
+	}
 	call("act", map[string]any{"key": "split-focus-1", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

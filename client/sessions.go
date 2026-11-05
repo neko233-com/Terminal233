@@ -177,10 +177,12 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 		}
 	}
 	if second == nil {
+		d.splitFocusedSession = 0
 		terminal.View(c, d.term).Fill()
 		return
 	}
 	stacked := width < 1100 || (d.showFilePanel && width < 1450)
+	focusedID := 0
 	pane := func(s *workspaceSession, current bool) {
 		container := ui.Column(c).Grow(1)
 		if stacked {
@@ -196,7 +198,10 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 			if ui.Button(c.Key(fmt.Sprintf("split-focus-%d", s.id)), label).Disabled(current || !d.canSwitchSession()).Clicked() {
 				d.activateSession(s.id)
 			}
-			terminal.View(c, s.term).Grow(1).FillWidth()
+			view := terminal.View(c, s.term).Label("终端：" + s.label).Grow(1).FillWidth()
+			if view.Focused() {
+				focusedID = s.id
+			}
 		})
 	}
 	var current *workspaceSession
@@ -223,5 +228,16 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 		ui.Column(c).Fill().Children(panes)
 	} else {
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(panes)
+	}
+	// A terminal takes keyboard focus on pointer input. Follow focus changes
+	// so the file panel and close action refer to the terminal being used.
+	if focusedID != 0 && focusedID != d.currentSession && focusedID != d.splitFocusedSession && d.canSwitchSession() {
+		d.activateSession(focusedID)
+		c.Invalidate()
+	}
+	if !d.canSwitchSession() && focusedID != d.currentSession {
+		d.splitFocusedSession = 0
+	} else {
+		d.splitFocusedSession = focusedID
 	}
 }

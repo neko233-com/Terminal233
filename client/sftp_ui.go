@@ -389,6 +389,12 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		title, help = "本机文件", "选择目录浏览，拖入单个文件复制；删除前需要再次确认。"
 	}
 	ui.Text(c, title).FontSize(16).Bold()
+	for _, session := range d.sessions {
+		if session.id == d.currentSession {
+			ui.Text(c, "所属会话："+session.label).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+			break
+		}
+	}
 	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
 	ui.TextInput(c.Key("remote-dir"), &d.fileDir).Label("当前目录").Placeholder("目录路径").OnChange(func() {
 		d.selectedFile = ""

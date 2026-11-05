@@ -716,3 +716,11 @@ func TestFileSortingUnknownValuesAndSessionState(t *testing.T) {
 		t.Fatal("first session state not restored")
 	}
 }
+
+func TestFileWorkspaceIdentifiesCurrentSession(t *testing.T) {
+	d := &desktop{workspace: "files", currentSession: 2, sessions: []*workspaceSession{{id: 1, label: "server one"}, {id: 2, label: "server two"}}}
+	view := ui.NewTester(d.view, 1200, 1200)
+	if !view.HasText("所属会话：server two") || view.HasText("所属会话：server one") {
+		t.Fatal("file workspace identifies wrong session")
+	}
+}
