@@ -64,6 +64,10 @@ type desktop struct {
 	fileBatchDetails                                                                        bool
 	terminalSearchOpen                                                                      bool
 	terminalSearchText                                                                      string
+	quickOpen                                                                               bool
+	quickPath, quickName, quickText, quickStatus, quickConfirm                              string
+	quickCommands                                                                           []quickCommand
+	quickEdit                                                                               *quickCommand
 	expectedFingerprint, changedFingerprint                                                 string
 	win                                                                                     *mygo.Window
 	settings                                                                                connectionSettings
@@ -415,6 +419,13 @@ func (d *desktop) view(c *ui.Context) {
 								d.terminalSearchOpen = true
 							}
 						}
+						quickLabel := "快速命令"
+						if d.quickOpen {
+							quickLabel = "收起快速命令"
+						}
+						if ui.Button(c.Key("quick-toggle"), quickLabel).Disabled(d.term == nil).Clicked() {
+							d.quickOpen = !d.quickOpen
+						}
 						splitLabel := "分屏查看"
 						if d.splitSession != 0 {
 							splitLabel = "关闭分屏"
@@ -437,6 +448,9 @@ func (d *desktop) view(c *ui.Context) {
 					if d.term == nil {
 						ui.Text(c, "选择连接，或打开本机终端").FontSize(18).TextColor(t.TextMuted)
 					} else {
+						if d.quickOpen {
+							d.quickCommandsView(c)
+						}
 						if d.terminalSearchOpen {
 							d.terminalSearchView(c)
 						}
@@ -557,7 +571,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.22"
+const version = "0.3.23"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -579,6 +593,14 @@ func main() {
 		d.preferencesStatus = "界面设置不可用：" + err.Error()
 	} else if err = d.loadPreferences(filepath.Join(dir, "NekoSSH", "preferences.json")); err != nil {
 		d.preferencesStatus = "界面设置未载入，原文件未覆盖：" + err.Error()
+	}
+	if dir, err := os.UserConfigDir(); err != nil {
+		d.quickStatus = "快速命令存储不可用：" + err.Error()
+	} else {
+		d.quickPath = filepath.Join(dir, "NekoSSH", "quick-commands.json")
+		if d.quickCommands, err = readQuickCommands(d.quickPath); err != nil {
+			d.quickStatus = "读取快速命令失败，原文件未覆盖：" + err.Error()
+		}
 	}
 	mygo.Theme.SetSource(mygo.ThemeDark)
 	mygo.App.WhenReady(func() {

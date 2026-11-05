@@ -375,8 +375,60 @@ func TestDesktopNativeWindow(t *testing.T) {
 	call("act", map[string]any{"key": "terminal-search-close", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
+		if !strings.Contains(fmt.Sprint(call("tree")), "terminal-search-input") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "quick-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	localTerminalID = ""
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "quick-name") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	commandResult := filepath.Join(t.TempDir(), "quick-command-result.txt")
+	quickText := "Set-Content -LiteralPath '" + strings.ReplaceAll(commandResult, "'", "''") + "' -Value 'quick-command-ok'"
+	call("act", map[string]any{"key": "quick-name", "action": "setValue", "text": "验证命令"})
+	call("act", map[string]any{"key": "quick-text", "action": "setValue", "text": quickText})
+	call("act", map[string]any{"key": "quick-save", "action": "press"})
+	var quickRunKey string
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
 		result := call("tree")["result"].(map[string]any)
-		if strings.Contains(fmt.Sprint(result), "terminal-search-input") {
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if key, ok := node["key"].(string); ok && strings.HasPrefix(key, "quick-run-") {
+				quickRunKey = key
+				break
+			}
+		}
+		if quickRunKey != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if quickRunKey == "" {
+		t.Fatalf("saved quick command missing: %v", call("tree"))
+	}
+	call("act", map[string]any{"key": quickRunKey, "action": "press"})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(commandResult); err == nil && strings.Contains(string(data), "quick-command-ok") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if data, err := os.ReadFile(commandResult); err != nil || !strings.Contains(string(data), "quick-command-ok") {
+		t.Fatal("quick command did not execute in the selected local terminal")
+	}
+	call("act", map[string]any{"key": "quick-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		if strings.Contains(fmt.Sprint(result), "terminal-search-input") || strings.Contains(fmt.Sprint(result), "quick-name") {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
@@ -386,7 +438,13 @@ func TestDesktopNativeWindow(t *testing.T) {
 				localTerminalID, _ = node["id"].(string)
 			}
 		}
-		break
+		if localTerminalID != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if localTerminalID == "" {
+		t.Fatalf("terminal not visible after closing quick commands: %v", call("tree"))
 	}
 	call("act", map[string]any{"id": localTerminalID, "action": "focus"})
 	command := "Set-Location -LiteralPath '" + strings.ReplaceAll(followDir, "'", "''") + "'"
