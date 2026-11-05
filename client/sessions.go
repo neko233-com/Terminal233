@@ -50,6 +50,8 @@ type workspaceSession struct {
 	fileHistory                                              fileHistory
 	fileBatchErrors                                          []string
 	fileBatchDetails                                         bool
+	fileChecked                                              map[string]bool
+	fileCheckedDir, fileBatchTarget                          string
 	terminalSearchOpen                                       bool
 	terminalSearchText                                       string
 	refreshPending                                           bool
@@ -73,6 +75,7 @@ func (d *desktop) saveSessionState() {
 		s.files = d.files
 		s.fileHistory = d.fileHistory
 		s.fileBatchErrors, s.fileBatchDetails = d.fileBatchErrors, d.fileBatchDetails
+		s.fileChecked, s.fileCheckedDir, s.fileBatchTarget = d.fileChecked, d.fileCheckedDir, d.fileBatchTarget
 		s.terminalSearchOpen, s.terminalSearchText = d.terminalSearchOpen, d.terminalSearchText
 		return
 	}
@@ -103,6 +106,7 @@ func (d *desktop) activateSession(id int) {
 		d.files, d.confirmDelete = s.files, ""
 		d.fileHistory = s.fileHistory
 		d.fileBatchErrors, d.fileBatchDetails = s.fileBatchErrors, s.fileBatchDetails
+		d.fileChecked, d.fileCheckedDir, d.fileBatchTarget = s.fileChecked, s.fileCheckedDir, s.fileBatchTarget
 		d.terminalSearchOpen, d.terminalSearchText = s.terminalSearchOpen, s.terminalSearchText
 		d.workspace = "terminal"
 		d.status = "当前会话：" + s.label
@@ -170,6 +174,7 @@ func (d *desktop) closeSession(id int) {
 		d.files, d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile, d.confirmDelete = nil, "", "", "", "", ""
 		d.fileHistory = fileHistory{}
 		d.fileBatchErrors, d.fileBatchDetails = nil, false
+		d.fileChecked, d.fileCheckedDir, d.fileBatchTarget = nil, "", ""
 		d.terminalSearchOpen, d.terminalSearchText = false, ""
 		d.fileFilter, d.fileSort = "", ""
 		d.fileSortDescending, d.fileHideDotfiles, d.fileFollowTerminal = false, false, false

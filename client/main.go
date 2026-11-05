@@ -63,6 +63,8 @@ type desktop struct {
 	fileHistory                                                                             fileHistory
 	fileBatchErrors                                                                         []string
 	fileBatchDetails                                                                        bool
+	fileChecked                                                                             map[string]bool
+	fileCheckedDir, fileBatchTarget                                                         string
 	terminalSearchOpen                                                                      bool
 	terminalSearchText                                                                      string
 	quickOpen                                                                               bool
@@ -604,7 +606,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.30"
+const version = "0.3.31"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

@@ -148,6 +148,7 @@ func (d *desktop) refreshFilesWithHistory(previousStatus string, historyIndex in
 				d.fileHistory.visit(dir)
 			}
 			d.files = files
+			d.reconcileCheckedFiles()
 			d.fileStatus = fmt.Sprintf("%d 个条目", len(files))
 			if previousStatus != "" {
 				d.fileStatus = previousStatus + "；" + d.fileStatus
@@ -541,6 +542,7 @@ func (d *desktop) setFileSort(order string) {
 }
 
 func (d *desktop) fileView(c *ui.Context, compact bool) {
+	d.syncCheckedDirectory()
 	local := d.term != nil && d.shell == nil
 	title, help := "远程文件", "选择目录浏览，拖入文件上传；删除前需要再次确认。"
 	if local {
@@ -682,6 +684,19 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 					label = "📁 " + label
 				}
 				ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+					checked := d.fileChecked[f.Name]
+					if ui.Checkbox(c.Key("file-check-"+f.Name), &checked, "").Label("多选文件：" + f.Name).Disabled(d.busy || d.fileSessionUnavailable() || !eligibleBatchFile(f)).Changed() {
+						if checked && len(d.fileChecked) >= maxBatchFiles {
+							d.fileStatus = fmt.Sprintf("每次最多选择 %d 个文件", maxBatchFiles)
+						} else if checked {
+							if d.fileChecked == nil {
+								d.fileChecked = make(map[string]bool)
+							}
+							d.fileChecked[f.Name] = true
+						} else {
+							delete(d.fileChecked, f.Name)
+						}
+					}
 					row := ui.Button(c.Key("file-"+f.Name), label).Grow(1).Disabled(d.busy || d.fileSessionUnavailable())
 					row.ContextMenu(func(menu *ui.Menu) {
 						if menu.Item("选择").Chosen() {
@@ -737,6 +752,18 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if len(d.files) > 0 && len(visible) == 0 {
 		ui.Text(c, "没有匹配的文件").TextColor(c.Theme().TextMuted)
 	}
+	ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, fmt.Sprintf("多选 %d/%d", len(d.fileChecked), maxBatchFiles)).FontSize(12)
+		if ui.Button(c.Key("file-select-visible"), "选择可见文件").Disabled(d.busy || d.fileSessionUnavailable() || len(visible) == 0).Clicked() {
+			d.selectVisibleBatchFiles(visible)
+		}
+		if ui.Button(c.Key("file-clear-checked"), "清除多选").Disabled(d.busy || len(d.fileChecked) == 0).Clicked() {
+			d.fileChecked = nil
+		}
+	})
+	if len(d.fileChecked) > 0 {
+		ui.Text(c, "多选仅用于批量下载或复制普通文件；删除和重命名只作用于单击选中的文件。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+	}
 	d.fileActionsView(c, local, compact)
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
 		ui.TextInput(c.Key("new-directory-name"), &d.fileNewDirectory).Label("新目录名称").Placeholder("输入目录名称").Grow(1)
@@ -775,6 +802,21 @@ func (d *desktop) fileDropView(c *ui.Context, local bool) {
 }
 
 func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {
+	if len(d.fileChecked) > 0 {
+		ui.TextInput(c.Key("batch-target"), &d.fileBatchTarget).Label("批量目标目录").Placeholder("选择本机目标目录")
+		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+			if ui.Button(c.Key("pick-batch-target"), "选择批量目标目录…").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
+				d.pickLocalPath("batch-target")
+			}
+			label := "下载多选文件"
+			if local {
+				label = "复制多选文件"
+			}
+			if ui.Button(c.Key("batch-download"), label).Disabled(d.busy || d.fileSessionUnavailable() || d.fileBatchTarget == "").Clicked() {
+				d.downloadCheckedFiles()
+			}
+		})
+	}
 	ui.TextInput(c.Key("local-file"), &d.fileLocal).Label("本地文件路径").Placeholder("本地文件完整路径")
 	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 		if ui.Button(c.Key("pick-upload"), "选择源文件…").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {

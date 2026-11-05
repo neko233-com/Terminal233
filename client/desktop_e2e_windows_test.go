@@ -800,6 +800,57 @@ func TestDesktopNativeWindow(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	call("act", map[string]any{"key": "remote-dir", "action": "setValue", "text": filepath.ToSlash(transferDir)})
+	for _, name := range []string{"batch-one.txt", "batch-existing.txt"} {
+		if err := os.WriteFile(filepath.Join(transferDir, name), []byte(name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batchTarget := t.TempDir()
+	if err := os.WriteFile(filepath.Join(batchTarget, "batch-existing.txt"), []byte("protected"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	call("act", map[string]any{"key": "file-refresh", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "file-batch-one.txt") && strings.Contains(tree, "file-batch-existing.txt") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "file-batch-one.txt") || !strings.Contains(tree, "file-batch-existing.txt") {
+		t.Fatalf("batch SFTP source files did not appear: %s", tree)
+	}
+	call("act", map[string]any{"key": "file-select-visible", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "多选 2/100") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "多选 2/100") {
+		t.Fatal("native file selection did not select both files")
+	}
+	call("act", map[string]any{"key": "batch-target", "action": "setValue", "text": batchTarget})
+	call("act", map[string]any{"key": "batch-download", "action": "press"})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "批量传输完成：成功 1，失败 1") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "批量传输完成：成功 1，失败 1") {
+		t.Fatalf("native SFTP batch download did not finish: %s", tree)
+	}
+	if data, err := os.ReadFile(filepath.Join(batchTarget, "batch-one.txt")); err != nil || string(data) != "batch-one.txt" {
+		t.Fatal("native SFTP batch download did not copy the new file")
+	}
+	if data, err := os.ReadFile(filepath.Join(batchTarget, "batch-existing.txt")); err != nil || string(data) != "protected" {
+		t.Fatal("native SFTP batch download overwrote the existing file")
+	}
 	call("act", map[string]any{"key": "local-file", "action": "setValue", "text": transferSource})
 	slowSFTP.Store(true)
 	call("act", map[string]any{"key": "upload", "action": "press"})

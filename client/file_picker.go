@@ -57,6 +57,7 @@ func (d *desktop) pickLocalPath(kind string) {
 	}
 	var title, defaultPath string
 	save := false
+	directory := false
 	switch kind {
 	case "upload":
 		title, defaultPath = "选择要上传或复制的文件", d.fileLocal
@@ -75,6 +76,8 @@ func (d *desktop) pickLocalPath(kind string) {
 		title, defaultPath = "选择加密连接备份", d.archivePath
 	case "archive-save":
 		title, defaultPath, save = "选择连接备份目标（不覆盖已有文件）", d.archivePath, true
+	case "batch-target":
+		title, defaultPath, directory = "选择批量下载或复制的目标目录", d.fileBatchTarget, true
 	default:
 		return
 	}
@@ -87,7 +90,7 @@ func (d *desktop) pickLocalPath(kind string) {
 			selected, err = mygo.Dialog.Save(mygo.SaveDialogOptions{Parent: win, Title: title, DefaultPath: defaultPath})
 		} else {
 			var paths []string
-			paths, err = mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: win, Title: title, DefaultPath: defaultPath})
+			paths, err = mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: win, Title: title, DefaultPath: defaultPath, Directory: directory})
 			if len(paths) == 1 {
 				selected = paths[0]
 			}
@@ -103,7 +106,7 @@ func (d *desktop) applyPickedPath(kind, selected string, err error) {
 	if err != nil {
 		message := "选择文件失败：" + err.Error()
 		switch kind {
-		case "upload", "download":
+		case "upload", "download", "batch-target":
 			d.fileStatus = message
 		case "backup-open", "backup-save":
 			d.adminStatus = message
@@ -120,6 +123,8 @@ func (d *desktop) applyPickedPath(kind, selected string, err error) {
 	switch kind {
 	case "upload", "download":
 		d.fileLocal = selected
+	case "batch-target":
+		d.fileBatchTarget = selected
 	case "key":
 		d.settings.KeyPath = selected
 	case "backup-open", "backup-save":
