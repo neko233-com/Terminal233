@@ -120,6 +120,7 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
 	d.settingsFromCloud = true
 	d.fingerprint = ""
+	d.changedFingerprint = ""
 	d.expectedFingerprint = account.HostKeyFingerprint
 	d.status = "已载入连接，请重新获取并核对主机指纹。"
 }

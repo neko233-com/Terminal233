@@ -90,6 +90,7 @@ func (d *desktop) openQuickConnection() {
 	d.settingsFromCloud = false
 	d.quickConnect, d.profileGroup, d.profileLabel, d.selectedProfile = "", "", "", ""
 	d.fingerprint, d.expectedFingerprint = "", ""
+	d.changedFingerprint = ""
 	d.editConnection = true
 	d.status = "请填写认证信息，获取并核对服务器指纹。"
 }

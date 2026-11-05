@@ -82,6 +82,7 @@ func (d *desktop) loadProfile(p profile) {
 	d.profileLabel = p.Label
 	d.expectedFingerprint = p.Settings.Fingerprint
 	d.fingerprint = ""
+	d.changedFingerprint = ""
 	d.selectedProfile = string(p.ID)
 	d.status = "已载入连接，请输入密码并核对指纹。"
 }
@@ -145,6 +146,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.profileGroup = ""
 			d.profileLabel = ""
 			d.fingerprint = ""
+			d.changedFingerprint = ""
 			d.expectedFingerprint = ""
 			d.selectedProfile = ""
 			d.editConnection = true

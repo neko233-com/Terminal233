@@ -56,7 +56,7 @@ type desktop struct {
 	fileDir, fileLocal, fileStatus, selectedFile, confirmDelete                             string
 	fileFilter                                                                              string
 	files                                                                                   []remoteFile
-	expectedFingerprint                                                                     string
+	expectedFingerprint, changedFingerprint                                                 string
 	win                                                                                     *mygo.Window
 	settings                                                                                connectionSettings
 	settingsFromCloud                                                                       bool
@@ -126,28 +126,42 @@ func (d *desktop) inspect() {
 	}
 	d.busy = true
 	d.fingerprint = ""
+	d.changedFingerprint = ""
 	d.status = "正在获取服务器指纹…"
 	settings := d.settings
 	go func() {
 		fp, err := inspectHost(settings)
 		d.win.Update(func() {
 			d.busy = false
-			if err != nil {
-				d.status = fmt.Sprintf("获取指纹失败：%v", err)
-				return
-			}
-			if d.settings.Host != settings.Host || d.settings.Port != settings.Port || d.settings.User != settings.User {
-				d.status = "连接信息已改变，请重新获取指纹。"
-				return
-			}
-			if d.expectedFingerprint != "" && d.expectedFingerprint != fp {
-				d.status = "主机密钥已变化，已阻止连接。请通过可信渠道核实。"
-				return
-			}
-			d.fingerprint = fp
-			d.status = "请通过可信渠道核对指纹，再点击确认并连接。"
+			d.finishHostInspection(settings, fp, err)
 		})
 	}()
+}
+
+func (d *desktop) finishHostInspection(settings connectionSettings, fp string, err error) {
+	if err != nil {
+		d.status = fmt.Sprintf("获取指纹失败：%v", err)
+		return
+	}
+	if d.settings.Host != settings.Host || d.settings.Port != settings.Port || d.settings.User != settings.User {
+		d.status = "连接信息已改变，请重新获取指纹。"
+		return
+	}
+	if d.expectedFingerprint != "" && d.expectedFingerprint != fp {
+		d.changedFingerprint = fp
+		d.status = "主机密钥已变化，已阻止连接。请通过可信渠道核实新指纹。"
+		return
+	}
+	d.fingerprint = fp
+	d.status = "请通过可信渠道核对指纹，再点击确认并连接。"
+}
+
+func (d *desktop) acceptChangedFingerprint() {
+	if d.busy || d.changedFingerprint == "" {
+		return
+	}
+	d.fingerprint, d.changedFingerprint = d.changedFingerprint, ""
+	d.status = "已选择新指纹；请确认并连接。本机已保存连接会更新，云端连接需重新同步。"
 }
 
 func (d *desktop) connect() {
@@ -401,9 +415,10 @@ func (d *desktop) connectionView(c *ui.Context) {
 		d.editConnection = false
 	}
 	ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("连接名称（可选）")
-	ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
-	ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
-	ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
+	resetFingerprint := func() { d.fingerprint, d.expectedFingerprint, d.changedFingerprint = "", "", "" }
+	ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(resetFingerprint)
+	ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(resetFingerprint)
+	ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint)
 	ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password()
 	ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）")
 	ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password()
@@ -423,7 +438,13 @@ func (d *desktop) connectionView(c *ui.Context) {
 	if trusted := d.trustedProfileFingerprint(); trusted != "" {
 		ui.Text(c, "本机已信任指纹："+trusted).FontSize(12).Wrap()
 		ui.Text(c, "重连时仍会验证服务器指纹；若指纹变化，将在发送凭据前阻止连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-		ui.Button(c.Key("connect-trusted"), "使用已信任指纹连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.connectTrustedProfile)
+		ui.Button(c.Key("connect-trusted"), "使用已信任指纹连接").Disabled(d.busy || d.changedFingerprint != "" || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.connectTrustedProfile)
+	}
+	if d.changedFingerprint != "" {
+		ui.Text(c, "原指纹："+d.expectedFingerprint).FontSize(12).Wrap()
+		ui.Text(c, "新指纹："+d.changedFingerprint).FontSize(12).Wrap()
+		ui.Text(c, "请先通过可信渠道核实新指纹；确认前不会发送认证信息。").FontSize(12).Wrap()
+		ui.Button(c.Key("accept-changed-fingerprint"), "已核实，使用新指纹").Disabled(d.busy).OnClick(d.acceptChangedFingerprint)
 	}
 	if d.fingerprint != "" {
 		ui.Text(c, d.fingerprint).FontSize(12)

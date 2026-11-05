@@ -132,6 +132,32 @@ func TestCloudSessionCleanupClearsSensitiveAndPendingState(t *testing.T) {
 	}
 }
 
+func TestChangedHostKeyRequiresExplicitVerification(t *testing.T) {
+	settings := connectionSettings{Host: "example.test", Port: "22", User: "alice"}
+	d := &desktop{workspace: "connections", editConnection: true, settings: settings, expectedFingerprint: "SHA256:old"}
+	d.finishHostInspection(settings, "SHA256:new", nil)
+	if d.fingerprint != "" || d.changedFingerprint != "SHA256:new" || d.expectedFingerprint != "SHA256:old" {
+		t.Fatal("changed host key was accepted without verification")
+	}
+	view := ui.NewTester(d.view, 1200, 1800)
+	if !view.HasText("原指纹：SHA256:old") || !view.HasText("新指纹：SHA256:new") {
+		t.Fatal("both fingerprints must be visible for comparison")
+	}
+	if err := view.Click("已核实，使用新指纹"); err != nil {
+		t.Fatal(err)
+	}
+	if d.fingerprint != "SHA256:new" || d.changedFingerprint != "" || d.expectedFingerprint != "SHA256:old" {
+		t.Fatal("verification did not stage the new key without overwriting the stored key")
+	}
+	other := settings
+	other.Host = "other.test"
+	d.fingerprint = ""
+	d.finishHostInspection(other, "SHA256:unrelated", nil)
+	if d.fingerprint != "" || d.changedFingerprint != "" {
+		t.Fatal("stale inspection result was accepted")
+	}
+}
+
 func TestConnectionSourcesFilterLocalAndCloud(t *testing.T) {
 	d := &desktop{cloud: &cloudClient{}, profiles: []profile{{ID: "local", Label: "本地测试机", Settings: connectionSettings{Host: "local.example", Port: "22", User: "a"}}}, accounts: []cloudAccount{{ID: "cloud", Label: "云端测试机", Host: "cloud.example", Port: 22, Username: "b"}}}
 	view := ui.NewTester(d.view, 1200, 2200)
