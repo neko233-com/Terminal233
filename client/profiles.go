@@ -177,6 +177,10 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		}
 	}
+	ui.TextInput(c.Key("quick-connect"), &d.quickConnect).Label("SSH 快速连接").Placeholder("ssh 用户@主机 -p 端口")
+	if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy).Clicked() {
+		d.openQuickConnection()
+	}
 	ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接").Placeholder("搜索连接或分组")
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 		for _, column := range []struct{ key, label string }{{"name", "名称排序"}, {"host", "地址排序"}} {

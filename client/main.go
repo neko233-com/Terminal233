@@ -36,7 +36,7 @@ type desktop struct {
 	teamInviteHours, teamInviteUses                                                         string
 	confirmCloudDelete                                                                      string
 	profiles                                                                                []profile
-	profileSearch, profileGroup, selectedProfile                                            string
+	profileSearch, profileGroup, selectedProfile, quickConnect                              string
 	confirmProfileDelete                                                                    profileID
 	profileLabel                                                                            string
 	profileFilter                                                                           string
