@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 )
 
-var Version = "0.3.2"
+var Version = "0.3.3"
 
 type Config struct {
 	AdminUsername         string
@@ -20,6 +21,7 @@ type Config struct {
 	DataPath              string
 	MasterKey             string
 	OfficialToken         string
+	PublicURL             string
 	AllowedOrigins        map[string]struct{}
 	TrustCloudflareTunnel bool
 	EdgeHMACKey           []byte
@@ -34,6 +36,7 @@ func ConfigFromEnv() (Config, error) {
 		DataPath:            envOr("TERMINAL233_DATA_PATH", "data/terminal233-server.json"),
 		MasterKey:           os.Getenv("TERMINAL233_MASTER_KEY"),
 		OfficialToken:       os.Getenv("TERMINAL233_OFFICIAL_TOKEN"),
+		PublicURL:           os.Getenv("TERMINAL233_PUBLIC_URL"),
 	}
 	host, _, err := net.SplitHostPort(cfg.Address)
 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
@@ -54,6 +57,9 @@ func ConfigFromEnv() (Config, error) {
 	if len(cfg.OfficialToken) < 32 {
 		return Config{}, errors.New("TERMINAL233_OFFICIAL_TOKEN 至少需要 32 个随机字符")
 	}
+	if cfg.PublicURL, err = normalizePublicURL(cfg.PublicURL); err != nil {
+		return Config{}, err
+	}
 	if value := strings.TrimSpace(os.Getenv("TERMINAL233_TRUST_CLOUDFLARE_TUNNEL")); value != "" {
 		trusted, err := strconv.ParseBool(value)
 		if err != nil {
@@ -70,6 +76,22 @@ func ConfigFromEnv() (Config, error) {
 	}
 	cfg.AllowedOrigins = parseOrigins(os.Getenv("TERMINAL233_ALLOWED_ORIGINS"))
 	return cfg, nil
+}
+
+// Never construct invitation links from Host or forwarding headers: those
+// may be controlled by a requester. An unset public URL returns only a token.
+func normalizePublicURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+		return "", errors.New("TERMINAL233_PUBLIC_URL 必须是无账号、参数和片段的 HTTPS 服务地址")
+	}
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = ""
+	return u.String(), nil
 }
 
 func envOr(key, fallback string) string {

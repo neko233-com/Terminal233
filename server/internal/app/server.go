@@ -51,6 +51,10 @@ type session struct {
 }
 
 func New(cfg Config) (*Server, error) {
+	var err error
+	if cfg.PublicURL, err = normalizePublicURL(cfg.PublicURL); err != nil {
+		return nil, err
+	}
 	store, err := openStore(cfg.DataPath, cfg.MasterKey)
 	if err != nil {
 		return nil, err

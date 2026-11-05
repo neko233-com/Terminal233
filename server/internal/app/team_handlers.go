@@ -2,6 +2,7 @@ package app
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -129,7 +130,16 @@ func (s *Server) teamResource(w http.ResponseWriter, r *http.Request, user strin
 			s.error(w, http.StatusBadRequest, "invitation_failed", "邀请创建失败：请检查权限、密码和数量")
 			return
 		}
-		s.json(w, http.StatusCreated, map[string]string{"token": token, "url": "https://nekossh.neko233.com/#join=" + token})
+		result := map[string]string{"token": token}
+		if s.cfg.PublicURL != "" {
+			link, _ := url.Parse(s.cfg.PublicURL)
+			if link.Path == "" {
+				link.Path = "/"
+			}
+			link.Fragment = url.Values{"join": {token}}.Encode()
+			result["url"] = link.String()
+		}
+		s.json(w, http.StatusCreated, result)
 	case len(parts) == 2 && parts[1] == "accounts" && r.Method == http.MethodGet:
 		accounts, err := s.store.listTeamAccounts(user, id)
 		if err != nil {
