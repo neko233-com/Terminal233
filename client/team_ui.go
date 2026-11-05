@@ -80,15 +80,31 @@ func (d *desktop) selectTeam(id string) {
 				d.teamStatus = err.Error()
 				return
 			}
-			client.teamID = id
-			d.accounts = accounts
-			d.members = members
-			d.teamInvites = nil
-			d.confirmInvite = ""
-			d.confirmCloudDelete = ""
+			d.applyCloudScope(id, accounts, members)
 			d.teamStatus = "已切换同步空间"
 		})
 	}()
+}
+
+// Pending confirmations and invitation links belong to the previous scope.
+func (d *desktop) applyCloudScope(id string, accounts []cloudAccount, members []cloudTeamMember) {
+	d.cloud.teamID = id
+	d.accounts, d.members = accounts, members
+	d.teamInvites = nil
+	d.confirmInvite, d.confirmMember, d.confirmCloudDelete = "", "", ""
+	d.teamInviteURL = ""
+}
+
+func (d *desktop) cloudScopeName() string {
+	if d.cloud == nil || d.cloud.teamID == "" {
+		return "个人空间"
+	}
+	for _, team := range d.teams {
+		if team.ID == d.cloud.teamID {
+			return team.Name
+		}
+	}
+	return "团队空间"
 }
 func (d *desktop) refreshTeams() {
 	if d.busy || d.cloud == nil {
@@ -136,6 +152,9 @@ func (d *desktop) removeMember() {
 }
 func (d *desktop) teamView(c *ui.Context) {
 	ui.Text(c, "团队共享").Bold()
+	if d.cloud != nil {
+		ui.Text(c, "当前同步空间："+d.cloudScopeName()).FontSize(12).Wrap()
+	}
 	ui.Text(c, "邀请注册：填写上方云账号和密码，再粘贴邀请链接并输入邀请密码。").FontSize(12).Wrap()
 	ui.TextInput(c.Key("team-name"), &d.teamName).Label("团队名称").Placeholder("新团队名称")
 	if ui.Button(c.Key("team-create"), "创建团队").Disabled(d.busy || d.cloud == nil).Clicked() {
@@ -150,6 +169,9 @@ func (d *desktop) teamView(c *ui.Context) {
 	for _, entry := range d.teams {
 		team := entry
 		label := team.Name + "（" + team.Role + "）"
+		if d.cloud != nil && d.cloud.teamID == team.ID {
+			label += " · 当前"
+		}
 		if team.Disabled {
 			label += "（已停用）"
 		}

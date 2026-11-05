@@ -95,6 +95,25 @@ func TestConnectionListShowsCurrentCloudScopeWithoutTrustingIt(t *testing.T) {
 	}
 }
 
+func TestSwitchCloudScopeClearsOldTeamActions(t *testing.T) {
+	d := &desktop{workspace: "cloud", showTeams: true, cloud: &cloudClient{teamID: "old"}, teams: []cloudTeam{{ID: "old", Name: "旧团队"}, {ID: "new", Name: "新团队", Role: "admin"}}, teamInviteURL: "https://example.test/#join=secret", confirmMember: "alice", confirmInvite: "invite-old", confirmCloudDelete: "account-old", teamInvites: []cloudInvite{{ID: "invite-old"}}}
+	d.applyCloudScope("new", []cloudAccount{{ID: "account-new"}}, []cloudTeamMember{{Username: "bob"}})
+	if d.cloud.teamID != "new" || len(d.accounts) != 1 || d.accounts[0].ID != "account-new" || len(d.members) != 1 || d.members[0].Username != "bob" {
+		t.Fatal("scope did not switch to the new team's data")
+	}
+	if d.confirmMember != "" || d.confirmInvite != "" || d.confirmCloudDelete != "" || d.teamInviteURL != "" || len(d.teamInvites) != 0 {
+		t.Fatal("previous team's actions or invite survived the scope change")
+	}
+	view := ui.NewTester(d.view, 1200, 2200)
+	if !view.HasText("当前同步空间：新团队") || !view.HasText("新团队（admin） · 当前") || view.HasText("https://example.test/#join=secret") {
+		t.Fatalf("scope is not clearly presented: %v", view.Texts())
+	}
+	d.applyCloudScope("", nil, nil)
+	if d.cloudScopeName() != "个人空间" {
+		t.Fatal("personal scope was not identified")
+	}
+}
+
 func TestConnectionListSearchAndContextMenu(t *testing.T) {
 	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice", Password: "private"}, profileGroup: "工作"}
 	if err := d.addProfile(); err != nil {

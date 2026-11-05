@@ -29,8 +29,13 @@ func (d *desktop) cloudLogin(register bool) {
 			err = client.login(user, password)
 		}
 		var accounts []cloudAccount
+		var teams []cloudTeam
+		var teamErr error
 		if err == nil {
 			accounts, err = client.list()
+		}
+		if err == nil {
+			teams, teamErr = client.teams()
 		}
 		d.win.Update(func() {
 			d.busy = false
@@ -40,7 +45,12 @@ func (d *desktop) cloudLogin(register bool) {
 			}
 			d.cloud = client
 			d.accounts = accounts
+			d.teams = teams
 			d.cloudStatus = "同步服务已登录"
+			d.teamStatus = ""
+			if teamErr != nil {
+				d.teamStatus = "团队列表加载失败，请刷新团队：" + teamErr.Error()
+			}
 		})
 	}()
 }
@@ -134,6 +144,9 @@ func (d *desktop) cloudView(c *ui.Context) {
 		})
 	})
 	ui.Text(c, "云端连接").FontSize(16).Bold()
+	if d.cloud != nil {
+		ui.Text(c, "当前同步空间："+d.cloudScopeName()).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+	}
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 		if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || d.cloud == nil || d.active.Password == "").Clicked() {
 			d.cloudSave()

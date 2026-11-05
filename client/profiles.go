@@ -377,17 +377,7 @@ func (d *desktop) profileView(c *ui.Context) {
 		}
 	}
 	if d.cloud != nil && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent {
-		scope := "个人空间"
-		if d.cloud.teamID != "" {
-			scope = "团队空间"
-			for _, team := range d.teams {
-				if team.ID == d.cloud.teamID {
-					scope = team.Name
-					break
-				}
-			}
-		}
-		ui.Text(c, "云端连接 · "+scope).FontSize(16).Bold()
+		ui.Text(c, "云端连接 · "+d.cloudScopeName()).FontSize(16).Bold()
 		accounts := d.accounts
 		if d.profileSort != "" {
 			accounts = append([]cloudAccount(nil), d.accounts...)
