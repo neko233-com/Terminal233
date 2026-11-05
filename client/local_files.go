@@ -48,9 +48,9 @@ func listLocal(dir string) ([]remoteFile, error) {
 }
 
 func copyLocalFile(source, target string) error {
-	return copyLocalFileContext(context.Background(), source, target)
+	return copyLocalFileContext(context.Background(), source, target, nil)
 }
-func copyLocalFileContext(ctx context.Context, source, target string) error {
+func copyLocalFileContext(ctx context.Context, source, target string, progress func(int64)) error {
 	info, err := os.Lstat(source)
 	if err != nil {
 		return err
@@ -67,7 +67,7 @@ func copyLocalFileContext(ctx context.Context, source, target string) error {
 	if err != nil {
 		return err
 	}
-	copyErr := copyTransfer(ctx, dst, src)
+	copyErr := copyTransfer(ctx, dst, src, progress)
 	closeErr := dst.Close()
 	if copyErr != nil || closeErr != nil {
 		if removeErr := os.Remove(target); removeErr != nil {

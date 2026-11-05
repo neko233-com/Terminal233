@@ -1,12 +1,28 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestTransferProgressAndCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	data := bytes.Repeat([]byte("a"), 128*1024)
+	var dst bytes.Buffer
+	var reported int64
+	err := copyTransfer(ctx, &dst, bytes.NewReader(data), func(read int64) {
+		reported = read
+		cancel()
+	})
+	if !errors.Is(err, context.Canceled) || reported <= 0 || reported >= int64(len(data)) {
+		t.Fatalf("progress/cancellation failed: bytes=%d err=%v", reported, err)
+	}
+}
 
 func TestLocalFilesBrowseCopyAndDeleteSafely(t *testing.T) {
 	root := t.TempDir()
@@ -55,7 +71,7 @@ func TestCancelledLocalCopyRemovesPartialTarget(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := copyLocalFileContext(ctx, source, target); !errors.Is(err, context.Canceled) {
+	if err := copyLocalFileContext(ctx, source, target, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled copy returned %v", err)
 	}
 	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {

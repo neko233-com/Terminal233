@@ -81,23 +81,30 @@ func (d *desktop) transfer(upload bool) {
 	d.cancelTransfer = cancel
 	go func() {
 		defer cancel()
+		progress := func(read int64) {
+			d.win.Update(func() {
+				if ctx.Err() == nil && d.cancelTransfer != nil && sessionID == d.currentSession && shell == d.shell && dir == d.fileDir {
+					d.fileStatus = "正在传输，已读取 " + fileSizeLabel(remoteFile{Size: read})
+				}
+			})
+		}
 		var err error
 		if shell == nil && upload {
 			var target string
 			target, err = localItemPath(dir, filepath.Base(local))
 			if err == nil {
-				err = copyLocalFileContext(ctx, local, target)
+				err = copyLocalFileContext(ctx, local, target, progress)
 			}
 		} else if shell == nil {
 			var source string
 			source, err = localItemPath(dir, selected)
 			if err == nil {
-				err = copyLocalFileContext(ctx, source, local)
+				err = copyLocalFileContext(ctx, source, local, progress)
 			}
 		} else if upload {
-			err = uploadFileContext(ctx, shell, local, dir)
+			err = uploadFileContext(ctx, shell, local, dir, progress)
 		} else {
-			err = downloadFileContext(ctx, shell, path.Join(dir, selected), local)
+			err = downloadFileContext(ctx, shell, path.Join(dir, selected), local, progress)
 		}
 		d.win.Update(func() {
 			d.busy = false

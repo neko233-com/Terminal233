@@ -267,14 +267,14 @@ func TestSFTPStreamsLargeFilesAndCleansCancelledTransfers(t *testing.T) {
 	if err = os.WriteFile(cancelledSource, []byte("data"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err = uploadFileContext(ctx, shell, cancelledSource, filepath.ToSlash(remoteDir)); !errors.Is(err, context.Canceled) {
+	if err = uploadFileContext(ctx, shell, cancelledSource, filepath.ToSlash(remoteDir), nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled upload returned %v", err)
 	}
 	if _, err = os.Stat(filepath.Join(remoteDir, "cancelled-upload.bin")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("cancelled upload left a partial file: %v", err)
 	}
 	cancelledTarget := filepath.Join(root, "cancelled.bin")
-	if err = downloadFileContext(ctx, shell, path.Join(filepath.ToSlash(remoteDir), "large.bin"), cancelledTarget); !errors.Is(err, context.Canceled) {
+	if err = downloadFileContext(ctx, shell, path.Join(filepath.ToSlash(remoteDir), "large.bin"), cancelledTarget, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled download returned %v", err)
 	}
 	if _, err = os.Stat(cancelledTarget); !errors.Is(err, os.ErrNotExist) {

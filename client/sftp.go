@@ -10,24 +10,37 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/pkg/sftp"
 )
 
 type contextReader struct {
-	ctx context.Context
-	r   io.Reader
+	ctx      context.Context
+	r        io.Reader
+	progress func(int64)
+	read     int64
+	last     time.Time
 }
 
-func (r contextReader) Read(p []byte) (int, error) {
+func (r *contextReader) Read(p []byte) (int, error) {
 	if err := r.ctx.Err(); err != nil {
 		return 0, err
 	}
-	return r.r.Read(p)
+	n, err := r.r.Read(p)
+	if n > 0 && r.progress != nil {
+		r.read += int64(n)
+		now := time.Now()
+		if r.last.IsZero() || now.Sub(r.last) >= 250*time.Millisecond {
+			r.last = now
+			r.progress(r.read)
+		}
+	}
+	return n, err
 }
 
-func copyTransfer(ctx context.Context, dst io.Writer, src io.Reader) error {
-	_, err := io.Copy(dst, contextReader{ctx: ctx, r: src})
+func copyTransfer(ctx context.Context, dst io.Writer, src io.Reader, progress func(int64)) error {
+	_, err := io.Copy(dst, &contextReader{ctx: ctx, r: src, progress: progress})
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -79,9 +92,9 @@ func listRemote(shell *remoteShell, dir string) ([]remoteFile, error) {
 	return result, err
 }
 func uploadFile(shell *remoteShell, local, dir string) error {
-	return uploadFileContext(context.Background(), shell, local, dir)
+	return uploadFileContext(context.Background(), shell, local, dir, nil)
 }
-func uploadFileContext(ctx context.Context, shell *remoteShell, local, dir string) error {
+func uploadFileContext(ctx context.Context, shell *remoteShell, local, dir string, progress func(int64)) error {
 	file, err := os.Open(local)
 	if err != nil {
 		return err
@@ -104,7 +117,7 @@ func uploadFileContext(ctx context.Context, shell *remoteShell, local, dir strin
 		if err != nil {
 			return err
 		}
-		copyErr := copyTransfer(ctx, dst, file)
+		copyErr := copyTransfer(ctx, dst, file, progress)
 		closeErr := dst.Close()
 		if copyErr != nil || closeErr != nil {
 			if removeErr := client.Remove(remote); removeErr != nil {
@@ -121,9 +134,9 @@ func uploadFileContext(ctx context.Context, shell *remoteShell, local, dir strin
 	})
 }
 func downloadFile(shell *remoteShell, remote, local string) error {
-	return downloadFileContext(context.Background(), shell, remote, local)
+	return downloadFileContext(context.Background(), shell, remote, local, nil)
 }
-func downloadFileContext(ctx context.Context, shell *remoteShell, remote, local string) error {
+func downloadFileContext(ctx context.Context, shell *remoteShell, remote, local string, progress func(int64)) error {
 	return withSFTP(shell, func(client *sftp.Client) error {
 		info, err := client.Lstat(remote)
 		if err != nil {
@@ -141,7 +154,7 @@ func downloadFileContext(ctx context.Context, shell *remoteShell, remote, local 
 		if err != nil {
 			return err
 		}
-		copyErr := copyTransfer(ctx, dst, src)
+		copyErr := copyTransfer(ctx, dst, src, progress)
 		closeErr := dst.Close()
 		if copyErr != nil || closeErr != nil {
 			if removeErr := os.Remove(local); removeErr != nil {
