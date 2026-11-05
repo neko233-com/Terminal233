@@ -350,7 +350,7 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 	}
 	items := append([]storedAccount(nil), s.doc.Accounts[owner]...)
 	original := s.doc.Accounts[owner]
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if account.ID == "" {
 		account.ID = newID()
 		account.CreatedAt = now
@@ -358,6 +358,10 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 		found := false
 		for _, item := range items {
 			if item.ID == account.ID {
+				if account.ExpectedUpdatedAt != "" && account.ExpectedUpdatedAt != item.UpdatedAt {
+					return Account{}, errAccountConflict
+				}
+				now = nextAccountTimestamp(item.UpdatedAt)
 				found = true
 				account.CreatedAt = item.CreatedAt
 				break
@@ -371,6 +375,7 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 		account.CreatedAt = now
 	}
 	account.UpdatedAt = now
+	account.ExpectedUpdatedAt = ""
 	ciphertext, err := encryptString(s.key, account.Password)
 	if err != nil {
 		return Account{}, err
@@ -398,6 +403,16 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 		return Account{}, err
 	}
 	return account, nil
+}
+
+// Under the store lock, every update must produce a distinct revision even
+// when two writes occur in the same clock tick or the system clock moves back.
+func nextAccountTimestamp(previous string) string {
+	now := time.Now().UTC()
+	if old, err := time.Parse(time.RFC3339Nano, previous); err == nil && !now.After(old) {
+		now = old.Add(time.Nanosecond)
+	}
+	return now.Format(time.RFC3339Nano)
 }
 
 func (s *Store) deleteAccount(owner, id string) error {
@@ -525,6 +540,7 @@ func normalizeUsername(username string) string { return strings.ToLower(strings.
 var (
 	errUserExists      = errors.New("user exists")
 	errAccountNotFound = errors.New("account not found")
+	errAccountConflict = errors.New("account was modified")
 	errAccountLimit    = errors.New("account limit reached")
 )
 

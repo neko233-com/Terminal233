@@ -31,6 +31,7 @@ type Account struct {
 	HostKeyFingerprint string `json:"hostKeyFingerprint,omitempty"`
 	CreatedAt          string `json:"createdAt,omitempty"`
 	UpdatedAt          string `json:"updatedAt,omitempty"`
+	ExpectedUpdatedAt  string `json:"expectedUpdatedAt,omitempty"`
 }
 
 type Server struct {
@@ -87,7 +88,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version})
+		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version, "capabilities": []string{"conditional-account-update"}})
 	case r.URL.Path == "/api/v1/register" && r.Method == http.MethodPost:
 		s.register(w, r)
 	case r.URL.Path == "/api/v1/login" && r.Method == http.MethodPost:
@@ -245,6 +246,8 @@ func (s *Server) saveAccount(w http.ResponseWriter, r *http.Request, username st
 	saved, err := s.store.upsertAccount(username, account)
 	if err != nil {
 		switch {
+		case errors.Is(err, errAccountConflict):
+			s.error(w, http.StatusConflict, "account_conflict", "连接已被其他设备修改，请刷新后重试")
 		case errors.Is(err, errAccountLimit):
 			s.error(w, http.StatusConflict, "account_limit", "每个账号最多保存 1000 条 SSH 凭据")
 		case errors.Is(err, errAccountNotFound):
@@ -351,7 +354,7 @@ func newID() string {
 }
 
 func validAccountInput(a Account) bool {
-	return a.Label != "" && len(a.Label) <= 128 && a.Host != "" && len(a.Host) <= 253 && !strings.ContainsAny(a.Host, "/\\@ \t\r\n") && a.Port > 0 && a.Port <= 65535 && a.Username != "" && len(a.Username) <= 128 && !strings.ContainsAny(a.Username, "/\\@ \t\r\n") && a.Password != "" && len(a.Password) <= 64*1024 && strings.HasPrefix(a.HostKeyFingerprint, "SHA256:") && len(a.HostKeyFingerprint) <= 100
+	return (a.ExpectedUpdatedAt == "" || (a.ID != "" && len(a.ExpectedUpdatedAt) <= 64)) && a.Label != "" && len(a.Label) <= 128 && a.Host != "" && len(a.Host) <= 253 && !strings.ContainsAny(a.Host, "/\\@ \t\r\n") && a.Port > 0 && a.Port <= 65535 && a.Username != "" && len(a.Username) <= 128 && !strings.ContainsAny(a.Username, "/\\@ \t\r\n") && a.Password != "" && len(a.Password) <= 64*1024 && strings.HasPrefix(a.HostKeyFingerprint, "SHA256:") && len(a.HostKeyFingerprint) <= 100
 }
 
 func (s *Server) acquireAuth(w http.ResponseWriter) bool {

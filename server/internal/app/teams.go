@@ -265,7 +265,7 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 	if !ok || t.Disabled || !s.activeUserLocked(user) || (role != "owner" && role != "admin") {
 		return Account{}, errTeamUnavailable
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	index := -1
 	if a.ID == "" {
 		if len(t.Accounts) >= maxAccountsPerUser {
@@ -276,6 +276,10 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 	} else {
 		for i, existing := range t.Accounts {
 			if existing.ID == a.ID {
+				if a.ExpectedUpdatedAt != "" && a.ExpectedUpdatedAt != existing.UpdatedAt {
+					return Account{}, errAccountConflict
+				}
+				now = nextAccountTimestamp(existing.UpdatedAt)
 				index = i
 				a.CreatedAt = existing.CreatedAt
 				break
@@ -286,6 +290,7 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 		}
 	}
 	a.UpdatedAt = now
+	a.ExpectedUpdatedAt = ""
 	encrypted, err := encryptString(s.key, a.Password)
 	if err != nil {
 		return Account{}, err

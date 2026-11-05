@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -158,6 +159,10 @@ func (s *Server) teamResource(w http.ResponseWriter, r *http.Request, user strin
 		}
 		result, err := s.store.saveTeamAccount(user, id, a)
 		if err != nil {
+			if errors.Is(err, errAccountConflict) {
+				s.error(w, http.StatusConflict, "account_conflict", "连接已被其他设备修改，请刷新后重试")
+				return
+			}
 			s.error(w, http.StatusForbidden, "save_failed", "无权保存或团队凭据数量已达上限")
 			return
 		}
