@@ -13,6 +13,26 @@ func groupWithin(group, parent string) bool {
 	return group == parent || strings.HasPrefix(group, parent+"/")
 }
 
+func groupsWithChildren(groups []string) map[string]bool {
+	parents := make(map[string]bool)
+	for _, group := range groups {
+		if i := strings.LastIndex(group, "/"); i > 0 {
+			parents[group[:i]] = true
+		}
+	}
+	return parents
+}
+
+func groupHidden(group string, folded map[string]bool) bool {
+	for i := strings.LastIndex(group, "/"); i > 0; i = strings.LastIndex(group, "/") {
+		group = group[:i]
+		if folded[group] {
+			return true
+		}
+	}
+	return false
+}
+
 // Groups formerly existed only as connection metadata. Derive their ancestors
 // so existing installations retain their groups, including nested paths.
 func (d *desktop) groupTree() ([]string, map[string]int) {
@@ -204,6 +224,7 @@ func (d *desktop) changeGroup(remove bool) {
 		d.profileGroup = mapPath(d.profileGroup)
 	}
 	d.profileFilter, d.groupInput, d.confirmGroupDelete = replacement, "", false
+	d.foldedGroups = nil
 	if remove {
 		d.status = "分组已移除，连接和子分组已移到上级。"
 	} else {

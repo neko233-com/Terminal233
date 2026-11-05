@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -137,5 +139,60 @@ func TestProfileDragToGroupPersists(t *testing.T) {
 	var restored desktop
 	if err := restored.loadProfiles(path); err != nil || restored.profiles[0].Group != "target" {
 		t.Fatal("dragged group was not saved")
+	}
+}
+
+func TestGroupStorageVersionProtectsEmptyGroupsFromOlderClients(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	legacy := []byte(`{"Version":1,"Items":[{"Label":"server","Group":"legacy","Host":"host.test","Port":"22","User":"alice"}],"Groups":["empty"]}`)
+	if err := os.WriteFile(path, legacy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	d := &desktop{}
+	if err := d.loadProfiles(path); err != nil || !d.groupExists("empty") {
+		t.Fatal("version 1 groups were not preserved")
+	}
+	if err := d.saveProfiles(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored diskProfiles
+	if err := json.Unmarshal(data, &stored); err != nil || stored.Version != 2 || len(stored.Groups) != 1 {
+		t.Fatal("groups not protected by version 2")
+	}
+	var restored desktop
+	if err := restored.loadProfiles(path); err != nil || !restored.groupExists("empty") || restored.profiles[0].Group != "legacy" {
+		t.Fatal("version 2 data not restored")
+	}
+	restored.profileGroups = nil
+	if err := restored.saveProfiles(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	if err := json.Unmarshal(data, &stored); err != nil || stored.Version != 2 {
+		t.Fatal("storage version was downgraded")
+	}
+}
+
+func TestGroupTreeCanCollapseAndExpand(t *testing.T) {
+	d := &desktop{workspace: "connections", profileGroups: []string{"parent", "parent/child", "other"}}
+	view := ui.NewTester(d.view, 1400, 1400)
+	if !view.HasText("分组：parent/child") {
+		t.Fatal("child missing")
+	}
+	if err := view.Click("折叠分组：parent"); err != nil {
+		t.Fatal(err)
+	}
+	if view.HasText("分组：parent/child") || !view.HasText("分组：other") {
+		t.Fatal("collapse hid wrong groups")
+	}
+	if err := view.Click("展开分组：parent"); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasText("分组：parent/child") {
+		t.Fatal("expand did not restore child")
 	}
 }

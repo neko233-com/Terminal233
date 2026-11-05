@@ -51,6 +51,8 @@ type desktop struct {
 	confirmCloudDeleteVersion                                                               string
 	profiles                                                                                []profile
 	profileGroups                                                                           []string
+	foldedGroups                                                                            map[string]bool
+	profileFormat                                                                           int
 	groupInput                                                                              string
 	confirmGroupDelete                                                                      bool
 	profileSearch, profileGroup, selectedProfile, quickConnect                              string
@@ -408,23 +410,41 @@ func (d *desktop) view(c *ui.Context) {
 								d.profileSource = "local"
 							}
 						}
+						parents := groupsWithChildren(groups)
 						for _, group := range groups {
 							name := group
-							button := ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", name, counts[name])).Label("分组：" + name).Disabled(d.busy)
-							if button.Clicked() {
-								d.workspace = "connections"
-								d.editConnection = false
-								d.profileFilter = name
-								d.confirmGroupDelete = false
-								d.profileFavorites = false
-								d.profileRecent = false
-								if d.profileSource == "cloud" {
-									d.profileSource = "local"
+							if groupHidden(name, d.foldedGroups) {
+								continue
+							}
+							ui.Row(c).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
+								if parents[name] {
+									label, title := "▾", "折叠分组："+name
+									if d.foldedGroups[name] {
+										label, title = "▸", "展开分组："+name
+									}
+									if ui.Button(c.Key("group-fold-"+name), label).Label(title).Width(32).Clicked() {
+										if d.foldedGroups == nil {
+											d.foldedGroups = make(map[string]bool)
+										}
+										d.foldedGroups[name] = !d.foldedGroups[name]
+									}
 								}
-							}
-							if dragged, ok := ui.Drop[profileID](button); ok && !d.busy {
-								d.moveProfileToGroup(dragged, name)
-							}
+								button := ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", name, counts[name])).Label("分组：" + name).Disabled(d.busy).Grow(1)
+								if button.Clicked() {
+									d.workspace = "connections"
+									d.editConnection = false
+									d.profileFilter = name
+									d.confirmGroupDelete = false
+									d.profileFavorites = false
+									d.profileRecent = false
+									if d.profileSource == "cloud" {
+										d.profileSource = "local"
+									}
+								}
+								if dragged, ok := ui.Drop[profileID](button); ok && !d.busy {
+									d.moveProfileToGroup(dragged, name)
+								}
+							})
 						}
 						ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
 						ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端\nCtrl+Shift+F 查找终端输出\nCtrl+Tab / Ctrl+Shift+Tab 切换会话").FontSize(11).TextColor(t.TextMuted).Wrap()
@@ -710,7 +730,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.60"
+const version = "0.3.61"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

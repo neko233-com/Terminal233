@@ -32,6 +32,7 @@ func (d *desktop) loadProfiles(path string) error {
 		d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
 		d.profiles, d.nextProfileID = nil, 0
 		d.profileGroups, d.confirmGroupDelete = nil, false
+		d.profileFormat, d.foldedGroups = 1, nil
 		d.profilePath = path
 		d.profileExists = false
 		d.profileRevision = [32]byte{}
@@ -48,7 +49,7 @@ func (d *desktop) loadProfiles(path string) error {
 	if err := json.Unmarshal(data, &saved); err != nil {
 		return fmt.Errorf("连接列表格式无效：%w", err)
 	}
-	if saved.Version != 1 || len(saved.Items) > 10000 || len(saved.Groups) > 10000 {
+	if (saved.Version != 1 && saved.Version != 2) || len(saved.Items) > 10000 || len(saved.Groups) > 10000 {
 		return errors.New("连接列表版本或数量无效")
 	}
 	profiles := make([]profile, 0, len(saved.Items))
@@ -61,6 +62,7 @@ func (d *desktop) loadProfiles(path string) error {
 	}
 	d.profiles, d.nextProfileID, d.profilePath = profiles, len(profiles), path
 	d.profileGroups, d.confirmGroupDelete = saved.Groups, false
+	d.profileFormat, d.foldedGroups = saved.Version, nil
 	d.confirmProfileDelete = ""
 	d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
 	d.profileExists, d.profileRevision = true, sha256.Sum256(data)
@@ -75,7 +77,11 @@ func (d *desktop) saveProfiles() error {
 	if d.profilePath == "" {
 		return nil
 	}
-	saved := diskProfiles{Version: 1, Items: make([]diskProfile, 0, len(d.profiles)), Groups: d.profileGroups}
+	version := 1
+	if len(d.profileGroups) != 0 || d.profileFormat == 2 {
+		version = 2
+	}
+	saved := diskProfiles{Version: version, Items: make([]diskProfile, 0, len(d.profiles)), Groups: d.profileGroups}
 	for _, p := range d.profiles {
 		s := p.Settings
 		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Favorite: p.Favorite, LastConnected: p.LastConnected, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint})
@@ -130,6 +136,7 @@ func (d *desktop) saveProfiles() error {
 		return err
 	}
 	d.profileExists, d.profileRevision = true, sha256.Sum256(data)
+	d.profileFormat = version
 	d.profileStoreConflict = false
 	return nil
 }
