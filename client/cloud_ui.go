@@ -29,35 +29,40 @@ func (d *desktop) cloudLogin(register bool) {
 	d.busy = true
 	d.cloudStatus = "正在连接同步服务…"
 	go func() {
+		registered := false
 		var err error
 		if register {
 			err = client.register(user, password, registration)
+			registered = err == nil
 		}
 		if err == nil {
 			err = client.login(user, password)
 		}
-		var accounts []cloudAccount
-		var teams []cloudTeam
-		var teamErr error
+		var loaded cloudInitialState
 		if err == nil {
-			accounts, err = client.list()
-		}
-		if err == nil {
-			teams, teamErr = client.teams()
+			loaded = loadCloudInitialState(client, false)
 		}
 		d.win.Update(func() {
 			d.busy = false
 			if err != nil {
-				d.cloudStatus = fmt.Sprintf("同步服务：%v", err)
+				if registered {
+					d.cloudStatus = "注册已完成，但登录失败；请直接登录：" + err.Error()
+				} else if register {
+					d.cloudStatus = "注册请求未确认；请先尝试登录或核对账号：" + err.Error()
+				} else {
+					d.cloudStatus = fmt.Sprintf("同步服务：%v", err)
+				}
 				return
 			}
-			d.cloud = client
-			d.accounts = accounts
-			d.teams = teams
+			d.cloud, d.accounts, d.teams = client, loaded.accounts, loaded.teams
+			d.cloudListStale = loaded.accountErr != nil
 			d.cloudStatus = "同步服务已登录"
+			if loaded.accountErr != nil {
+				d.cloudStatus = "已登录，但连接列表加载失败；请刷新后再修改：" + loaded.accountErr.Error()
+			}
 			d.teamStatus = ""
-			if teamErr != nil {
-				d.teamStatus = "团队列表加载失败，请刷新团队：" + teamErr.Error()
+			if loaded.teamErr != nil {
+				d.teamStatus = "团队列表加载失败，请刷新团队：" + loaded.teamErr.Error()
 			}
 		})
 	}()
@@ -77,6 +82,8 @@ func (d *desktop) cloudRefresh() {
 				return
 			}
 			d.accounts = accounts
+			d.cloudListStale = false
+			d.confirmCloudDelete = ""
 			d.cloudStatus = "已刷新连接列表"
 		})
 	}()
@@ -117,6 +124,10 @@ func (d *desktop) saveCloudConnection(settings connectionSettings, label string)
 	if d.busy || d.cloud == nil {
 		return
 	}
+	if d.cloudListStale {
+		d.cloudStatus, d.status = "连接列表需要先刷新，避免重复或覆盖错误连接。", "连接列表需要先刷新。"
+		return
+	}
 	account, err := prepareCloudAccount(settings, label, d.accounts)
 	if err != nil {
 		d.cloudStatus, d.status = err.Error(), err.Error()
@@ -127,23 +138,27 @@ func (d *desktop) saveCloudConnection(settings connectionSettings, label string)
 	d.cloudStatus = "正在加密传输连接信息…"
 	d.status = d.cloudStatus
 	go func() {
-		err := client.save(account)
-		var accounts []cloudAccount
-		if err == nil {
-			accounts, err = client.list()
-		}
-		d.win.Update(func() {
-			d.busy = false
-			if err != nil {
-				d.cloudStatus = err.Error()
-				d.status = "同步失败：" + err.Error()
-				return
-			}
-			d.accounts = accounts
-			d.cloudStatus = "连接信息已同步"
-			d.status = d.cloudStatus
-		})
+		accounts, mutationErr, refreshErr := mutateAndRefresh(func() error { return client.save(account) }, client.list)
+		d.win.Update(func() { d.busy = false; d.finishCloudSave(accounts, mutationErr, refreshErr) })
 	}()
+}
+
+func (d *desktop) finishCloudSave(accounts []cloudAccount, mutationErr, refreshErr error) {
+	if mutationErr != nil {
+		d.cloudListStale = true
+		d.cloudStatus = "同步请求未确认，可能已生效；请先刷新：" + mutationErr.Error()
+		d.status = d.cloudStatus
+		return
+	}
+	if refreshErr != nil {
+		d.cloudListStale = true
+		d.cloudStatus = "连接已同步，但列表刷新失败；请先刷新：" + refreshErr.Error()
+		d.status = d.cloudStatus
+		return
+	}
+	d.accounts, d.cloudListStale = accounts, false
+	d.cloudStatus = "连接信息已同步"
+	d.status = d.cloudStatus
 }
 
 func (d *desktop) loadCloudAccount(account cloudAccount) {
@@ -196,17 +211,20 @@ func (d *desktop) cloudView(c *ui.Context) {
 		ui.Text(c, "当前同步空间："+d.cloudScopeName()).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-		if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || d.cloud == nil || d.active.Password == "" || d.active.KeyPath != "").Clicked() {
+		if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || d.cloud == nil || d.cloudListStale || d.active.Password == "" || d.active.KeyPath != "").Clicked() {
 			d.cloudSave()
 		}
 		if ui.Button(c.Key("cloudrefresh"), "刷新云端连接").Disabled(d.busy || d.cloud == nil).Clicked() {
 			d.cloudRefresh()
 		}
-		if ui.Button(c.Key("clouddelete"), "删除选中云端连接（需确认）").Disabled(d.busy || d.confirmCloudDelete == "").Clicked() {
+		if ui.Button(c.Key("clouddelete"), "删除选中云端连接（需确认）").Disabled(d.busy || d.cloudListStale || d.confirmCloudDelete == "").Clicked() {
 			d.cloudDelete()
 		}
 	})
-	ui.Text(c, d.cloudStatus).FontSize(12)
+	if d.cloudListStale {
+		ui.Text(c, "连接列表可能过期，请先刷新后再修改或删除。").FontSize(12).Wrap()
+	}
+	ui.Text(c, d.cloudStatus).FontSize(12).Wrap()
 	teamLabel := "展开团队管理"
 	if d.showTeams {
 		teamLabel = "收起团队管理"
@@ -250,29 +268,38 @@ func (d *desktop) cloudURLChanged() {
 }
 
 func (d *desktop) cloudDelete() {
-	if d.busy || d.cloud == nil || d.confirmCloudDelete == "" {
+	if d.busy || d.cloud == nil || d.cloudListStale || d.confirmCloudDelete == "" {
 		return
 	}
 	id, client := d.confirmCloudDelete, d.cloud
 	d.confirmCloudDelete = ""
 	d.busy = true
 	go func() {
-		err := client.remove(id)
-		var accounts []cloudAccount
-		if err == nil {
-			accounts, err = client.list()
-		}
-		d.win.Update(func() {
-			d.busy = false
-			if err != nil {
-				d.cloudStatus = err.Error()
-				return
-			}
-			d.accounts = accounts
-			d.cloudStatus = "云端连接已删除"
-		})
+		accounts, mutationErr, refreshErr := mutateAndRefresh(func() error { return client.remove(id) }, client.list)
+		d.win.Update(func() { d.busy = false; d.finishCloudDelete(id, accounts, mutationErr, refreshErr) })
 	}()
 }
+func (d *desktop) finishCloudDelete(id string, accounts []cloudAccount, mutationErr, refreshErr error) {
+	if mutationErr != nil {
+		d.cloudListStale = true
+		d.cloudStatus = "删除请求未确认，可能已生效；请先刷新：" + mutationErr.Error()
+		return
+	}
+	if refreshErr != nil {
+		kept := d.accounts[:0]
+		for _, account := range d.accounts {
+			if account.ID != id {
+				kept = append(kept, account)
+			}
+		}
+		d.accounts, d.cloudListStale = kept, true
+		d.cloudStatus = "连接已删除，但列表刷新失败；请先刷新：" + refreshErr.Error()
+		return
+	}
+	d.accounts, d.cloudListStale = accounts, false
+	d.cloudStatus = "云端连接已删除"
+}
+
 func (d *desktop) cloudLogout() {
 	if d.busy || d.cloud == nil {
 		return
@@ -307,7 +334,7 @@ func (d *desktop) clearCloudState() {
 		d.settingsFromCloud = false
 	}
 	d.cloudPassword, d.cloudRegistration = "", ""
-	d.cloudRegistrationLocal = false
+	d.cloudRegistrationLocal, d.cloudListStale = false, false
 	d.cloudStatus, d.teamStatus = "", ""
 	d.accounts, d.teams, d.members, d.teamInvites = nil, nil, nil, nil
 	d.teamInviteURL, d.teamInviteInput, d.teamInvitePassword = "", "", ""

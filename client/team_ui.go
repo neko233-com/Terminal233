@@ -29,36 +29,48 @@ func (d *desktop) teamOperation(action string) {
 	d.busy = true
 	d.teamStatus = "正在处理团队操作…"
 	go func() {
-		var err error
-		var urlText string
-		switch action {
-		case "create":
-			_, err = client.createTeam(name)
-		case "join":
-			_, err = client.joinTeam(invite, password)
-		case "invite":
-			urlText, err = client.createInvite(password, hours*3600, uses)
-		}
-		var teams []cloudTeam
-		if err == nil {
-			teams, err = client.teams()
-		}
-		d.win.Update(func() {
-			d.busy = false
-			if err != nil {
-				d.teamStatus = fmt.Sprintf("团队操作失败：%v", err)
-				return
+		var inviteURL string
+		teams, mutationErr, refreshErr := mutateAndRefresh(func() error {
+			switch action {
+			case "create":
+				_, err := client.createTeam(name)
+				return err
+			case "join":
+				_, err := client.joinTeam(invite, password)
+				return err
+			case "invite":
+				var err error
+				inviteURL, err = client.createInvite(password, hours*3600, uses)
+				return err
+			default:
+				return fmt.Errorf("未知团队操作")
 			}
-			d.teams = teams
-			if urlText != "" {
-				d.teamInviteURL = urlText
-				d.teamStatus = "邀请已创建，复制链接并通过安全渠道单独发送密码。"
-			} else {
-				d.teamStatus = "团队列表已更新"
-			}
-		})
+		}, client.teams)
+		d.win.Update(func() { d.busy = false; d.finishTeamOperation(action, inviteURL, teams, mutationErr, refreshErr) })
 	}()
 }
+func (d *desktop) finishTeamOperation(action, inviteURL string, teams []cloudTeam, mutationErr, refreshErr error) {
+	if mutationErr != nil {
+		d.teamStatus = "团队操作未确认，可能已生效；请先刷新团队或邀请列表：" + mutationErr.Error()
+		return
+	}
+	if action == "invite" {
+		if inviteURL == "" {
+			d.teamStatus = "邀请已创建，但服务未返回链接；请检查有效邀请。"
+		} else {
+			d.teamInviteURL = inviteURL
+			d.teamStatus = "邀请已创建，复制链接并通过安全渠道单独发送密码。"
+		}
+	} else {
+		d.teamStatus = "团队操作已完成"
+	}
+	if refreshErr != nil {
+		d.teamStatus += " 团队列表刷新失败，请手动刷新：" + refreshErr.Error()
+		return
+	}
+	d.teams = teams
+}
+
 func (d *desktop) selectTeam(id string) {
 	if d.busy || d.cloud == nil {
 		return
@@ -89,6 +101,7 @@ func (d *desktop) selectTeam(id string) {
 // Pending confirmations and invitation links belong to the previous scope.
 func (d *desktop) applyCloudScope(id string, accounts []cloudAccount, members []cloudTeamMember) {
 	d.cloud.teamID = id
+	d.cloudListStale = false
 	d.accounts, d.members = accounts, members
 	d.teamInvites = nil
 	d.confirmInvite, d.confirmMember, d.confirmCloudDelete = "", "", ""
@@ -134,18 +147,20 @@ func (d *desktop) removeMember() {
 	d.confirmMember = ""
 	d.busy = true
 	go func() {
-		err := c.removeMember(user)
-		var m []cloudTeamMember
-		if err == nil {
-			m, err = c.members()
-		}
+		items, mutationErr, refreshErr := mutateAndRefresh(func() error { return c.removeMember(user) }, c.members)
 		d.win.Update(func() {
 			d.busy = false
-			if err != nil {
-				d.teamStatus = err.Error()
+			if mutationErr != nil {
+				d.members = nil
+				d.teamStatus = "成员操作未确认，可能已生效；请重新选择团队以刷新成员列表：" + mutationErr.Error()
 				return
 			}
-			d.members = m
+			if refreshErr != nil {
+				d.members = nil
+				d.teamStatus = "成员已移除，但列表刷新失败；请重新选择团队以刷新成员列表：" + refreshErr.Error()
+				return
+			}
+			d.members = items
 			d.teamStatus = "成员已移除"
 		})
 	}()
@@ -263,34 +278,39 @@ func (d *desktop) registerWithInvite() {
 	d.teamStatus = "正在注册并加入团队…"
 	go func() {
 		err := c.registerWithInvite(user, password, token, invitePassword)
+		registered := err == nil
 		if err == nil {
 			err = c.login(user, password)
 		}
-		var teams []cloudTeam
-		var accounts []cloudAccount
-		var members []cloudTeamMember
+		var loaded cloudInitialState
 		if err == nil {
-			teams, err = c.teams()
-		}
-		if err == nil && len(teams) == 1 {
-			c.teamID = teams[0].ID
-			members, err = c.members()
-		}
-		if err == nil {
-			accounts, err = c.list()
+			loaded = loadCloudInitialState(c, true)
 		}
 		d.win.Update(func() {
 			d.busy = false
+			if registered {
+				d.teamInviteInput = ""
+			}
 			if err != nil {
-				d.teamStatus = err.Error()
+				if registered {
+					d.teamStatus = "注册并加入团队已完成，但登录失败；请直接登录：" + err.Error()
+				} else {
+					d.teamStatus = "注册请求未确认；请核对账号后再试：" + err.Error()
+				}
 				return
 			}
-			d.cloud = c
-			d.teams = teams
-			d.accounts = accounts
-			d.members = members
-			d.teamInviteInput = ""
+			d.cloud, d.teams, d.accounts, d.members = c, loaded.teams, loaded.accounts, loaded.members
+			d.cloudListStale = loaded.accountErr != nil
 			d.teamStatus = "已注册并加入团队"
+			if loaded.teamErr != nil {
+				d.teamStatus += "；团队列表加载失败，请刷新：" + loaded.teamErr.Error()
+			}
+			if loaded.memberErr != nil {
+				d.teamStatus += "；成员列表加载失败：" + loaded.memberErr.Error()
+			}
+			if loaded.accountErr != nil {
+				d.cloudStatus = "已登录，但连接列表加载失败；请刷新后再修改：" + loaded.accountErr.Error()
+			}
 		})
 	}()
 }
@@ -303,18 +323,20 @@ func (d *desktop) changeMemberRole(role string) {
 	d.confirmMember = ""
 	d.busy = true
 	go func() {
-		err := c.setMemberRole(user, role)
-		var members []cloudTeamMember
-		if err == nil {
-			members, err = c.members()
-		}
+		items, mutationErr, refreshErr := mutateAndRefresh(func() error { return c.setMemberRole(user, role) }, c.members)
 		d.win.Update(func() {
 			d.busy = false
-			if err != nil {
-				d.teamStatus = err.Error()
+			if mutationErr != nil {
+				d.members = nil
+				d.teamStatus = "成员操作未确认，可能已生效；请重新选择团队以刷新成员列表：" + mutationErr.Error()
 				return
 			}
-			d.members = members
+			if refreshErr != nil {
+				d.members = nil
+				d.teamStatus = "成员角色已更新，但列表刷新失败；请重新选择团队以刷新成员列表：" + refreshErr.Error()
+				return
+			}
+			d.members = items
 			d.teamStatus = "成员角色已更新"
 		})
 	}()
@@ -346,15 +368,17 @@ func (d *desktop) revokeInvite() {
 	d.confirmInvite = ""
 	d.busy = true
 	go func() {
-		err := c.revokeInvitation(id)
-		var items []cloudInvite
-		if err == nil {
-			items, err = c.invitations()
-		}
+		items, mutationErr, refreshErr := mutateAndRefresh(func() error { return c.revokeInvitation(id) }, c.invitations)
 		d.win.Update(func() {
 			d.busy = false
-			if err != nil {
-				d.teamStatus = err.Error()
+			if mutationErr != nil {
+				d.teamInvites = nil
+				d.teamStatus = "邀请操作未确认，可能已生效；请刷新邀请列表：" + mutationErr.Error()
+				return
+			}
+			if refreshErr != nil {
+				d.teamInvites = nil
+				d.teamStatus = "邀请已撤销，但列表刷新失败；请刷新邀请列表：" + refreshErr.Error()
 				return
 			}
 			d.teamInvites = items

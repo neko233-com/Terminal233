@@ -33,6 +33,7 @@ func (d *desktop) adminAction(action string) {
 	d.busy = true
 	go func() {
 		var err error
+		var mutationDone, importAttempted bool
 		var users []cloudAdminUser
 		var teams []cloudTeam
 		switch action {
@@ -40,6 +41,7 @@ func (d *desktop) adminAction(action string) {
 			teams, err = c.adminTeams()
 		case "suspend-team", "enable-team":
 			err = c.setTeamDisabled(teamID, action == "suspend-team")
+			mutationDone = err == nil
 			if err == nil {
 				teams, err = c.adminTeams()
 			}
@@ -47,6 +49,7 @@ func (d *desktop) adminAction(action string) {
 			users, err = c.adminUsers()
 		case "disable", "enable":
 			err = c.setUserDisabled(name, action == "disable")
+			mutationDone = err == nil
 			if err == nil {
 				users, err = c.adminUsers()
 			}
@@ -85,6 +88,7 @@ func (d *desktop) adminAction(action string) {
 					var backup cloudBackup
 					err = json.Unmarshal(data, &backup)
 					if err == nil {
+						importAttempted = true
 						err = c.importBackup(backup)
 					}
 				}
@@ -93,7 +97,26 @@ func (d *desktop) adminAction(action string) {
 		d.win.Update(func() {
 			d.busy = false
 			if err != nil {
-				d.adminStatus = fmt.Sprintf("管理操作失败：%v", err)
+				if importAttempted {
+					d.clearCloudState()
+					d.adminStatus = "恢复请求未确认，可能已生效；请重新登录并检查：" + err.Error()
+				} else if mutationDone {
+					if action == "suspend-team" || action == "enable-team" {
+						d.adminTeams = nil
+					} else {
+						d.adminUsers = nil
+					}
+					d.adminStatus = "管理操作已完成，但列表刷新失败；请重新查看：" + err.Error()
+				} else if action == "suspend-team" || action == "enable-team" || action == "disable" || action == "enable" {
+					if action == "suspend-team" || action == "enable-team" {
+						d.adminTeams = nil
+					} else {
+						d.adminUsers = nil
+					}
+					d.adminStatus = "管理请求未确认，可能已生效；请重新查看后再操作：" + err.Error()
+				} else {
+					d.adminStatus = fmt.Sprintf("管理操作未完成：%v", err)
+				}
 				return
 			}
 			if users != nil {
