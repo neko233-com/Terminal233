@@ -546,6 +546,56 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !deadline.IsZero() {
 		t.Fatal("directory refresh after creation did not finish")
 	}
+	// Navigate through the actual native controls, including a failed read.
+	childDirectory := filepath.Join(localDirectory, "新目录")
+	if err := os.WriteFile(filepath.Join(childDirectory, "history-marker.txt"), []byte("child"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	waitDirectory := func(dir, marker string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			result := call("tree")["result"].(map[string]any)
+			matches, ready, found := false, false, false
+			for _, value := range result["nodes"].([]any) {
+				node := value.(map[string]any)
+				if node["key"] == "remote-dir" && strings.EqualFold(fmt.Sprint(node["value"]), dir) {
+					matches = true
+				}
+				if node["key"] == "file-refresh" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+					ready = true
+				}
+				if node["key"] == "file-"+marker {
+					found = true
+				}
+			}
+			if matches && ready && found {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("directory navigation did not load %q with %q: %v", dir, marker, call("tree"))
+	}
+	call("act", map[string]any{"key": "file-新目录", "action": "press"})
+	waitDirectory(childDirectory, "history-marker.txt")
+	call("act", map[string]any{"key": "file-back", "action": "press"})
+	waitDirectory(localDirectory, "renamed.txt")
+	call("act", map[string]any{"key": "file-forward", "action": "press"})
+	waitDirectory(childDirectory, "history-marker.txt")
+	call("act", map[string]any{"key": "remote-dir", "action": "setValue", "text": filepath.Join(localDirectory, "does-not-exist")})
+	call("act", map[string]any{"key": "file-refresh", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "读取文件失败") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if time.Now().After(deadline) {
+		t.Fatal("failed directory read was not reported")
+	}
+	call("act", map[string]any{"key": "file-back", "action": "press"})
+	waitDirectory(localDirectory, "renamed.txt")
 	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
