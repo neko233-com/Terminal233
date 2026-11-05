@@ -76,6 +76,7 @@ func (d *desktop) moveProfile(from, to profileID) {
 func (d *desktop) loadProfile(p profile) {
 	d.workspace = "connections"
 	d.editConnection = true
+	d.settingsFromCloud = false
 	d.settings = p.Settings
 	d.profileGroup = p.Group
 	d.profileLabel = p.Label
@@ -140,6 +141,7 @@ func (d *desktop) profileView(c *ui.Context) {
 		ui.Text(c, title).FontSize(22).Bold().Grow(1)
 		if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Clicked() {
 			d.settings = connectionSettings{Port: "22"}
+			d.settingsFromCloud = false
 			d.profileGroup = ""
 			d.profileLabel = ""
 			d.fingerprint = ""

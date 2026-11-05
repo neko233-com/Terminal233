@@ -118,6 +118,7 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.profileGroup = ""
 	d.profileLabel = account.Label
 	d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
+	d.settingsFromCloud = true
 	d.fingerprint = ""
 	d.expectedFingerprint = account.HostKeyFingerprint
 	d.status = "已载入连接，请重新获取并核对主机指纹。"
@@ -228,26 +229,7 @@ func (d *desktop) cloudLogout() {
 		err := client.logout()
 		d.win.Update(func() {
 			d.busy = false
-			d.cloud = nil
-			if d.profileSource == "cloud" {
-				d.profileSource = ""
-			}
-			d.accounts = nil
-			d.teams = nil
-			d.members = nil
-			d.teamInviteURL = ""
-			d.teamInviteInput = ""
-			d.confirmMember = ""
-			d.teamInvites = nil
-			d.confirmInvite = ""
-			d.adminUsers = nil
-			d.adminTeams = nil
-			d.adminConfirmTeam = ""
-			d.adminStatus = ""
-			d.adminTOTP = ""
-			d.adminConfirmRestore = false
-			d.adminConfirmUser = ""
-			d.confirmCloudDelete = ""
+			d.clearCloudState()
 			if err != nil {
 				d.cloudStatus = "本地已退出，服务端注销失败：" + err.Error()
 			} else {
@@ -255,4 +237,27 @@ func (d *desktop) cloudLogout() {
 			}
 		})
 	}()
+}
+
+// Logging out and restoring a backup both invalidate the cloud session.
+func (d *desktop) clearCloudState() {
+	if d.cloud != nil {
+		d.cloud.token, d.cloud.adminTOTP = "", ""
+	}
+	d.cloud = nil
+	if d.profileSource == "cloud" {
+		d.profileSource = ""
+	}
+	if d.settingsFromCloud {
+		d.settings.Password, d.settings.Passphrase = "", ""
+		d.settingsFromCloud = false
+	}
+	d.cloudPassword, d.cloudRegistration = "", ""
+	d.cloudStatus, d.teamStatus = "", ""
+	d.accounts, d.teams, d.members, d.teamInvites = nil, nil, nil, nil
+	d.teamInviteURL, d.teamInviteInput, d.teamInvitePassword = "", "", ""
+	d.confirmMember, d.confirmInvite, d.confirmCloudDelete = "", "", ""
+	d.adminUsers, d.adminTeams = nil, nil
+	d.adminConfirmTeam, d.adminConfirmUser, d.adminStatus, d.adminTOTP = "", "", "", ""
+	d.adminConfirmRestore = false
 }

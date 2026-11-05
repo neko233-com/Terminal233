@@ -59,6 +59,7 @@ type desktop struct {
 	expectedFingerprint                                                                     string
 	win                                                                                     *mygo.Window
 	settings                                                                                connectionSettings
+	settingsFromCloud                                                                       bool
 	fingerprint, status                                                                     string
 	busy                                                                                    bool
 	cancelTransfer                                                                          context.CancelFunc

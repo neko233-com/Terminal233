@@ -114,6 +114,24 @@ func TestSwitchCloudScopeClearsOldTeamActions(t *testing.T) {
 	}
 }
 
+func TestCloudSessionCleanupClearsSensitiveAndPendingState(t *testing.T) {
+	client := &cloudClient{token: "session-secret", adminTOTP: "123456", teamID: "team"}
+	d := &desktop{cloud: client, profileSource: "cloud", cloudPassword: "login-secret", cloudRegistration: "registration-secret", teamInviteURL: "https://example.test/#join=secret", teamInviteInput: "invite-secret", teamInvitePassword: "invite-password", confirmMember: "alice", confirmInvite: "invite", confirmCloudDelete: "account", adminTOTP: "123456", adminConfirmUser: "alice", adminConfirmTeam: "team", adminConfirmRestore: true, accounts: []cloudAccount{{ID: "account"}}, teams: []cloudTeam{{ID: "team"}}, members: []cloudTeamMember{{Username: "alice"}}, teamInvites: []cloudInvite{{ID: "invite"}}, adminUsers: []cloudAdminUser{{Username: "alice"}}, adminTeams: []cloudTeam{{ID: "team"}}}
+	d.loadCloudAccount(cloudAccount{Host: "example.test", Port: 22, Username: "alice", Password: "ssh-secret"})
+	d.clearCloudState()
+	if d.cloud != nil || client.token != "" || client.adminTOTP != "" || d.settings.Password != "" || d.settingsFromCloud || d.cloudPassword != "" || d.cloudRegistration != "" || d.teamInviteURL != "" || d.teamInviteInput != "" || d.teamInvitePassword != "" || d.adminTOTP != "" {
+		t.Fatal("session cleanup retained cloud secrets")
+	}
+	if d.profileSource != "" || d.confirmMember != "" || d.confirmInvite != "" || d.confirmCloudDelete != "" || d.adminConfirmUser != "" || d.adminConfirmTeam != "" || d.adminConfirmRestore || len(d.accounts)+len(d.teams)+len(d.members)+len(d.teamInvites)+len(d.adminUsers)+len(d.adminTeams) != 0 {
+		t.Fatal("session cleanup retained stale cloud data or actions")
+	}
+	local := &desktop{settings: connectionSettings{Password: "unsaved-local-password"}}
+	local.clearCloudState()
+	if local.settings.Password != "unsaved-local-password" {
+		t.Fatal("cleanup altered an unrelated local form")
+	}
+}
+
 func TestConnectionSourcesFilterLocalAndCloud(t *testing.T) {
 	d := &desktop{cloud: &cloudClient{}, profiles: []profile{{ID: "local", Label: "本地测试机", Settings: connectionSettings{Host: "local.example", Port: "22", User: "a"}}}, accounts: []cloudAccount{{ID: "cloud", Label: "云端测试机", Host: "cloud.example", Port: 22, Username: "b"}}}
 	view := ui.NewTester(d.view, 1200, 2200)

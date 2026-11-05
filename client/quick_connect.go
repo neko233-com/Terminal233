@@ -70,6 +70,7 @@ func (d *desktop) openQuickConnection() {
 		return
 	}
 	d.settings = settings
+	d.settingsFromCloud = false
 	d.quickConnect, d.profileGroup, d.profileLabel, d.selectedProfile = "", "", "", ""
 	d.fingerprint, d.expectedFingerprint = "", ""
 	d.editConnection = true

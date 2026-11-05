@@ -103,11 +103,7 @@ func (d *desktop) adminAction(action string) {
 				d.adminTeams = teams
 			}
 			if action == "import" {
-				d.cloud = nil
-				d.accounts = nil
-				d.teams = nil
-				d.members = nil
-				d.adminUsers = nil
+				d.clearCloudState()
 				d.adminStatus = "备份已恢复，请重新登录。"
 			} else {
 				d.adminStatus = "管理操作已完成"
