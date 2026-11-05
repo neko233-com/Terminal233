@@ -63,7 +63,7 @@ type desktop struct {
 	win                                                                                     *mygo.Window
 	settings                                                                                connectionSettings
 	settingsFromCloud                                                                       bool
-	cloudEditingID, cloudEditingScope                                                       string
+	cloudFormSources                                                                        map[string]string
 	fingerprint, status                                                                     string
 	busy                                                                                    bool
 	cancelTransfer                                                                          context.CancelFunc
@@ -184,9 +184,9 @@ func (d *desktop) connect() {
 	options := d.terminalOptions()
 	settings.Fingerprint = d.fingerprint
 	profileID := d.selectedProfile
-	cloudID, cloudScope := "", ""
+	var cloudSources map[string]string
 	if d.settingsFromCloud && d.cloud != nil {
-		cloudID, cloudScope = d.cloudEditingID, d.cloudEditingScope
+		cloudSources = cloneCloudSources(d.cloudFormSources)
 	}
 	d.settings.Password = ""
 	d.settings.Passphrase = ""
@@ -201,7 +201,7 @@ func (d *desktop) connect() {
 			d.addSession(term, shell, settings, settings.User+"@"+settings.Host)
 			for _, session := range d.sessions {
 				if session.id == d.currentSession {
-					session.cloudID, session.cloudScope = cloudID, cloudScope
+					session.cloudSources = cloudSources
 					break
 				}
 			}
@@ -527,7 +527,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 		if d.cloudListStale {
 			ui.Text(c, "云端列表需要先刷新后才能同步。").FontSize(12).Wrap()
 		}
-		if d.settingsFromCloud && d.cloudEditingID != "" && d.cloudEditingScope == d.cloud.teamID {
+		if d.formCloudSource() != "" {
 			ui.Text(c, "将更新已载入的云端连接；其他相同地址的连接不会被修改。").FontSize(12).Wrap()
 		} else {
 			ui.Text(c, "将新建云端连接；相同地址不会自动覆盖。").FontSize(12).Wrap()
@@ -538,7 +538,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.16"
+const version = "0.3.17"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

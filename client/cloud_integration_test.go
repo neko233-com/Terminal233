@@ -87,24 +87,18 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	if err != nil || second.ID != "" {
 		t.Fatal("new record selected an existing ID")
 	}
-	if err = client.save(second); err != nil {
-		t.Fatal(err)
-	}
-	both, err := client.list()
-	if err != nil || len(both) != 2 {
-		t.Fatalf("expected two independent records: %v", err)
+	secondID, both, mutationErr, refreshErr := saveCloudAndRefresh(client, second)
+	if mutationErr != nil || refreshErr != nil || secondID == "" || len(both) != 2 {
+		t.Fatalf("expected two independent records: %v %v", mutationErr, refreshErr)
 	}
 	settings.Password = "updated-first"
 	update, err := prepareCloudAccount(settings, "", both, accounts[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = client.save(update); err != nil {
-		t.Fatal(err)
-	}
-	both, err = client.list()
-	if err != nil || len(both) != 2 {
-		t.Fatal("cloud update changed the record count")
+	updatedID, both, mutationErr, refreshErr := saveCloudAndRefresh(client, update)
+	if mutationErr != nil || refreshErr != nil || updatedID != accounts[0].ID || len(both) != 2 {
+		t.Fatal("cloud update changed the record count or ID")
 	}
 	for _, item := range both {
 		if item.ID == accounts[0].ID && item.Password != "updated-first" {

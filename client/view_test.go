@@ -757,7 +757,7 @@ func TestCloudUpdateUsesOnlyExplicitSourceAndScope(t *testing.T) {
 		t.Fatal("cross-team save did not switch to create")
 	}
 	d.currentSession = 1
-	d.sessions = []*workspaceSession{{id: 1, cloudID: "one", cloudScope: "team-one"}}
+	d.sessions = []*workspaceSession{{id: 1, cloudSources: map[string]string{"team-one": "one"}}}
 	if d.currentCloudSource() != "" {
 		t.Fatal("other team's source leaked into current scope")
 	}
@@ -766,7 +766,7 @@ func TestCloudUpdateUsesOnlyExplicitSourceAndScope(t *testing.T) {
 		t.Fatal("explicit session source was lost")
 	}
 	d.clearCloudState()
-	if d.sessions[0].cloudID != "" || d.cloudEditingID != "" {
+	if len(d.sessions[0].cloudSources) != 0 || len(d.cloudFormSources) != 0 {
 		t.Fatal("cloud source survived logout")
 	}
 }

@@ -88,30 +88,54 @@ func (d *desktop) cloudRefresh() {
 		})
 	}()
 }
+func cloneCloudSources(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	clone := make(map[string]string, len(source))
+	for scope, id := range source {
+		clone[scope] = id
+	}
+	return clone
+}
+
 func (d *desktop) currentCloudSource() string {
 	if d.cloud == nil {
 		return ""
 	}
 	for _, session := range d.sessions {
-		if session.id == d.currentSession && session.cloudScope == d.cloud.teamID {
-			return session.cloudID
+		if session.id == d.currentSession {
+			return session.cloudSources[d.cloud.teamID]
 		}
 	}
 	return ""
 }
 
+func (d *desktop) formCloudSource() string {
+	if d.cloud == nil || !d.settingsFromCloud {
+		return ""
+	}
+	return d.cloudFormSources[d.cloud.teamID]
+}
+
 func (d *desktop) cloudSave() {
-	d.saveCloudConnection(d.active, "", d.currentCloudSource())
+	binding := cloudSaveBinding{client: d.cloud, sessionID: d.currentSession, sessionSettings: d.active}
+	if d.cloud != nil {
+		binding.scope = d.cloud.teamID
+		binding.sourceID = d.currentCloudSource()
+	}
+	d.saveCloudConnection(d.active, "", binding.sourceID, binding)
 }
 
 func (d *desktop) cloudSaveForm() {
 	settings := d.settings
 	settings.Fingerprint = d.fingerprint
-	sourceID := ""
-	if d.settingsFromCloud && d.cloud != nil && d.cloudEditingScope == d.cloud.teamID {
-		sourceID = d.cloudEditingID
+	binding := cloudSaveBinding{client: d.cloud, form: true, formSettings: d.settings, formFingerprint: d.fingerprint, formLabel: d.profileLabel, formProfileID: d.selectedProfile, formFromCloud: d.settingsFromCloud}
+	if d.cloud != nil {
+		binding.scope = d.cloud.teamID
+		binding.sourceID = d.formCloudSource()
 	}
-	d.saveCloudConnection(settings, d.profileLabel, sourceID)
+	d.saveCloudConnection(settings, d.profileLabel, binding.sourceID, binding)
 }
 
 // Updates require an explicitly loaded ID; matching an address is not proof
@@ -146,7 +170,7 @@ func prepareCloudAccount(settings connectionSettings, label string, existing []c
 	return cloudAccount{ID: selectedID, Label: label, Host: strings.TrimSpace(settings.Host), Port: port, Username: strings.TrimSpace(settings.User), Password: settings.Password, HostKeyFingerprint: settings.Fingerprint}, nil
 }
 
-func (d *desktop) saveCloudConnection(settings connectionSettings, label, sourceID string) {
+func (d *desktop) saveCloudConnection(settings connectionSettings, label, sourceID string, binding cloudSaveBinding) {
 	if d.busy || d.cloud == nil {
 		return
 	}
@@ -164,9 +188,61 @@ func (d *desktop) saveCloudConnection(settings connectionSettings, label, source
 	d.cloudStatus = "正在加密传输连接信息…"
 	d.status = d.cloudStatus
 	go func() {
-		accounts, mutationErr, refreshErr := mutateAndRefresh(func() error { return client.save(account) }, client.list)
-		d.win.Update(func() { d.busy = false; d.finishCloudSave(accounts, mutationErr, refreshErr) })
+		id, accounts, mutationErr, refreshErr := saveCloudAndRefresh(client, account)
+		d.win.Update(func() {
+			d.busy = false
+			bound := false
+			if mutationErr == nil {
+				bound = d.bindSavedCloudID(binding, id)
+			}
+			d.finishCloudSave(accounts, mutationErr, refreshErr)
+			if mutationErr == nil && !bound {
+				d.cloudStatus += "；当前表单或会话已改变，请从云端列表重新选择以继续更新。"
+				d.status = d.cloudStatus
+			}
+		})
 	}()
+}
+
+// A response may arrive after the user has moved to a different form or
+// session. Bind its ID only to the exact state that initiated the write.
+type cloudSaveBinding struct {
+	client                                    *cloudClient
+	scope                                     string
+	sessionID                                 int
+	sessionSettings                           connectionSettings
+	form                                      bool
+	formSettings                              connectionSettings
+	formFingerprint, formLabel, formProfileID string
+	formFromCloud                             bool
+	sourceID                                  string
+}
+
+func (d *desktop) bindSavedCloudID(binding cloudSaveBinding, id string) bool {
+	if id == "" || d.cloud == nil || d.cloud != binding.client || d.cloud.teamID != binding.scope {
+		return false
+	}
+	if binding.form {
+		if d.settings != binding.formSettings || d.fingerprint != binding.formFingerprint || d.profileLabel != binding.formLabel || d.selectedProfile != binding.formProfileID || d.settingsFromCloud != binding.formFromCloud || d.formCloudSource() != binding.sourceID {
+			return false
+		}
+		if d.cloudFormSources == nil {
+			d.cloudFormSources = make(map[string]string)
+		}
+		d.settingsFromCloud = true
+		d.cloudFormSources[binding.scope] = id
+		return true
+	}
+	for _, session := range d.sessions {
+		if session.id == binding.sessionID && session.active == binding.sessionSettings && session.cloudSources[binding.scope] == binding.sourceID {
+			if session.cloudSources == nil {
+				session.cloudSources = make(map[string]string)
+			}
+			session.cloudSources[binding.scope] = id
+			return true
+		}
+	}
+	return false
 }
 
 func (d *desktop) finishCloudSave(accounts []cloudAccount, mutationErr, refreshErr error) {
@@ -195,9 +271,9 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.profileLabel = account.Label
 	d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
 	d.settingsFromCloud = true
-	d.cloudEditingID, d.cloudEditingScope = account.ID, ""
-	if d.cloud != nil {
-		d.cloudEditingScope = d.cloud.teamID
+	d.cloudFormSources = nil
+	if d.cloud != nil && account.ID != "" {
+		d.cloudFormSources = map[string]string{d.cloud.teamID: account.ID}
 	}
 	d.fingerprint = ""
 	d.changedFingerprint = ""
@@ -372,9 +448,9 @@ func (d *desktop) clearCloudState() {
 	}
 	d.cloudPassword, d.cloudRegistration = "", ""
 	d.cloudRegistrationLocal, d.cloudListStale = false, false
-	d.cloudEditingID, d.cloudEditingScope = "", ""
+	d.cloudFormSources = nil
 	for _, session := range d.sessions {
-		session.cloudID, session.cloudScope = "", ""
+		session.cloudSources = nil
 	}
 	d.cloudStatus, d.teamStatus = "", ""
 	d.accounts, d.teams, d.members, d.teamInvites = nil, nil, nil, nil

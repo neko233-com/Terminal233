@@ -88,6 +88,7 @@ func (d *desktop) openQuickConnection() {
 	}
 	d.settings = settings
 	d.settingsFromCloud = false
+	d.cloudFormSources = nil
 	d.quickConnect, d.profileGroup, d.profileLabel, d.selectedProfile = "", "", "", ""
 	d.fingerprint, d.expectedFingerprint = "", ""
 	d.changedFingerprint = ""

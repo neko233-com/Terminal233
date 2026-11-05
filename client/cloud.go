@@ -130,6 +130,25 @@ func (c *cloudClient) save(a cloudAccount) error {
 	}
 	return c.request(http.MethodPost, c.accountsPath(), a, nil)
 }
+
+// saveReturningID uses the server's exact response ID, avoiding endpoint-based
+// guesses when several credentials have the same address.
+func (c *cloudClient) saveReturningID(a cloudAccount) (string, error) {
+	if c.token == "" {
+		return "", errors.New("请先登录同步服务")
+	}
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := c.request(http.MethodPost, c.accountsPath(), a, &result); err != nil {
+		return "", err
+	}
+	if result.ID == "" || len(result.ID) > 128 || strings.ContainsAny(result.ID, "/\\\x00") || (a.ID != "" && result.ID != a.ID) {
+		return "", errors.New("服务未返回可确认的连接编号")
+	}
+	return result.ID, nil
+}
+
 func (c *cloudClient) logout() error {
 	if c.token == "" {
 		return nil

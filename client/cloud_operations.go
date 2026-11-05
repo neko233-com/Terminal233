@@ -1,5 +1,7 @@
 package main
 
+import "errors"
+
 // mutateAndRefresh keeps the server mutation result separate from a later
 // read: a failed refresh must never be reported as a failed write.
 func mutateAndRefresh[T any](mutate func() error, refresh func() (T, error)) (T, error, error) {
@@ -28,4 +30,25 @@ func loadCloudInitialState(c *cloudClient, selectSoleTeam bool) cloudInitialStat
 	}
 	state.accounts, state.accountErr = c.list()
 	return state
+}
+
+func saveCloudAndRefresh(c *cloudClient, account cloudAccount) (string, []cloudAccount, error, error) {
+	id, mutationErr := c.saveReturningID(account)
+	if mutationErr != nil {
+		return "", nil, mutationErr, nil
+	}
+	accounts, refreshErr := c.list()
+	if refreshErr == nil {
+		found := false
+		for _, account := range accounts {
+			if account.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			refreshErr = errors.New("服务确认的连接未出现在刷新结果中")
+		}
+	}
+	return id, accounts, nil, refreshErr
 }
