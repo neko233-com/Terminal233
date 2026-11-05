@@ -299,14 +299,23 @@ func (d *desktop) view(c *ui.Context) {
 			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
 				if d.workspace == "terminal" {
+					closeSessionID := 0
 					ui.ScrollHorizontal(c).FillWidth().Padding(8, 12).Gap(6).Children(func() {
 						for _, session := range d.sessions {
 							s := session
-							if workspaceButton(c, fmt.Sprintf("session-%d", s.id), s.label, s.id == d.currentSession).Disabled(d.busy).Clicked() {
-								d.activateSession(s.id)
-							}
+							ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
+								if workspaceButton(c, fmt.Sprintf("session-%d", s.id), s.label, s.id == d.currentSession).Disabled(d.busy).Clicked() {
+									d.activateSession(s.id)
+								}
+								if ui.Button(c.Key(fmt.Sprintf("session-close-%d", s.id)), "×").Label("关闭会话：" + s.label).Disabled(d.busy).Clicked() {
+									closeSessionID = s.id
+								}
+							})
 						}
 					})
+					if closeSessionID != 0 {
+						d.closeSession(closeSessionID)
+					}
 					ui.Row(c).FillWidth().Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 						ui.Text(c, "终端").FontSize(17).Bold().Grow(1)
 						ui.Text(c, d.status).FontSize(12).TextColor(t.TextMuted)

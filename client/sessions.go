@@ -75,15 +75,23 @@ func (d *desktop) addSession(term *terminal.Terminal, shell *remoteShell, active
 }
 
 func (d *desktop) closeCurrentSession() {
+	d.closeSession(d.currentSession)
+}
+
+func (d *desktop) closeSession(id int) {
 	if d.busy {
 		return
 	}
 	for i, s := range d.sessions {
-		if s.id != d.currentSession {
+		if s.id != id {
 			continue
 		}
 		_ = s.term.Close()
 		d.sessions = append(d.sessions[:i], d.sessions[i+1:]...)
+		if id != d.currentSession {
+			d.status = "已关闭会话：" + s.label
+			return
+		}
 		d.currentSession = 0
 		d.term, d.shell, d.active = nil, nil, connectionSettings{}
 		d.files, d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile, d.confirmDelete = nil, "", "", "", "", ""

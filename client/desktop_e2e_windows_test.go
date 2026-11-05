@@ -239,6 +239,19 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "当前会话：本机终端 2") {
 		t.Fatalf("failed to switch terminal tabs: %s", tree)
 	}
+	// Closing an inactive tab must not switch or close the active shell.
+	call("act", map[string]any{"key": "session-close-1", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if !strings.Contains(tree, "session-1") && strings.Contains(tree, "session-2") && strings.Contains(tree, "已关闭会话：") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if strings.Contains(tree, "session-1") || !strings.Contains(tree, "session-2") || !strings.Contains(tree, "session-3") {
+		t.Fatalf("closing inactive SSH tab changed other sessions: %s", tree)
+	}
 	call("act", map[string]any{"key": "disconnect", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -250,18 +263,6 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if !strings.Contains(tree, "已关闭会话；当前：本机终端 3") {
 		t.Fatalf("closing one tab lost the remaining session: %s", tree)
-	}
-	call("act", map[string]any{"key": "disconnect", "action": "press"})
-	deadline = time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "session-1") && !strings.Contains(tree, "session-3") && strings.Contains(tree, "已关闭会话；当前：") {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if !strings.Contains(tree, "session-1") || strings.Contains(tree, "session-3") {
-		t.Fatalf("SSH session disappeared or local tab remained: %s", tree)
 	}
 	call("act", map[string]any{"key": "disconnect", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
