@@ -20,6 +20,11 @@ type workspaceSession struct {
 	fileDir, fileLocal, fileStatus, selectedFile string
 	fileFilter                                   string
 	files                                        []remoteFile
+	refreshPending                               bool
+}
+
+func (d *desktop) canSwitchSession() bool {
+	return !d.busy || d.cancelTransfer != nil
 }
 
 func (d *desktop) saveSessionState() {
@@ -35,7 +40,7 @@ func (d *desktop) saveSessionState() {
 }
 
 func (d *desktop) activateSession(id int) {
-	if d.busy {
+	if !d.canSwitchSession() {
 		return
 	}
 	for _, s := range d.sessions {
@@ -50,6 +55,11 @@ func (d *desktop) activateSession(id int) {
 		d.files, d.confirmDelete = s.files, ""
 		d.workspace = "terminal"
 		d.status = "当前会话：" + s.label
+		if s.refreshPending && d.term != nil && !d.busy && d.win != nil {
+			s.refreshPending = false
+			d.refreshFiles()
+			return
+		}
 		if d.showFilePanel && d.term != nil && d.shell == nil && d.files == nil && d.fileStatus == "" && d.win != nil {
 			d.refreshFiles()
 		}

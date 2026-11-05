@@ -21,6 +21,29 @@ import (
 )
 
 func testSSHServer(t *testing.T, authorized ...ssh.PublicKey) (connectionSettings, string, *atomic.Int32) {
+	return testSSHServerWithSlowSFTP(t, nil, authorized...)
+}
+
+type slowSFTPStream struct {
+	io.ReadWriteCloser
+	slow *atomic.Bool
+}
+
+func (s *slowSFTPStream) Read(p []byte) (int, error) {
+	if s.slow.Load() {
+		time.Sleep(25 * time.Millisecond)
+	}
+	return s.ReadWriteCloser.Read(p)
+}
+
+func (s *slowSFTPStream) Write(p []byte) (int, error) {
+	if s.slow.Load() {
+		time.Sleep(25 * time.Millisecond)
+	}
+	return s.ReadWriteCloser.Write(p)
+}
+
+func testSSHServerWithSlowSFTP(t *testing.T, slow *atomic.Bool, authorized ...ssh.PublicKey) (connectionSettings, string, *atomic.Int32) {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -89,7 +112,11 @@ func testSSHServer(t *testing.T, authorized ...ssh.PublicKey) (connectionSetting
 									continue
 								}
 								_ = req.Reply(true, nil)
-								srv, err := sftp.NewServer(channel)
+								var stream io.ReadWriteCloser = channel
+								if slow != nil {
+									stream = &slowSFTPStream{ReadWriteCloser: channel, slow: slow}
+								}
+								srv, err := sftp.NewServer(stream)
 								if err == nil {
 									_ = srv.Serve()
 									_ = srv.Close()

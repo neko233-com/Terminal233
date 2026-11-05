@@ -20,6 +20,35 @@ func TestTransferCancellationIsAvailableWhileBusy(t *testing.T) {
 	}
 }
 
+func TestBackgroundTransferKeepsItsSessionState(t *testing.T) {
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &desktop{
+		workspace: "terminal", busy: true, cancelTransfer: cancel, transferSessionID: 1,
+		currentSession: 1, fileDir: "/one", fileStatus: "正在传输…",
+		sessions: []*workspaceSession{{id: 1, label: "one", fileDir: "/one", files: []remoteFile{{Name: "before"}}}, {id: 2, label: "two", fileDir: "/two", fileStatus: "第二个会话"}},
+	}
+	view := ui.NewTester(d.view, 1200, 900)
+	if err := view.Click("two"); err != nil {
+		t.Fatal(err)
+	}
+	if d.currentSession != 2 || d.fileStatus != "第二个会话" {
+		t.Fatal("could not switch to the other session during transfer")
+	}
+	d.transferProgress(1, nil, "/one", 2048)
+	if d.sessions[0].fileStatus != "正在传输，已读取 2.0 KiB" || d.fileStatus != "第二个会话" {
+		t.Fatal("background progress changed the wrong session")
+	}
+	d.finishTransfer(1, nil, "/one", true, nil)
+	if d.busy || d.cancelTransfer != nil || d.sessions[0].fileStatus != "传输完成" || !d.sessions[0].refreshPending || d.fileStatus != "第二个会话" {
+		t.Fatal("background result did not remain with its original session")
+	}
+	d.activateSession(1)
+	if d.fileStatus != "传输完成" || d.files != nil {
+		t.Fatal("returning to the transfer session lost its result or retained stale files")
+	}
+}
+
 func TestNativeViewLoadsSyncedAccountWithoutTrustingIt(t *testing.T) {
 	d := &desktop{settings: connectionSettings{Port: "22"}, accounts: []cloudAccount{{ID: "test", Label: "示例服务器", Host: "example.test", Port: 22, Username: "alice", Password: "secret", HostKeyFingerprint: "SHA256:old"}}}
 	test := ui.NewTester(d.view, 1200, 3200)

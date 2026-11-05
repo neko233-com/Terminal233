@@ -67,6 +67,61 @@ func (d *desktop) refreshFiles() {
 		})
 	}()
 }
+
+func (d *desktop) transferProgress(sessionID int, shell *remoteShell, dir string, read int64) {
+	status := "正在传输，已读取 " + fileSizeLabel(remoteFile{Size: read})
+	if sessionID == d.currentSession {
+		if shell == d.shell && dir == d.fileDir {
+			d.fileStatus = status
+		}
+		return
+	}
+	for _, session := range d.sessions {
+		if session.id == sessionID && session.shell == shell && session.fileDir == dir {
+			session.fileStatus = status
+			return
+		}
+	}
+}
+
+func (d *desktop) finishTransfer(sessionID int, shell *remoteShell, dir string, upload bool, err error) {
+	d.busy = false
+	d.cancelTransfer = nil
+	d.transferSessionID = 0
+	status := "传输完成"
+	if errors.Is(err, context.Canceled) {
+		status = "传输已取消；未完成的目标文件已清理"
+	} else if err != nil {
+		status = "传输失败：" + err.Error()
+	}
+	if sessionID == d.currentSession && shell == d.shell {
+		if dir != d.fileDir {
+			d.fileStatus = "先前目录的" + status + "；当前目录未更改"
+			return
+		}
+		d.fileStatus = status
+		if upload && err == nil && d.win != nil {
+			d.refreshFiles()
+		}
+		return
+	}
+	for _, session := range d.sessions {
+		if session.id != sessionID || session.shell != shell {
+			continue
+		}
+		if dir != session.fileDir {
+			session.fileStatus = "先前目录的" + status + "；当前目录未更改"
+		} else {
+			session.fileStatus = status
+			if upload && err == nil {
+				session.files = nil
+				session.refreshPending = true
+			}
+		}
+		return
+	}
+}
+
 func (d *desktop) transfer(upload bool) {
 	if d.busy || d.term == nil || d.fileLocal == "" {
 		return
@@ -79,12 +134,13 @@ func (d *desktop) transfer(upload bool) {
 	d.fileStatus = "正在传输…"
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancelTransfer = cancel
+	d.transferSessionID = sessionID
 	go func() {
 		defer cancel()
 		progress := func(read int64) {
 			d.win.Update(func() {
-				if ctx.Err() == nil && d.cancelTransfer != nil && sessionID == d.currentSession && shell == d.shell && dir == d.fileDir {
-					d.fileStatus = "正在传输，已读取 " + fileSizeLabel(remoteFile{Size: read})
+				if ctx.Err() == nil && d.cancelTransfer != nil && d.transferSessionID == sessionID {
+					d.transferProgress(sessionID, shell, dir, read)
 				}
 			})
 		}
@@ -107,31 +163,7 @@ func (d *desktop) transfer(upload bool) {
 			err = downloadFileContext(ctx, shell, path.Join(dir, selected), local, progress)
 		}
 		d.win.Update(func() {
-			d.busy = false
-			d.cancelTransfer = nil
-			if sessionID != d.currentSession || shell != d.shell {
-				return
-			}
-			if dir != d.fileDir {
-				if err != nil {
-					d.fileStatus = "先前目录的传输失败：" + err.Error()
-				} else {
-					d.fileStatus = "先前目录的传输已完成；当前目录已改变，请刷新"
-				}
-				return
-			}
-			if errors.Is(err, context.Canceled) {
-				d.fileStatus = "传输已取消；未完成的目标文件已清理"
-				return
-			}
-			if err != nil {
-				d.fileStatus = fmt.Sprintf("传输失败：%v", err)
-				return
-			}
-			d.fileStatus = "传输完成"
-			if upload {
-				d.refreshFiles()
-			}
+			d.finishTransfer(sessionID, shell, dir, upload, err)
 		})
 	}()
 }
@@ -321,9 +353,19 @@ func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {
 		if ui.Button(c.Key("delete"), deleteShort).Label("删除选中文件（需确认）").Disabled(d.busy || d.term == nil || d.selectedFile == "").Clicked() {
 			d.removeSelected()
 		}
-		if d.cancelTransfer != nil && ui.Button(c.Key("cancel-transfer"), "取消传输").Clicked() {
-			d.cancelTransfer()
-			d.fileStatus = "正在取消传输…"
+		if d.cancelTransfer != nil {
+			cancelLabel := "取消传输"
+			if d.transferSessionID != d.currentSession {
+				cancelLabel = "取消后台传输"
+			}
+			if ui.Button(c.Key("cancel-transfer"), cancelLabel).Clicked() {
+				d.cancelTransfer()
+				if d.transferSessionID == d.currentSession {
+					d.fileStatus = "正在取消传输…"
+				} else {
+					d.status = "正在取消后台传输…"
+				}
+			}
 		}
 	})
 	ui.Text(c, d.fileStatus).FontSize(12)

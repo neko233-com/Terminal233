@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -120,7 +121,8 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings, fingerprint, attempts := testSSHServer(t, authorizedKey)
+	var slowSFTP atomic.Bool
+	settings, fingerprint, attempts := testSSHServerWithSlowSFTP(t, &slowSFTP, authorizedKey)
 	for key, value := range map[string]string{"host": settings.Host, "port": settings.Port, "user": settings.User, "password": settings.Password} {
 		call("act", map[string]any{"key": key, "action": "setValue", "text": value})
 	}
@@ -250,6 +252,129 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if !strings.Contains(tree, "session-1") || !strings.Contains(tree, "session-2") || !strings.Contains(tree, "session-3") {
 		t.Fatalf("multiple terminal tabs missing: %s", tree)
+	}
+	// Run a deliberately slowed, isolated SFTP upload while switching to a
+	// different terminal, then cancel it from that other session.
+	transferDir := t.TempDir()
+	transferSource := filepath.Join(t.TempDir(), "background.bin")
+	if err = os.WriteFile(transferSource, make([]byte, 2<<20), 0600); err != nil {
+		t.Fatal(err)
+	}
+	call("act", map[string]any{"key": "session-1", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "当前会话：alice@") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "当前会话：alice@") {
+		t.Fatalf("could not activate SSH tab for transfer: %s", tree)
+	}
+	call("act", map[string]any{"key": "nav-files", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "key:remote-dir") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "remote-dir", "action": "setValue", "text": filepath.ToSlash(transferDir)})
+	call("act", map[string]any{"key": "local-file", "action": "setValue", "text": transferSource})
+	slowSFTP.Store(true)
+	call("act", map[string]any{"key": "upload", "action": "press"})
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "cancel-transfer") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "cancel-transfer") {
+		t.Fatalf("slow transfer did not start: %s", tree)
+	}
+	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "session-2") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "session-2", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "当前会话：本机终端 2") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "当前会话：本机终端 2") {
+		t.Fatalf("could not switch during transfer: %s", tree)
+	}
+	call("act", map[string]any{"key": "nav-files", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "取消后台传输") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "取消后台传输") {
+		t.Fatalf("background cancel action missing: %s", tree)
+	}
+	call("act", map[string]any{"key": "cancel-transfer", "action": "press"})
+	deadline = time.Now().Add(12 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if !strings.Contains(tree, "cancel-transfer") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	slowSFTP.Store(false)
+	if strings.Contains(tree, "cancel-transfer") {
+		t.Fatalf("background cancellation did not finish: %s", tree)
+	}
+	if _, err = os.Stat(filepath.Join(transferDir, "background.bin")); !os.IsNotExist(err) {
+		t.Fatalf("background cancellation left an output file: %v", err)
+	}
+	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "session-1") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "session-1", "action": "press"})
+	call("act", map[string]any{"key": "nav-files", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "传输已取消") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "传输已取消") {
+		t.Fatalf("cancelled result was not kept on the original session: %s", tree)
+	}
+	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "session-2") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	call("act", map[string]any{"key": "session-2", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)

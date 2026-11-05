@@ -61,6 +61,7 @@ type desktop struct {
 	fingerprint, status                                                                     string
 	busy                                                                                    bool
 	cancelTransfer                                                                          context.CancelFunc
+	transferSessionID                                                                       int
 	term                                                                                    *terminal.Terminal
 	active                                                                                  connectionSettings
 	cloud                                                                                   *cloudClient
@@ -310,7 +311,7 @@ func (d *desktop) view(c *ui.Context) {
 						for _, session := range d.sessions {
 							s := session
 							ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
-								if workspaceButton(c, fmt.Sprintf("session-%d", s.id), s.label, s.id == d.currentSession).Disabled(d.busy).Clicked() {
+								if workspaceButton(c, fmt.Sprintf("session-%d", s.id), s.label, s.id == d.currentSession).Disabled(!d.canSwitchSession()).Clicked() {
 									d.activateSession(s.id)
 								}
 								if ui.Button(c.Key(fmt.Sprintf("session-close-%d", s.id)), "×").Label("关闭会话：" + s.label).Disabled(d.busy).Clicked() {
@@ -329,7 +330,7 @@ func (d *desktop) view(c *ui.Context) {
 						if d.showFilePanel {
 							label = "收起文件面板"
 						}
-						if ui.Button(c.Key("toggle-file-panel"), label).Disabled(d.term == nil || d.busy).Clicked() {
+						if ui.Button(c.Key("toggle-file-panel"), label).Disabled(d.term == nil || !d.canSwitchSession()).Clicked() {
 							d.showFilePanel = !d.showFilePanel
 							if d.showFilePanel && d.shell == nil && d.files == nil {
 								d.refreshFiles()
