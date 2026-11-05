@@ -218,18 +218,8 @@ func (d *desktop) profileView(c *ui.Context) {
 				if menu.Item("载入").Chosen() {
 					d.loadProfile(p)
 				}
-				if menu.Item("移除").Chosen() {
-					for i, current := range d.profiles {
-						if current.ID == p.ID {
-							d.profiles = append(d.profiles[:i], d.profiles[i+1:]...)
-							break
-						}
-					}
-					if err := d.saveProfiles(); err != nil {
-						d.status = "连接已移除，但本机保存失败：" + err.Error()
-					} else {
-						d.status = "连接已移除"
-					}
+				if menu.Item("移除…").Chosen() {
+					d.confirmProfileDelete = p.ID
 				}
 			})
 			if row.Clicked() {
@@ -247,6 +237,45 @@ func (d *desktop) profileView(c *ui.Context) {
 				d.loadProfile(p)
 			}
 		})
+		if d.confirmProfileDelete == p.ID {
+			if d.confirmProfileDelete != "" {
+				var pending *profile
+				for i := range d.profiles {
+					if d.profiles[i].ID == d.confirmProfileDelete {
+						pending = &d.profiles[i]
+						break
+					}
+				}
+				if pending == nil {
+					d.confirmProfileDelete = ""
+				} else {
+					ui.Text(c, "确定移除连接："+pending.Label+"？").Wrap()
+					ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+						if ui.Button(c.Key("profile-delete-confirm"), "确认移除连接").Disabled(d.busy).Clicked() {
+							id := d.confirmProfileDelete
+							d.confirmProfileDelete = ""
+							for i := range d.profiles {
+								if d.profiles[i].ID == id {
+									d.profiles = append(d.profiles[:i], d.profiles[i+1:]...)
+									break
+								}
+							}
+							if d.selectedProfile == string(id) {
+								d.selectedProfile = ""
+							}
+							if err := d.saveProfiles(); err != nil {
+								d.status = "连接已移除，但本机保存失败：" + err.Error()
+							} else {
+								d.status = "连接已移除"
+							}
+						}
+						if ui.Button(c.Key("profile-delete-cancel"), "取消移除").Clicked() {
+							d.confirmProfileDelete = ""
+						}
+					})
+				}
+			}
+		}
 	}
 	if len(d.profiles) > 0 && shown == 0 {
 		ui.Text(c, "没有匹配的连接").TextColor(c.Theme().TextMuted)

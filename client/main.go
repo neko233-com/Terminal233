@@ -36,6 +36,7 @@ type desktop struct {
 	confirmCloudDelete                                                                      string
 	profiles                                                                                []profile
 	profileSearch, profileGroup, selectedProfile                                            string
+	confirmProfileDelete                                                                    profileID
 	profileLabel                                                                            string
 	profileFilter                                                                           string
 	profileFavorites                                                                        bool

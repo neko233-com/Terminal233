@@ -40,7 +40,25 @@ func TestConnectionListSearchAndContextMenu(t *testing.T) {
 	if err := test.RightClick("工作 / alice@one.test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := test.ChooseMenuItem("移除"); err != nil {
+	if err := test.ChooseMenuItem("移除…"); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.profiles) != 2 || !test.HasText("确定移除连接：alice@one.test？") {
+		t.Fatal("remove was not awaiting confirmation")
+	}
+	if err := test.Click("取消移除"); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.profiles) != 2 || d.confirmProfileDelete != "" {
+		t.Fatal("cancel did not preserve the connection")
+	}
+	if err := test.RightClick("工作 / alice@one.test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := test.ChooseMenuItem("移除…"); err != nil {
+		t.Fatal(err)
+	}
+	if err := test.Click("确认移除连接"); err != nil {
 		t.Fatal(err)
 	}
 	if len(d.profiles) != 1 || d.profiles[0].Settings.Host != "two.test" {

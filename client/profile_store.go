@@ -27,6 +27,7 @@ type diskProfiles struct {
 func (d *desktop) loadProfiles(path string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		d.confirmProfileDelete = ""
 		d.profiles, d.nextProfileID = nil, 0
 		d.profilePath = path
 		d.profileExists = false
@@ -56,6 +57,7 @@ func (d *desktop) loadProfiles(path string) error {
 		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Group: p.Group, Label: p.Label, Favorite: p.Favorite, LastConnected: p.LastConnected, Settings: settings})
 	}
 	d.profiles, d.nextProfileID, d.profilePath = profiles, len(profiles), path
+	d.confirmProfileDelete = ""
 	d.profileExists, d.profileRevision = true, sha256.Sum256(data)
 	d.profileStoreConflict = false
 	return nil
