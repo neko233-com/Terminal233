@@ -20,6 +20,7 @@ type desktop struct {
 	lightTheme                                                                              bool
 	terminalFontSize                                                                        int
 	terminalTheme                                                                           string
+	splitLayout                                                                             string
 	terminalLightTheme, terminalDarkTheme                                                   *terminal.Theme
 	showFilePanel                                                                           bool
 	sidebarCollapsed                                                                        bool
@@ -328,6 +329,11 @@ func (d *desktop) view(c *ui.Context) {
 						if ui.Select(c.Key("terminal-theme"), &selectedTheme, terminalThemeLabels()).Label("选择终端配色").FillWidth().Changed() {
 							d.changeTerminalTheme(terminalThemeID(selectedTheme))
 						}
+						ui.Text(c, "终端分屏布局").FontSize(12).TextColor(t.TextMuted)
+						layout := splitLayoutLabel(d.splitLayout)
+						if ui.Select(c.Key("split-layout"), &layout, []string{"自动布局", "左右分屏", "上下分屏"}).Label("选择分屏布局").FillWidth().Changed() {
+							d.changeSplitLayout(splitLayoutID(layout))
+						}
 						ui.Text(c, "连接").FontSize(12).TextColor(t.TextMuted)
 						connectionCount := len(d.profiles) + 1
 						if d.cloud != nil {
@@ -614,7 +620,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.33"
+const version = "0.3.34"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

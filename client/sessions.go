@@ -250,11 +250,11 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 		}
 		return
 	}
-	stacked := width < 1100 || (d.showFilePanel && width < 1450)
+	stacked := d.splitLayout == "stacked" || (d.splitLayout == "" && (width < 1100 || (d.showFilePanel && width < 1450)))
 	// Two vertically stacked terminals become too short in a shallow window.
 	// Keep both usable side by side until there is enough vertical space.
 	_, height := c.Size()
-	if height < 650 {
+	if height < 650 && d.splitLayout == "" {
 		stacked = false
 	}
 	focusedID := 0
@@ -319,6 +319,43 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 		d.splitFocusedSession = 0
 	} else {
 		d.splitFocusedSession = focusedID
+	}
+}
+
+func splitLayoutLabel(layout string) string {
+	switch layout {
+	case "side":
+		return "左右分屏"
+	case "stacked":
+		return "上下分屏"
+	default:
+		return "自动布局"
+	}
+}
+
+func splitLayoutID(label string) string {
+	switch label {
+	case "左右分屏":
+		return "side"
+	case "上下分屏":
+		return "stacked"
+	default:
+		return ""
+	}
+}
+
+func (d *desktop) changeSplitLayout(layout string) {
+	if layout != "" && layout != "side" && layout != "stacked" {
+		return
+	}
+	d.splitLayout = layout
+	if d.preferencesPath == "" {
+		return
+	}
+	if err := updatePreferences(d.preferencesPath, func(p *workspacePreferences) error { p.SplitLayout = layout; return nil }); err != nil {
+		d.preferencesStatus = "界面设置未保存：" + err.Error()
+	} else {
+		d.preferencesStatus = ""
 	}
 }
 

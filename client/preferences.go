@@ -18,6 +18,7 @@ type workspacePreferences struct {
 	ShowFiles        bool   `json:"show_files"`
 	TerminalFontSize int    `json:"terminal_font_size"`
 	TerminalTheme    string `json:"terminal_theme,omitempty"`
+	SplitLayout      string `json:"split_layout,omitempty"`
 }
 
 func readPreferences(path string) (workspacePreferences, error) {
@@ -44,6 +45,9 @@ func readPreferences(path string) (workspacePreferences, error) {
 	if !validTerminalTheme(p.TerminalTheme) {
 		return p, errors.New("终端配色无效")
 	}
+	if p.SplitLayout != "" && p.SplitLayout != "side" && p.SplitLayout != "stacked" {
+		return p, errors.New("分屏布局无效")
+	}
 	return p, nil
 }
 
@@ -55,6 +59,7 @@ func (d *desktop) loadPreferences(path string) error {
 	}
 	d.lightTheme, d.sidebarCollapsed, d.showFilePanel = p.Light, p.SidebarCollapsed, p.ShowFiles
 	d.terminalFontSize = p.TerminalFontSize
+	d.splitLayout = p.SplitLayout
 	light, dark, err := terminalThemePair(p.TerminalTheme)
 	if err != nil {
 		return err

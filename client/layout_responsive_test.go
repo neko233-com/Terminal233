@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"path/filepath"
 	"testing"
 
 	"github.com/egoist/mygo/plugins/terminal"
@@ -33,6 +34,55 @@ func TestTerminalRemainsVisibleWithPanelsAtMinimumWindow(t *testing.T) {
 	filter, ok := view.Find("搜索快速命令")
 	if !ok || filter.Y+filter.H/2 < panel.Y || filter.Y+filter.H/2 > panel.Y+panel.H {
 		t.Fatalf("quick-command controls cannot be reached by scrolling: panel=%+v filter=%+v", panel, filter)
+	}
+}
+
+func TestSplitLayoutChoiceAndPersistence(t *testing.T) {
+	firstConn, firstPeer := net.Pipe()
+	defer firstPeer.Close()
+	secondConn, secondPeer := net.Pipe()
+	defer secondPeer.Close()
+	first, err := terminal.New(terminal.Options{Conn: firstConn, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := terminal.New(terminal.Options{Conn: secondConn, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	d := &desktop{workspace: "terminal", term: first, currentSession: 1, splitSession: 2, splitFirstSession: 1, sessions: []*workspaceSession{{id: 1, label: "first", term: first}, {id: 2, label: "second", term: second}}}
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	if err := d.loadPreferences(path); err != nil {
+		t.Fatal(err)
+	}
+	view := ui.NewTester(d.view, 1500, 900)
+	for _, tc := range []struct {
+		label, id string
+		stacked   bool
+	}{{"上下分屏", "stacked", true}, {"左右分屏", "side", false}} {
+		if err := view.Click("选择分屏布局"); err != nil {
+			t.Fatal(err)
+		}
+		if err := view.Click(tc.label); err != nil {
+			t.Fatal(err)
+		}
+		a, oka := view.Find("终端：first")
+		b, okb := view.Find("终端：second")
+		if !oka || !okb || d.splitLayout != tc.id {
+			t.Fatalf("layout %s not applied", tc.label)
+		}
+		if tc.stacked && b.Y < a.Y+a.H-1 {
+			t.Fatalf("panes not stacked: %+v %+v", a, b)
+		}
+		if !tc.stacked && b.X < a.X+a.W-1 {
+			t.Fatalf("panes not side by side: %+v %+v", a, b)
+		}
+		restored := &desktop{}
+		if err := restored.loadPreferences(path); err != nil || restored.splitLayout != tc.id {
+			t.Fatalf("layout not persisted: %v", err)
+		}
 	}
 }
 
