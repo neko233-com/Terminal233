@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -105,5 +106,43 @@ func TestFailedCurrentScopeRefreshDisablesWrites(t *testing.T) {
 	d.finishCloudScopeSelection("team", cloudScopeState{accountErr: errors.New("failed")})
 	if !d.teamListStale || !d.cloudListStale || d.canWriteCloudScope() {
 		t.Fatal("failed current scope refresh left writes enabled")
+	}
+}
+
+func TestRevokedTeamDropsCachedScopeAndRequiresPersonalRefresh(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		d := &desktop{cloud: &cloudClient{teamID: "team"}, settingsFromCloud: true, settings: connectionSettings{Password: "secret"}, cloudFormSources: map[string]string{"team": "account"}, accounts: []cloudAccount{{ID: "account", Password: "secret"}}, selectedCloudProfile: "account", members: []cloudTeamMember{{Username: "bob"}}, confirmCloudDelete: "account", teamInviteURL: "sensitive"}
+		var teams []cloudTeam
+		if disabled {
+			teams = []cloudTeam{{ID: "team", Disabled: true}}
+		}
+		d.finishTeamRefresh(teams, nil)
+		if d.cloud.teamID != "" || !d.cloudListStale || len(d.accounts) != 0 || len(d.members) != 0 || d.selectedCloudProfile != "" || d.confirmCloudDelete != "" || d.teamInviteURL != "" || d.settings.Password != "" || d.settingsFromCloud {
+			t.Fatalf("revoked scope remained available: %+v", d)
+		}
+		if d.teamListStale || !strings.Contains(d.teamStatus, "请刷新个人连接") {
+			t.Fatal("recovery path not shown")
+		}
+	}
+	d := &desktop{cloud: &cloudClient{teamID: "team"}, accounts: []cloudAccount{{ID: "old", Password: "secret"}}}
+	d.finishTeamOperation("join", "", nil, nil, nil)
+	if d.cloud.teamID != "" || !d.cloudListStale || len(d.accounts) != 0 {
+		t.Fatal("team refresh after mutation did not clear revoked scope")
+	}
+}
+
+func TestCloudRefreshFailureInvalidatesCachedTeamPermissions(t *testing.T) {
+	d := &desktop{cloud: &cloudClient{teamID: "team"}, teams: []cloudTeam{{ID: "team", Role: "admin"}}, accounts: []cloudAccount{{ID: "old"}}}
+	d.finishCloudRefresh(nil, errors.New("network error"))
+	if !d.cloudListStale || !d.teamListStale || d.canWriteCloudScope() || len(d.accounts) != 1 {
+		t.Fatal("failed refresh did not mark cached data stale")
+	}
+	d.finishTeamRefresh([]cloudTeam{{ID: "team", Role: "admin"}}, nil)
+	if d.teamListStale || !d.cloudListStale {
+		t.Fatal("team refresh incorrectly validated account list")
+	}
+	d.finishCloudRefresh([]cloudAccount{{ID: "fresh"}}, nil)
+	if d.cloudListStale || !d.canWriteCloudScope() || len(d.accounts) != 1 || d.accounts[0].ID != "fresh" {
+		t.Fatal("independent refreshes did not restore state")
 	}
 }

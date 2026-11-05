@@ -79,8 +79,7 @@ func (d *desktop) finishTeamOperation(action, inviteURL string, teams []cloudTea
 		d.teamStatus += " 团队列表刷新失败，请手动刷新：" + refreshErr.Error()
 		return
 	}
-	d.teams = teams
-	d.teamListStale = false
+	d.applyRefreshedTeams(teams)
 }
 
 func (d *desktop) selectTeam(id string) {
@@ -198,8 +197,36 @@ func (d *desktop) finishTeamRefresh(teams []cloudTeam, err error) {
 		d.teamStatus = "团队列表刷新失败，请重试：" + err.Error()
 		return
 	}
-	d.teams, d.teamListStale = teams, false
+	if d.applyRefreshedTeams(teams) {
+		return
+	}
 	d.teamStatus = "团队列表已刷新"
+}
+
+// Returns true when the previous team scope was revoked or disabled.
+func (d *desktop) applyRefreshedTeams(teams []cloudTeam) bool {
+	d.teams, d.teamListStale = teams, false
+	if d.cloud != nil && d.cloud.teamID != "" {
+		oldScope, accessible := d.cloud.teamID, false
+		for _, team := range teams {
+			if team.ID == oldScope && !team.Disabled {
+				accessible = true
+				break
+			}
+		}
+		if !accessible {
+			if d.settingsFromCloud && d.cloudFormSources[oldScope] != "" {
+				d.settings.Password, d.settings.Passphrase, d.settingsFromCloud = "", "", false
+				d.cloudFormSources = nil
+			}
+			d.applyCloudScope("", nil, nil)
+			d.cloudListStale = true
+			d.teamStatus = "当前团队已不可用，已切换到个人空间；请刷新个人连接。"
+			d.cloudStatus = d.teamStatus
+			return true
+		}
+	}
+	return false
 }
 func (d *desktop) removeMember() {
 	if d.busy || !d.canManageSelectedMember() || d.confirmMember == "" || d.confirmMember != d.selectedMember {

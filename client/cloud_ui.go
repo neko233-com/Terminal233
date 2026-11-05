@@ -78,17 +78,22 @@ func (d *desktop) cloudRefresh() {
 		accounts, err := client.list()
 		d.win.Update(func() {
 			d.busy = false
-			if err != nil {
-				d.cloudStatus = err.Error()
-				return
-			}
-			d.accounts = accounts
-			d.selectedCloudProfile = ""
-			d.cloudListStale = false
-			d.confirmCloudDelete = ""
-			d.cloudStatus = "已刷新连接列表"
+			d.finishCloudRefresh(accounts, err)
 		})
 	}()
+}
+
+func (d *desktop) finishCloudRefresh(accounts []cloudAccount, err error) {
+	if err != nil {
+		d.cloudListStale = true
+		if d.cloud != nil && d.cloud.teamID != "" {
+			d.teamListStale = true
+		}
+		d.cloudStatus = "连接列表刷新失败，请重试：" + err.Error()
+		return
+	}
+	d.accounts, d.selectedCloudProfile, d.cloudListStale, d.confirmCloudDelete = accounts, "", false, ""
+	d.cloudStatus = "已刷新连接列表"
 }
 func cloneCloudSources(source map[string]string) map[string]string {
 	if source == nil {
