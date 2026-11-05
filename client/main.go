@@ -92,6 +92,25 @@ func workspaceButton(c *ui.Context, key, label string, active bool) ui.Element {
 	return ui.Button(c.Key(key), label)
 }
 
+func (d *desktop) workspaceShortcuts(c *ui.Context) {
+	mods := ui.Cmd | ui.Shift
+	switch {
+	case c.Shortcut(mods, ui.Key1):
+		d.workspace, d.editConnection = "connections", false
+	case c.Shortcut(mods, ui.Key2):
+		d.workspace = "terminal"
+	case c.Shortcut(mods, ui.Key3):
+		d.workspace = "files"
+		if d.term != nil && d.shell == nil && d.files == nil && !d.busy {
+			d.refreshFiles()
+		}
+	case c.Shortcut(mods, ui.Key4):
+		d.workspace = "cloud"
+	case c.Shortcut(mods, ui.KeyT):
+		d.openLocalTerminal()
+	}
+}
+
 func (d *desktop) inspect() {
 	if d.busy {
 		return
@@ -167,6 +186,7 @@ func (d *desktop) connect() {
 }
 
 func (d *desktop) view(c *ui.Context) {
+	d.workspaceShortcuts(c)
 	if d.lightTheme {
 		c.SetTheme(workspaceLightTheme)
 	} else {
@@ -260,6 +280,7 @@ func (d *desktop) view(c *ui.Context) {
 						}
 					}
 					ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
+					ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端").FontSize(11).TextColor(t.TextMuted).Wrap()
 				})
 			})
 			ui.Column(c).Grow(1).FillHeight().Children(func() {

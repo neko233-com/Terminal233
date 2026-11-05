@@ -155,6 +155,23 @@ func TestThemeSwitchKeepsWorkspaceUsable(t *testing.T) {
 	}
 }
 
+func TestWorkspaceKeyboardNavigation(t *testing.T) {
+	d := &desktop{}
+	test := ui.NewTester(d.view, 1200, 900)
+	test.Key(ui.Cmd|ui.Shift, ui.Key3)
+	if d.workspace != "files" || !test.HasText("文件管理") {
+		t.Fatal("file workspace shortcut failed")
+	}
+	test.Key(ui.Cmd|ui.Shift, ui.Key4)
+	if d.workspace != "cloud" || !test.HasText("云端工作区") {
+		t.Fatal("cloud workspace shortcut failed")
+	}
+	test.Key(ui.Cmd|ui.Shift, ui.Key1)
+	if d.workspace != "connections" || !test.HasText("连接列表") {
+		t.Fatal("connection workspace shortcut failed")
+	}
+}
+
 func TestReloadAfterProfileConflictRequiresConfirmation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	first := &desktop{settings: connectionSettings{Host: "first.test", Port: "22", User: "alice"}}
