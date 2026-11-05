@@ -81,7 +81,7 @@ func TestBackgroundTransferKeepsItsSessionState(t *testing.T) {
 }
 
 func TestNativeViewLoadsSyncedAccountWithoutTrustingIt(t *testing.T) {
-	d := &desktop{settings: connectionSettings{Port: "22"}, accounts: []cloudAccount{{ID: "test", Label: "示例服务器", Host: "example.test", Port: 22, Username: "alice", Password: "secret", HostKeyFingerprint: "SHA256:old"}}}
+	d := &desktop{cloud: &cloudClient{}, settings: connectionSettings{Port: "22"}, accounts: []cloudAccount{{ID: "test", Label: "示例服务器", Host: "example.test", Port: 22, Username: "alice", Password: "secret", HostKeyFingerprint: "SHA256:old"}}}
 	test := ui.NewTester(d.view, 1200, 3200)
 	if !test.HasText("SSH 连接") || !test.HasText("远程文件") || !test.HasText("连接列表") {
 		t.Fatalf("missing native controls: %v", test.Texts())
@@ -533,13 +533,18 @@ func TestCollapsedSidebarKeepsKeyboardNavigation(t *testing.T) {
 func TestNarrowWorkspaceActionsRemainVisible(t *testing.T) {
 	for _, tc := range []struct {
 		workspace string
+		loggedIn  bool
 		labels    []string
 	}{
-		{"cloud", []string{"登录同步服务", "注册并登录", "退出同步服务", "同步当前密码连接", "刷新云端连接", "删除选中云端连接（需确认）"}},
-		{"files", []string{"上传本地文件", "下载选中文件", "删除选中文件（需确认）"}},
+		{"cloud", false, []string{"登录同步服务", "注册并登录"}},
+		{"cloud", true, []string{"退出同步服务", "同步当前密码连接", "刷新云端连接", "删除选中云端连接（需确认）"}},
+		{"files", false, []string{"上传本地文件", "下载选中文件", "删除选中文件（需确认）"}},
 	} {
-		t.Run(tc.workspace, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s-%t", tc.workspace, tc.loggedIn), func(t *testing.T) {
 			d := &desktop{workspace: tc.workspace}
+			if tc.loggedIn {
+				d.cloud = &cloudClient{}
+			}
 			view := ui.NewTester(d.view, 640, 1800)
 			for _, label := range tc.labels {
 				r, ok := view.Find(label)

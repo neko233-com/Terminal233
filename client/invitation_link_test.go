@@ -85,3 +85,16 @@ func TestInviteRegistrationAccessibleFromSignIn(t *testing.T) {
 		t.Fatal("invitation entry did not close")
 	}
 }
+
+func TestCloudWorkspaceShowsActionsForCurrentAuthenticationState(t *testing.T) {
+	d := &desktop{workspace: "cloud", cloudURL: defaultCloudURL, cloudUser: "alice", cloudStatus: "登录失败，请重试"}
+	view := ui.NewTester(d.view, 1200, 1200)
+	if !view.HasText("登录失败，请重试") || !view.HasText("登录同步服务") || view.HasText("展开团队管理") {
+		t.Fatal("signed-out workspace is misleading or hides the login error")
+	}
+	d.cloud, d.cloudStatus = &cloudClient{}, "同步服务已登录"
+	view.Frame()
+	if !view.HasText("已登录：alice") || !view.HasText("退出同步服务") || !view.HasText("展开团队管理") || view.HasText("注册令牌") {
+		t.Fatal("signed-in workspace did not expose the appropriate actions")
+	}
+}

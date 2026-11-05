@@ -340,7 +340,10 @@ func (d *desktop) profileView(c *ui.Context) {
 					d.status = "收藏状态已更新"
 				}
 			}
-			row := workspaceButton(c, "profile-"+string(p.ID), label, d.selectedProfile == string(p.ID)).Grow(1)
+			row := ui.Button(c.Key("profile-"+string(p.ID)), label).Grow(1)
+			if d.selectedProfile == string(p.ID) {
+				row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
+			}
 			if !d.profileRecent && d.profileSort == "" {
 				row = row.Drag(p.ID)
 			}
@@ -440,7 +443,10 @@ func (d *desktop) profileView(c *ui.Context) {
 			shown++
 			label := account.Label + " · " + account.Username + "@" + account.Host
 			ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
-				row := workspaceButton(c, "profile-cloud-"+account.ID, label, d.selectedCloudProfile == account.ID).Grow(1).Disabled(d.busy)
+				row := ui.Button(c.Key("profile-cloud-"+account.ID), label).Grow(1).Disabled(d.busy)
+				if d.selectedCloudProfile == account.ID {
+					row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
+				}
 				row.ContextMenu(func(menu *ui.Menu) {
 					if menu.Item("连接").Disabled(d.busy).Chosen() {
 						d.loadCloudAccount(account)

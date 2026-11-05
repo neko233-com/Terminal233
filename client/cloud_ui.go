@@ -290,6 +290,18 @@ func (d *desktop) cloudView(c *ui.Context) {
 	ui.Text(c, "跨设备访问连接信息，或与团队共享凭据。").TextColor(c.Theme().TextMuted).Wrap()
 	ui.Column(c).FillWidth().Padding(18).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
 		ui.Text(c, "同步账号").FontSize(16).Bold()
+		if d.cloud != nil {
+			if d.cloudUser != "" {
+				ui.Text(c, "已登录："+d.cloudUser).Wrap()
+			} else {
+				ui.Text(c, "已登录同步服务").Wrap()
+			}
+			ui.Text(c, "同步服务："+d.cloudURL).FontSize(12).Wrap()
+			if ui.Button(c.Key("cloudlogout"), "退出同步服务").Disabled(d.busy).Clicked() {
+				d.cloudLogout()
+			}
+			return
+		}
 		ui.TextInput(c.Key("cloudurl"), &d.cloudURL).Label("同步服务 HTTPS 地址").Placeholder("同步服务 HTTPS 地址").Disabled(d.busy || d.cloud != nil).OnChange(d.cloudURLChanged)
 		ui.TextInput(c.Key("clouduser"), &d.cloudUser).Label("同步账号").Placeholder("同步账号").Disabled(d.busy || d.cloud != nil)
 		ui.TextInput(c.Key("cloudpassword"), &d.cloudPassword).Label("同步密码").Placeholder("同步密码").Password().Disabled(d.busy || d.cloud != nil)
@@ -312,9 +324,6 @@ func (d *desktop) cloudView(c *ui.Context) {
 			if ui.Button(c.Key("cloudregister"), "注册并登录").Disabled(d.busy || d.cloud != nil).Clicked() {
 				d.cloudLogin(true)
 			}
-			if ui.Button(c.Key("cloudlogout"), "退出同步服务").Disabled(d.busy || d.cloud == nil).Clicked() {
-				d.cloudLogout()
-			}
 		})
 		if d.cloud == nil {
 			label := "使用团队邀请注册…"
@@ -336,6 +345,12 @@ func (d *desktop) cloudView(c *ui.Context) {
 			}
 		}
 	})
+	if d.cloudStatus != "" {
+		ui.Text(c, d.cloudStatus).FontSize(12).Wrap()
+	}
+	if d.cloud == nil {
+		return
+	}
 	ui.Text(c, "云端连接").FontSize(16).Bold()
 	if d.cloud != nil {
 		ui.Text(c, "当前同步空间："+d.cloudScopeName()).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
@@ -364,7 +379,6 @@ func (d *desktop) cloudView(c *ui.Context) {
 	if d.cloudListStale {
 		ui.Text(c, "连接列表可能过期，请先刷新后再修改或删除。").FontSize(12).Wrap()
 	}
-	ui.Text(c, d.cloudStatus).FontSize(12).Wrap()
 	archiveLabel := "展开连接备份"
 	if d.showArchive {
 		archiveLabel = "收起连接备份"
