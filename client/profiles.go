@@ -180,25 +180,6 @@ func (d *desktop) profileView(c *ui.Context) {
 		help = "正在按所选列排序；切换到自定义顺序后可拖动或移动连接。"
 	}
 	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
-	if d.profileSource != "cloud" || d.cloud != nil {
-		label := "分组管理"
-		if d.showGroupControls {
-			label = "收起分组管理"
-		}
-		ui.Row(c).FillWidth().Children(func() {
-			if ui.Button(c.Key("group-controls-toggle"), label).Clicked() {
-				d.showGroupControls = !d.showGroupControls
-				d.confirmGroupDelete = false
-			}
-		})
-		if d.showGroupControls {
-			if d.profileSource == "cloud" {
-				d.cloudGroupControls(c)
-			} else {
-				d.groupControls(c)
-			}
-		}
-	}
 	if d.status != "" {
 		ui.Text(c, d.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
@@ -226,12 +207,29 @@ func (d *desktop) profileView(c *ui.Context) {
 	}
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
 		ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接或快速连接").Placeholder("搜索连接，或输入 ssh 用户@主机 -p 端口").Grow(1).OnSubmit(d.submitConnectionSearch)
+		label := "分组管理"
+		if d.showGroupControls {
+			label = "收起分组管理"
+		}
+		if ui.Button(c.Key("group-controls-toggle"), label).Clicked() {
+			d.showGroupControls = !d.showGroupControls
+			d.confirmGroupDelete = false
+		}
 		if looksLikeQuickConnection(d.profileSearch) {
 			if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy).Clicked() {
 				d.submitConnectionSearch()
 			}
 		}
 	})
+	if d.showGroupControls {
+		ui.Column(c).FillWidth().Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
+			if d.profileSource == "cloud" {
+				d.cloudGroupControls(c)
+			} else {
+				d.groupControls(c)
+			}
+		})
+	}
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 		if workspaceButton(c, "profile-source-all", "全部来源", d.profileSource == "").Clicked() {
 			if d.profileSource == "cloud" {
@@ -250,17 +248,15 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.profileFilter = ""
 			d.profileFavorites, d.profileRecent = false, false
 		}
-	})
-	if compact {
-		label := "更多连接操作"
+		label, accessible := "更多操作", "更多连接操作"
 		if d.showCompactProfileTools {
-			label = "收起连接操作"
+			label, accessible = "收起操作", "收起连接操作"
 		}
-		if ui.Button(c.Key("profile-tools-toggle"), label).Clicked() {
+		if ui.Button(c.Key("profile-tools-toggle"), label).Label(accessible).Clicked() {
 			d.showCompactProfileTools = !d.showCompactProfileTools
 		}
-	}
-	if !compact || d.showCompactProfileTools {
+	})
+	if d.showCompactProfileTools {
 		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 			for _, column := range []struct{ key, label string }{{"name", "名称排序"}, {"host", "地址排序"}} {
 				label := column.label
@@ -355,18 +351,15 @@ func (d *desktop) profileView(c *ui.Context) {
 	showLocal := d.profileSource != "cloud" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
 		(query == "" || strings.Contains("本机终端 local terminal powershell", query))
 	if showLocal {
-		if compact {
-			ui.Row(c).FillWidth().Padding(8, 12).Gap(8).AlignItems(ui.Center).Background(c.Theme().Surface).Radius(8).Children(func() {
-				ui.Text(c, "本机终端").Bold().Grow(1)
-				ui.Button(c.Key("profile-local-terminal"), "打开").Label("打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
+		ui.Row(c).FillWidth().Padding(12, 16).Gap(12).AlignItems(ui.Center).Background(c.Theme().Surface).Radius(8).Children(func() {
+			ui.Column(c).Grow(1).Gap(3).Children(func() {
+				ui.Text(c, "本机终端").FontSize(15).Bold()
+				if !compact {
+					ui.Text(c, "内置本机连接，通过 PowerShell 直接使用这台电脑。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+				}
 			})
-		} else {
-			ui.Column(c).FillWidth().Padding(16).Gap(6).Background(c.Theme().Surface).Radius(8).Children(func() {
-				ui.Text(c, "本机终端").FontSize(16).Bold()
-				ui.Text(c, "内置本机连接，通过 PowerShell 直接使用这台电脑。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-				ui.Button(c.Key("profile-local-terminal"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
-			})
-		}
+			ui.Button(c.Key("profile-local-terminal"), "打开终端").Label("打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
+		})
 	}
 	if d.profileSource != "cloud" && len(d.profiles) == 0 {
 		ui.Column(c).FillWidth().Padding(28).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
@@ -432,7 +425,7 @@ func (d *desktop) profileView(c *ui.Context) {
 				d.status = "已复制地址：" + p.Label
 			}
 		}
-		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).FillWidth().Padding(4, 8).Gap(12).AlignItems(ui.Center).Background(c.Theme().Surface).Radius(7).Children(func() {
 			checked := d.checkedProfiles[p.ID]
 			if ui.Checkbox(c.Key("profile-check-"+string(p.ID)), &checked, "").Label("勾选本机连接：" + p.Label).Disabled(d.busy).Changed() {
 				if d.checkedProfiles == nil {
@@ -464,7 +457,7 @@ func (d *desktop) profileView(c *ui.Context) {
 					d.status = "收藏状态已更新"
 				}
 			}
-			row := ui.Button(c.Key("profile-"+string(p.ID)), label).Grow(1)
+			row := ui.Button(c.Key("profile-"+string(p.ID)), label).BorderWidth(0).Justify(ui.Start).Grow(1)
 			if d.selectedProfile == string(p.ID) {
 				row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
 			}
@@ -547,7 +540,12 @@ func (d *desktop) profileView(c *ui.Context) {
 	if d.cloud != nil && d.profileSource != "local" && (d.profileFilter == "" || d.profileSource == "cloud") && !d.profileFavorites && !d.profileRecent {
 		ui.Text(c, "云端连接 · "+d.cloudScopeName()).FontSize(16).Bold()
 		if d.cloud.cloudGroups && d.cloudGroupsStale {
-			ui.Text(c, "云端分组需要刷新后才能修改。").Wrap()
+			ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "云端分组需要刷新后才能修改。").Wrap()
+				if ui.Button(c.Key("cloud-groups-refresh"), "刷新云端连接和分组").Disabled(d.busy).Clicked() {
+					d.cloudRefresh()
+				}
+			})
 		}
 		accounts := d.accounts
 		if d.profileSort != "" {

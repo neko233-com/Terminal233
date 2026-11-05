@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -49,5 +50,24 @@ func TestCloudGroupRejectsInconsistentAccountSnapshot(t *testing.T) {
 	d.setCloudGroupState(state, nil)
 	if !d.cloudGroupsStale || len(d.cloudGroupSnapshot.AccountIDs) != 0 {
 		t.Fatal("inconsistent account and group snapshots accepted")
+	}
+}
+
+func TestCloudGroupRefreshMakesStaleOrRemovedSelectionRecoverable(t *testing.T) {
+	d := &desktop{workspace: "connections", profileSource: "cloud", profileFilter: "removed", cloud: &cloudClient{token: "session", cloudGroups: true}, accounts: []cloudAccount{{ID: "one", Label: "server", Host: "one.test", Username: "alice"}}}
+	state := cloudGroupSnapshot{Groups: []string{}, Assignments: map[string]string{}, AccountIDs: []string{"one"}, Revision: strings.Repeat("a", 64)}
+	d.setCloudGroupState(state, nil)
+	if d.profileFilter != "" {
+		t.Fatal("removed cloud group remained selected")
+	}
+	d.invalidateCloudGroups()
+	view := ui.NewTester(d.view, 1200, 1200)
+	if !view.HasText("刷新云端连接和分组") || d.showGroupControls {
+		t.Fatal("refresh action was hidden in collapsed group settings")
+	}
+	d.profileFilter = "stale"
+	d.setCloudGroupState(cloudGroupSnapshot{}, errors.New("unavailable"))
+	if d.profileFilter != "" || !d.cloudGroupsStale {
+		t.Fatal("failed refresh retained an unusable group filter")
 	}
 }

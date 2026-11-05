@@ -127,14 +127,14 @@ type desktop struct {
 
 var workspaceTheme = func() *ui.Theme {
 	t := ui.DarkTheme()
-	t.Background = ui.Hex("#111418")
-	t.Surface = ui.Hex("#1a1f24")
-	t.SurfaceHover = ui.Hex("#252c32")
-	t.SurfacePressed = ui.Hex("#303940")
-	t.Border = ui.Hex("#303840")
-	t.Accent = ui.Hex("#26885e")
-	t.AccentHover = ui.Hex("#2fa775")
-	t.AccentPressed = ui.Hex("#1c6948")
+	t.Background = ui.Hex("#10151b")
+	t.Surface = ui.Hex("#182129")
+	t.SurfaceHover = ui.Hex("#22313a")
+	t.SurfacePressed = ui.Hex("#2a3c44")
+	t.Border = ui.Hex("#30404a")
+	t.Accent = ui.Hex("#218a67")
+	t.AccentHover = ui.Hex("#2baa80")
+	t.AccentPressed = ui.Hex("#186d51")
 	t.Focus = ui.Hex("#6ad9a4")
 	return t
 }()
@@ -153,6 +153,14 @@ func workspaceButton(c *ui.Context, key, label string, active bool) ui.Element {
 		return ui.PrimaryButton(c.Key(key), label)
 	}
 	return ui.Button(c.Key(key), label)
+}
+
+func navigationButton(c *ui.Context, key, label string, active bool) ui.Element {
+	button := ui.Button(c.Key(key), label).BorderWidth(0).Justify(ui.Start).Padding(8, 12).Radius(7)
+	if active {
+		button = button.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
+	}
+	return button
 }
 
 func (d *desktop) workspaceShortcuts(c *ui.Context) {
@@ -291,7 +299,7 @@ func (d *desktop) view(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Padding(10, 16).Gap(12).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-			ui.Text(c, "NekoSSH").FontSize(21).Bold()
+			ui.Text(c, "NekoSSH").FontSize(20).Bold()
 			sidebarLabel := "收起侧栏"
 			if d.sidebarCollapsed {
 				sidebarLabel = "展开侧栏"
@@ -302,8 +310,10 @@ func (d *desktop) view(c *ui.Context) {
 			}
 			if d.preferencesStatus != "" {
 				ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).Grow(1).Wrap()
-			} else {
+			} else if width >= 900 {
 				ui.Text(c, "安全连接 · 本地与云端").FontSize(12).TextColor(t.TextMuted).Grow(1)
+			} else {
+				ui.Box(c).Grow(1)
 			}
 			themeLabel := "浅色"
 			if d.lightTheme {
@@ -323,23 +333,23 @@ func (d *desktop) view(c *ui.Context) {
 				ui.Scroll(c).Width(workspaceSidebarWidth(width)).FillHeight().Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
 					ui.Column(c).Padding(16).Gap(8).Children(func() {
 						ui.Text(c, "工作区").FontSize(12).TextColor(t.TextMuted)
-						if workspaceButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
+						if navigationButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
 							d.workspace = "connections"
 							d.editConnection = false
 						}
-						if workspaceButton(c, "nav-terminal", "终端", d.workspace == "terminal").Clicked() {
+						if navigationButton(c, "nav-terminal", "终端", d.workspace == "terminal").Clicked() {
 							d.workspace = "terminal"
 						}
-						if workspaceButton(c, "nav-files", "远程文件", d.workspace == "files").Clicked() {
+						if navigationButton(c, "nav-files", "远程文件", d.workspace == "files").Clicked() {
 							d.workspace = "files"
 							if d.term != nil && d.shell == nil && d.files == nil && !d.busy {
 								d.refreshFiles()
 							}
 						}
-						if workspaceButton(c, "nav-forward", "端口转发", d.workspace == "forward").Clicked() {
+						if navigationButton(c, "nav-forward", "端口转发", d.workspace == "forward").Clicked() {
 							d.workspace = "forward"
 						}
-						if workspaceButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
+						if navigationButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
 							d.workspace = "cloud"
 						}
 						settingsLabel := "终端设置"
@@ -386,7 +396,7 @@ func (d *desktop) view(c *ui.Context) {
 						if d.cloud != nil {
 							connectionCount += len(d.accounts)
 						}
-						if ui.Button(c.Key("group-all"), fmt.Sprintf("全部连接  %d", connectionCount)).Clicked() {
+						if navigationButton(c, "group-all", fmt.Sprintf("全部连接  %d", connectionCount), d.profileFilter == "" && !d.profileFavorites && !d.profileRecent).Clicked() {
 							d.workspace = "connections"
 							d.editConnection = false
 							d.profileFilter = ""
@@ -410,7 +420,7 @@ func (d *desktop) view(c *ui.Context) {
 								recent++
 							}
 						}
-						if ui.Button(c.Key("group-favorites"), fmt.Sprintf("收藏的连接  %d", favorites)).Clicked() {
+						if navigationButton(c, "group-favorites", fmt.Sprintf("收藏的连接  %d", favorites), d.profileFavorites).Clicked() {
 							d.workspace = "connections"
 							d.editConnection = false
 							d.profileFilter = ""
@@ -420,7 +430,7 @@ func (d *desktop) view(c *ui.Context) {
 								d.profileSource = "local"
 							}
 						}
-						if ui.Button(c.Key("group-recent"), fmt.Sprintf("最近连接  %d", recent)).Clicked() {
+						if navigationButton(c, "group-recent", fmt.Sprintf("最近连接  %d", recent), d.profileRecent).Clicked() {
 							d.workspace = "connections"
 							d.editConnection = false
 							d.profileFilter = ""
@@ -463,7 +473,7 @@ func (d *desktop) view(c *ui.Context) {
 								if isCloudGroups {
 									groupLabel = "云端分组：" + name
 								}
-								button := ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", groupLeaf(name), counts[name])).Label(groupLabel).Disabled(d.busy).Grow(1)
+								button := navigationButton(c, "group-entry-"+name, fmt.Sprintf("%s  %d", groupLeaf(name), counts[name]), d.profileFilter == name).Label(groupLabel).Disabled(d.busy).Grow(1)
 								button.ContextMenu(func(menu *ui.Menu) {
 									if menu.Item("管理分组").Chosen() {
 										d.workspace, d.editConnection = "connections", false
@@ -718,35 +728,66 @@ func (d *desktop) view(c *ui.Context) {
 }
 
 func (d *desktop) connectionView(c *ui.Context) {
-	ui.Text(c, "SSH 连接").FontSize(22).Bold()
+	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "SSH 连接").FontSize(22).Bold().Grow(1)
+		if ui.Button(c.Key("connection-back"), "返回连接列表").Clicked() {
+			d.editConnection = false
+		}
+	})
 	ui.Text(c, "填写连接信息，核对主机指纹后连接。可将连接保存到列表。").TextColor(c.Theme().TextMuted).Wrap()
-	if ui.Button(c.Key("connection-back"), "返回连接列表").Clicked() {
-		d.editConnection = false
-	}
-	ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("连接名称（可选）")
 	resetFingerprint := func() { d.fingerprint, d.expectedFingerprint, d.changedFingerprint = "", "", "" }
-	ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(resetFingerprint)
-	ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(resetFingerprint)
-	ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint)
-	ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password()
-	ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）")
-	if ui.Button(c.Key("pick-key"), "选择私钥文件…").Disabled(d.busy).Clicked() {
-		d.pickLocalPath("key")
-	}
-	ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password()
-	ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("分组（可选）")
-	if ui.Button(c.Key("profile-add"), "保存到连接列表").Disabled(d.busy).Clicked() {
-		if err := d.addProfile(); err != nil {
-			d.status = err.Error()
-		} else {
-			if err := d.saveProfiles(); err != nil {
-				d.status = "连接已添加，但本机保存失败：" + err.Error()
+	ui.Column(c).FillWidth().Padding(18).Gap(10).Background(c.Theme().Surface).Radius(10).Children(func() {
+		ui.Text(c, "连接信息").FontSize(16).Bold()
+		ui.Text(c, "名称和分组仅用于整理连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+		ui.Text(c, "连接名称（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
+		ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("连接名称（可选）").FillWidth()
+		ui.Row(c).FillWidth().Gap(10).Children(func() {
+			ui.Column(c).Grow(1).Gap(6).Children(func() {
+				ui.Text(c, "主机地址").FontSize(12).TextColor(c.Theme().TextMuted)
+				ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(resetFingerprint).FillWidth()
+			})
+			ui.Column(c).Width(100).Gap(6).Children(func() {
+				ui.Text(c, "端口").FontSize(12).TextColor(c.Theme().TextMuted)
+				ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(resetFingerprint).FillWidth()
+			})
+		})
+		ui.Text(c, "用户名").FontSize(12).TextColor(c.Theme().TextMuted)
+		ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint).FillWidth()
+		ui.Text(c, "连接分组（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
+		ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("分组（可选）").FillWidth()
+	})
+	ui.Column(c).FillWidth().Padding(18).Gap(10).Background(c.Theme().Surface).Radius(10).Children(func() {
+		ui.Text(c, "身份认证").FontSize(16).Bold()
+		ui.Text(c, "使用密码或选择私钥；本机连接列表不会保存密码。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+		ui.Text(c, "SSH 密码").FontSize(12).TextColor(c.Theme().TextMuted)
+		ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().FillWidth()
+		ui.Text(c, "私钥文件（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
+		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.End).Children(func() {
+			ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）").Grow(1)
+			if ui.Button(c.Key("pick-key"), "选择私钥文件…").Disabled(d.busy).Clicked() {
+				d.pickLocalPath("key")
+			}
+		})
+		ui.Text(c, "私钥口令（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
+		ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password().FillWidth()
+	})
+	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+		if ui.Button(c.Key("profile-add"), "保存到连接列表").Disabled(d.busy).Clicked() {
+			if err := d.addProfile(); err != nil {
+				d.status = err.Error()
 			} else {
-				d.status = "连接已保存（不保存密码）"
+				if err := d.saveProfiles(); err != nil {
+					d.status = "连接已添加，但本机保存失败：" + err.Error()
+				} else {
+					d.status = "连接已保存（不保存密码）"
+				}
 			}
 		}
-	}
-	ui.Button(c.Key("inspect"), "获取主机指纹").Disabled(d.busy).OnClick(d.inspect)
+	})
+	ui.Text(c, "主机验证").FontSize(16).Bold()
+	ui.Row(c).FillWidth().Children(func() {
+		ui.Button(c.Key("inspect"), "获取主机指纹").Disabled(d.busy).OnClick(d.inspect)
+	})
 	if trusted := d.trustedProfileFingerprint(); trusted != "" {
 		ui.Text(c, "本机已信任指纹："+trusted).FontSize(12).Wrap()
 		ui.Text(c, "重连时仍会验证服务器指纹；若指纹变化，将在发送凭据前阻止连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
@@ -782,7 +823,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.63"
+const version = "0.3.64"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

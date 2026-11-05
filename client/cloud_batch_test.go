@@ -113,6 +113,9 @@ func TestCloudBatchSelectionAndScopeReset(t *testing.T) {
 	}
 	d.profileSearch = "beta"
 	view.Frame()
+	if err := view.Click("更多连接操作"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("勾选当前显示的云端连接"); err != nil {
 		t.Fatal(err)
 	}

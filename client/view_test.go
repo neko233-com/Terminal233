@@ -103,6 +103,9 @@ func TestConnectionListShowsCurrentCloudScopeWithoutTrustingIt(t *testing.T) {
 	if !view.HasText("云端连接 · 研发") || !view.HasText("全部连接  3") || !view.HasText("测试机 · alice@example.test") {
 		t.Fatalf("cloud connection missing from workspace: %v", view.Texts())
 	}
+	if err := view.Click("更多连接操作"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("名称排序"); err != nil {
 		t.Fatal(err)
 	}
@@ -454,6 +457,9 @@ func TestConnectionSortingPreservesCustomOrder(t *testing.T) {
 		}
 	}
 	assertOrder("Bravo", "Alpha")
+	if err := view.Click("更多连接操作"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("名称排序"); err != nil {
 		t.Fatal(err)
 	}

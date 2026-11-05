@@ -127,12 +127,28 @@ func (d *desktop) setCloudGroupState(state cloudGroupSnapshot, err error) {
 	}
 	if d.cloud == nil || !d.cloud.cloudGroups || err != nil || !validCloudGroupSnapshot(state) {
 		d.cloudGroupSnapshot, d.cloudGroupsStale = cloudGroupSnapshot{}, true
+		if d.profileSource == "cloud" {
+			d.profileFilter = ""
+		}
 		if err != nil {
 			d.cloudStatus = "云端分组加载失败，请刷新：" + err.Error()
 		}
 		return
 	}
 	d.cloudGroupSnapshot, d.cloudGroupsStale = state, false
+	if d.profileSource == "cloud" && d.profileFilter != "" {
+		found := false
+		for _, group := range state.Groups {
+			if group == d.profileFilter {
+				found = true
+				break
+			}
+		}
+		if !found {
+			d.profileFilter = ""
+			d.confirmGroupDelete = false
+		}
+	}
 }
 
 func (d *desktop) cloudGroupTree() ([]string, map[string]int) {
@@ -325,9 +341,6 @@ func (d *desktop) cloudGroupControls(c *ui.Context) {
 	}
 	if d.cloudGroupsStale {
 		ui.Text(c, "云端分组需要刷新后才能修改。").Wrap()
-		if ui.Button(c.Key("cloud-groups-refresh"), "刷新云端连接和分组").Disabled(d.busy).Clicked() {
-			d.cloudRefresh()
-		}
 	}
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
 		ui.TextInput(c.Key("cloud-group-name"), &d.groupInput).Label("云端分组名称").Grow(1).OnChange(func() { d.confirmGroupDelete = false })
