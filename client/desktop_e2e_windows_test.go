@@ -219,6 +219,61 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !deadline.IsZero() {
 		t.Fatal("local directory read did not finish")
 	}
+	// Exercise the native file workspace against an isolated directory.
+	localDirectory := t.TempDir()
+	call("act", map[string]any{"key": "remote-dir", "action": "setValue", "text": localDirectory})
+	call("act", map[string]any{"key": "file-refresh", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	localReady := false
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		ready := false
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "file-refresh" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				ready = true
+				break
+			}
+		}
+		if ready {
+			localReady = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !localReady {
+		t.Fatal("isolated local directory did not finish loading")
+	}
+	call("act", map[string]any{"key": "new-directory-name", "action": "setValue", "text": "新目录"})
+	call("act", map[string]any{"key": "new-directory-create", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if info, statErr := os.Stat(filepath.Join(localDirectory, "新目录")); statErr == nil && info.IsDir() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if info, statErr := os.Stat(filepath.Join(localDirectory, "新目录")); statErr != nil || !info.IsDir() {
+		t.Fatal("native file workspace did not create the directory")
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "file-refresh" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				deadline = time.Time{}
+				break
+			}
+		}
+		if deadline.IsZero() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !deadline.IsZero() {
+		t.Fatal("directory refresh after creation did not finish")
+	}
 	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
