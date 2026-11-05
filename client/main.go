@@ -241,7 +241,8 @@ func (d *desktop) view(c *ui.Context) {
 	if (d.workspace == "files" || d.workspace == "terminal") && d.fileFollowTerminal {
 		d.followReportedDirectory(false)
 	}
-	width, _ := c.Size()
+	width, height := c.Size()
+	compactAuxiliaryPanels := height < 650 || (width < 940 && height < 1000)
 	if d.lightTheme {
 		c.SetTheme(workspaceLightTheme)
 	} else {
@@ -412,7 +413,9 @@ func (d *desktop) view(c *ui.Context) {
 								status = "本机终端已退出"
 							}
 						}
-						ui.Text(c, status).FontSize(12).TextColor(t.TextMuted)
+						if width >= 900 {
+							ui.Text(c, status).FontSize(12).TextColor(t.TextMuted)
+						}
 						if ui.Button(c.Key("terminal-search-toggle"), "查找").Disabled(d.term == nil).Clicked() {
 							if d.terminalSearchOpen {
 								d.closeTerminalSearch()
@@ -424,6 +427,12 @@ func (d *desktop) view(c *ui.Context) {
 						if d.quickOpen {
 							quickLabel = "收起快速命令"
 						}
+						if width < 900 {
+							quickLabel = "命令+"
+							if d.quickOpen {
+								quickLabel = "命令−"
+							}
+						}
 						if ui.Button(c.Key("quick-toggle"), quickLabel).Disabled(d.term == nil).Clicked() {
 							d.quickOpen = !d.quickOpen
 						}
@@ -431,12 +440,24 @@ func (d *desktop) view(c *ui.Context) {
 						if d.splitSession != 0 {
 							splitLabel = "关闭分屏"
 						}
+						if width < 900 {
+							splitLabel = "分屏+"
+							if d.splitSession != 0 {
+								splitLabel = "分屏−"
+							}
+						}
 						if ui.Button(c.Key("toggle-split"), splitLabel).Disabled(!d.canSwitchSession() || (d.splitSession == 0 && len(d.sessions) < 2)).Clicked() {
 							d.toggleSplit()
 						}
 						label := "打开文件面板"
 						if d.showFilePanel {
 							label = "收起文件面板"
+						}
+						if width < 900 {
+							label = "文件+"
+							if d.showFilePanel {
+								label = "文件−"
+							}
 						}
 						if ui.Button(c.Key("toggle-file-panel"), label).Disabled(d.term == nil || !d.canSwitchSession()).Clicked() {
 							d.showFilePanel = !d.showFilePanel
@@ -450,7 +471,11 @@ func (d *desktop) view(c *ui.Context) {
 						ui.Text(c, "选择连接，或打开本机终端").FontSize(18).TextColor(t.TextMuted)
 					} else {
 						if d.quickOpen {
-							d.quickCommandsView(c)
+							if compactAuxiliaryPanels {
+								ui.Scroll(c.Key("quick-compact-scroll")).Label("快速命令面板").Height(90).Shrink(0).FillWidth().Children(func() { d.quickCommandsView(c) })
+							} else {
+								d.quickCommandsView(c)
+							}
 						}
 						if d.terminalSearchOpen {
 							d.terminalSearchView(c)
@@ -468,9 +493,13 @@ func (d *desktop) view(c *ui.Context) {
 							})
 						}
 						if d.showFilePanel && width < 940 {
+							fileHeight := float32(260)
+							if compactAuxiliaryPanels {
+								fileHeight = 75
+							}
 							ui.Column(c).Grow(1).FillWidth().Children(func() {
 								ui.Column(c).Grow(1).FillWidth().Children(func() { d.terminalWorkspace(c, width) })
-								ui.Scroll(c).Height(260).Shrink(0).FillWidth().BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
+								ui.Scroll(c).Height(fileHeight).Shrink(0).FillWidth().BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
 									ui.Column(c).Padding(14).Gap(8).Children(func() { d.fileView(c, true) })
 								})
 							})
@@ -572,7 +601,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.27"
+const version = "0.3.28"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
