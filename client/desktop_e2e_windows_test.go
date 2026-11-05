@@ -31,7 +31,8 @@ func TestDesktopNativeWindow(t *testing.T) {
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("nekossh-test-%d.sock", os.Getpid()))
 	t.Cleanup(func() { _ = os.Remove(socket) })
 	app := exec.Command(exe)
-	app.Env = append(os.Environ(), "MYGO_AUTOMATION="+socket, "APPDATA="+t.TempDir())
+	configDir := t.TempDir()
+	app.Env = append(os.Environ(), "MYGO_AUTOMATION="+socket, "APPDATA="+configDir)
 	if err := app.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -724,5 +725,19 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if !strings.Contains(tree, "已断开") {
 		t.Fatalf("local terminal failed to close: %s", tree)
+	}
+	call("act", map[string]any{"key": "theme-toggle", "action": "press"})
+	call("act", map[string]any{"key": "toggle-sidebar", "action": "press"})
+	var prefs workspacePreferences
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		prefs, err = readPreferences(filepath.Join(configDir, "NekoSSH", "preferences.json"))
+		if err == nil && prefs.Light && prefs.SidebarCollapsed {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil || !prefs.Light || !prefs.SidebarCollapsed {
+		t.Fatalf("native appearance controls did not persist: %+v, %v", prefs, err)
 	}
 }

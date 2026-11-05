@@ -21,7 +21,7 @@ type desktop struct {
 	showFilePanel                                                                           bool
 	sidebarCollapsed                                                                        bool
 	sessions                                                                                []*workspaceSession
-	currentSession, nextSession, splitSession                                               int
+	currentSession, nextSession, splitSession, splitFirstSession                            int
 	showTeams, showAdmin                                                                    bool
 	teamInvites                                                                             []cloudInvite
 	confirmInvite                                                                           string
@@ -45,7 +45,7 @@ type desktop struct {
 	profileRecent                                                                           bool
 	profileSort                                                                             string
 	profileSortDescending                                                                   bool
-	profilePath                                                                             string
+	profilePath, preferencesPath, preferencesStatus                                         string
 	profileStoreBlocked                                                                     bool
 	profileStoreConflict                                                                    bool
 	confirmProfileReload                                                                    bool
@@ -231,14 +231,20 @@ func (d *desktop) view(c *ui.Context) {
 			}
 			if ui.Button(c.Key("toggle-sidebar"), sidebarLabel).Clicked() {
 				d.sidebarCollapsed = !d.sidebarCollapsed
+				d.savePreference("sidebar", d.sidebarCollapsed)
 			}
-			ui.Text(c, "安全连接 · 本地与云端").FontSize(12).TextColor(t.TextMuted).Grow(1)
+			if d.preferencesStatus != "" {
+				ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).Grow(1).Wrap()
+			} else {
+				ui.Text(c, "安全连接 · 本地与云端").FontSize(12).TextColor(t.TextMuted).Grow(1)
+			}
 			themeLabel := "浅色"
 			if d.lightTheme {
 				themeLabel = "深色"
 			}
 			if ui.Button(c.Key("theme-toggle"), themeLabel).Clicked() {
 				d.lightTheme = !d.lightTheme
+				d.savePreference("light", d.lightTheme)
 			}
 			ui.Button(c.Key("local-terminal"), "本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
 			if ui.Button(c.Key("disconnect"), "关闭当前会话").Disabled(d.busy || d.term == nil).Clicked() {
@@ -370,6 +376,7 @@ func (d *desktop) view(c *ui.Context) {
 						}
 						if ui.Button(c.Key("toggle-file-panel"), label).Disabled(d.term == nil || !d.canSwitchSession()).Clicked() {
 							d.showFilePanel = !d.showFilePanel
+							d.savePreference("files", d.showFilePanel)
 							if d.showFilePanel && d.shell == nil && d.files == nil {
 								d.refreshFiles()
 							}
@@ -473,7 +480,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.3"
+const version = "0.3.4"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -490,6 +497,11 @@ func main() {
 	} else if err = d.loadProfiles(filepath.Join(dir, "NekoSSH", "profiles.json")); err != nil {
 		d.profileStoreBlocked = true
 		d.status = "读取本机连接失败（未覆盖原文件）：" + err.Error()
+	}
+	if dir, err := os.UserConfigDir(); err != nil {
+		d.preferencesStatus = "界面设置不可用：" + err.Error()
+	} else if err = d.loadPreferences(filepath.Join(dir, "NekoSSH", "preferences.json")); err != nil {
+		d.preferencesStatus = "界面设置未载入，原文件未覆盖：" + err.Error()
 	}
 	mygo.Theme.SetSource(mygo.ThemeDark)
 	mygo.App.WhenReady(func() {

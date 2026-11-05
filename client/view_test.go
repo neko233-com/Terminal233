@@ -647,21 +647,21 @@ func TestFileFilterFollowsActiveSession(t *testing.T) {
 }
 
 func TestSplitSessionSwitchAndClosePreservesIndependentState(t *testing.T) {
-	d := &desktop{workspace: "terminal", currentSession: 1, splitSession: 2, fileDir: "/one", sessions: []*workspaceSession{
+	d := &desktop{workspace: "terminal", currentSession: 1, splitSession: 2, splitFirstSession: 1, fileDir: "/one", sessions: []*workspaceSession{
 		{id: 1, label: "one", fileDir: "/one"},
 		{id: 2, label: "two", fileDir: "/two"},
 		{id: 3, label: "three", fileDir: "/three"},
 	}}
 	d.activateSession(2)
-	if d.currentSession != 2 || d.splitSession != 1 || d.fileDir != "/two" {
+	if d.currentSession != 2 || d.splitSession != 1 || d.splitFirstSession != 1 || d.fileDir != "/two" {
 		t.Fatal("switching to the second pane lost split or session state")
 	}
 	d.activateSession(3)
-	if d.currentSession != 3 || d.splitSession != 1 || d.fileDir != "/three" {
+	if d.currentSession != 3 || d.splitSession != 1 || d.splitFirstSession != 1 || d.fileDir != "/three" {
 		t.Fatal("opening another tab changed the pinned pane")
 	}
 	d.closeSession(1)
-	if d.splitSession != 0 || d.currentSession != 3 || d.fileDir != "/three" {
+	if d.splitSession != 0 || d.splitFirstSession != 0 || d.currentSession != 3 || d.fileDir != "/three" {
 		t.Fatal("closing the split pane changed the active session")
 	}
 }

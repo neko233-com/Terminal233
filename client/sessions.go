@@ -51,6 +51,8 @@ func (d *desktop) activateSession(id int) {
 		d.saveSessionState()
 		if id == d.splitSession {
 			d.splitSession = d.currentSession
+		} else if d.splitSession != 0 && d.splitFirstSession == d.currentSession {
+			d.splitFirstSession = id
 		}
 		d.currentSession = id
 		d.term, d.shell, d.active = s.term, s.shell, s.active
@@ -105,7 +107,7 @@ func (d *desktop) closeSession(id int) {
 			_ = s.term.Close()
 		}
 		if d.splitSession == id {
-			d.splitSession = 0
+			d.splitSession, d.splitFirstSession = 0, 0
 		}
 		d.sessions = append(d.sessions[:i], d.sessions[i+1:]...)
 		if id != d.currentSession {
@@ -113,9 +115,7 @@ func (d *desktop) closeSession(id int) {
 			return
 		}
 		d.currentSession = 0
-		if d.splitSession != 0 {
-			d.splitSession = 0
-		}
+		d.splitSession, d.splitFirstSession = 0, 0
 		d.term, d.shell, d.active = nil, nil, connectionSettings{}
 		d.files, d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile, d.confirmDelete = nil, "", "", "", "", ""
 		d.fileFilter = ""
@@ -144,7 +144,7 @@ func (d *desktop) closeAllSessions() {
 	}
 	d.sessions = nil
 	d.term, d.shell, d.active = nil, nil, connectionSettings{}
-	d.currentSession, d.splitSession = 0, 0
+	d.currentSession, d.splitSession, d.splitFirstSession = 0, 0, 0
 }
 
 // toggleSplit displays a second, already open session without duplicating its terminal.
@@ -153,12 +153,12 @@ func (d *desktop) toggleSplit() {
 		return
 	}
 	if d.splitSession != 0 {
-		d.splitSession = 0
+		d.splitSession, d.splitFirstSession = 0, 0
 		return
 	}
 	for _, s := range d.sessions {
 		if s.id != d.currentSession && s.term != nil {
-			d.splitSession = s.id
+			d.splitSession, d.splitFirstSession = s.id, d.currentSession
 			return
 		}
 	}
@@ -206,9 +206,18 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 		terminal.View(c, d.term).Fill()
 		return
 	}
+	panes := func() {
+		if second.id == d.splitFirstSession {
+			pane(second, false)
+			pane(current, true)
+		} else {
+			pane(current, true)
+			pane(second, false)
+		}
+	}
 	if stacked {
-		ui.Column(c).Fill().Children(func() { pane(current, true); pane(second, false) })
+		ui.Column(c).Fill().Children(panes)
 	} else {
-		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() { pane(current, true); pane(second, false) })
+		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(panes)
 	}
 }

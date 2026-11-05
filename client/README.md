@@ -4,6 +4,8 @@
 
 在仓库根目录执行 `task test` 或 `task build:client`。`task build:client` 通过固定版本 MyGo 打包客户端及 libghostty-vt 动态库；该任务暂不生成安装程序。
 
+界面主题、侧栏和文件面板的显示状态会保存在当前用户配置目录，重启后恢复；多窗口修改不同设置时会合并保存。
+
 Windows 下可用 `Ctrl+Shift+1` 至 `Ctrl+Shift+4` 切换工作区，`Ctrl+Shift+T` 新建本机终端。
 
 Windows 桌面自动化验证：`pwsh -NoProfile -File client/test-desktop.ps1 -Quiet`。它构建仅用于测试的自动化版本，在本机测试 SSH 服务上验证原生窗口与连接，不使用外部 SSH 客户端。
