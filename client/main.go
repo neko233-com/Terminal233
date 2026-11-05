@@ -678,7 +678,9 @@ func (d *desktop) connectionView(c *ui.Context) {
 	}
 	if d.cloud != nil {
 		ui.Text(c, "同步目标："+d.cloudScopeName()+"；团队空间的成员可访问共享连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-		if !d.cloud.conditionalUpdates {
+		if d.cloud.capabilityUnknown {
+			ui.Text(c, "无法确认服务的并发保护能力；更新已有连接前请刷新云端连接。").FontSize(12).Wrap()
+		} else if !d.cloud.conditionalUpdates {
 			ui.Text(c, "未确认同步服务支持并发修改保护；更新可能覆盖其他设备的更改。").FontSize(12).Wrap()
 		}
 		if d.cloudListStale {
@@ -695,7 +697,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.54"
+const version = "0.3.55"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

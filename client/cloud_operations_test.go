@@ -259,6 +259,52 @@ func TestLegacyCloudCapabilityFallback(t *testing.T) {
 	}
 }
 
+func TestFailedCapabilityProbeBlocksExistingMutationUntilRecovery(t *testing.T) {
+	healthOK := false
+	writes := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			if !healthOK {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = w.Write([]byte(`{"status":"ok","capabilities":["conditional-account-update","conditional-account-delete"]}`))
+			return
+		}
+		writes++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	c, err := newCloudClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.http.Transport, c.token = server.Client().Transport, "token"
+	c.discoverCapabilities()
+	if !c.capabilityUnknown {
+		t.Fatal("failed probe was treated as a legacy service")
+	}
+	a := cloudAccount{ID: "item"}
+	if applyConditionalVersion(c, &a, "2026-01-01T00:00:00Z") == nil || c.removeWithRevision("item", "2026-01-01T00:00:00Z") == nil || writes != 0 {
+		t.Fatal("an unverified service allowed an existing connection to be changed")
+	}
+	view := ui.NewTester((&desktop{workspace: "cloud", cloud: c}).view, 1200, 1400)
+	if !view.HasText("无法确认同步服务的并发保护能力；已暂停更新和删除已有连接，请刷新云端连接重试。") {
+		t.Fatal("failed capability probe was not explained")
+	}
+	healthOK = true
+	c.discoverCapabilities()
+	if c.capabilityUnknown || !c.conditionalUpdates || !c.conditionalDeletes {
+		t.Fatal("successful retry did not restore advertised capabilities")
+	}
+	if err := applyConditionalVersion(c, &a, "2026-01-01T00:00:00Z"); err != nil || a.ExpectedUpdatedAt == "" {
+		t.Fatal("recovered update did not include its original revision")
+	}
+	if err := c.removeWithRevision("item", "2026-01-01T00:00:00Z"); err != nil || writes != 1 {
+		t.Fatal("recovered delete was not sent")
+	}
+}
+
 func TestConditionalDeleteBindsSelectionAndReportsConflict(t *testing.T) {
 	c := &cloudClient{conditionalDeletes: true}
 	d := &desktop{cloud: c}

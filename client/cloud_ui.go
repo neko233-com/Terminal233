@@ -78,9 +78,14 @@ func (d *desktop) cloudRefresh() {
 	d.busy = true
 	client := d.cloud
 	go func() {
+		probe := *client
+		probe.discoverCapabilities()
 		accounts, err := client.list()
 		d.win.Update(func() {
 			d.busy = false
+			if d.cloud == client {
+				client.conditionalUpdates, client.conditionalDeletes, client.capabilityUnknown = probe.conditionalUpdates, probe.conditionalDeletes, probe.capabilityUnknown
+			}
 			d.finishCloudRefresh(accounts, err)
 		})
 	}()
@@ -244,6 +249,9 @@ func (d *desktop) saveCloudConnection(settings connectionSettings, label, source
 }
 
 func applyConditionalVersion(c *cloudClient, account *cloudAccount, version string) error {
+	if c != nil && c.capabilityUnknown && account.ID != "" {
+		return errors.New("无法确认服务的并发保护能力，请刷新云端连接后重试。")
+	}
 	if c == nil || !c.conditionalUpdates || account.ID == "" {
 		return nil
 	}
@@ -413,7 +421,9 @@ func (d *desktop) cloudView(c *ui.Context) {
 		return
 	}
 	ui.Text(c, "云端连接").FontSize(16).Bold()
-	if !d.cloud.conditionalUpdates || !d.cloud.conditionalDeletes {
+	if d.cloud.capabilityUnknown {
+		ui.Text(c, "无法确认同步服务的并发保护能力；已暂停更新和删除已有连接，请刷新云端连接重试。").FontSize(12).Wrap()
+	} else if !d.cloud.conditionalUpdates || !d.cloud.conditionalDeletes {
 		ui.Text(c, "未确认当前服务支持并发修改或删除保护；多设备同时操作可能冲突，请先刷新并核对。").FontSize(12).Wrap()
 	}
 	if d.teamListStale {
@@ -492,6 +502,10 @@ func (d *desktop) cloudView(c *ui.Context) {
 
 func (d *desktop) prepareCloudDelete(account cloudAccount) {
 	if d.busy || d.cloudListStale || !d.canWriteCloudScope() {
+		return
+	}
+	if d.cloud.capabilityUnknown {
+		d.cloudStatus = "无法确认服务的并发保护能力，请刷新云端连接后重试。"
 		return
 	}
 	if d.cloud.conditionalDeletes {

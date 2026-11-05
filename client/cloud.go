@@ -34,6 +34,7 @@ type cloudClient struct {
 	adminTOTP          string
 	conditionalUpdates bool
 	conditionalDeletes bool
+	capabilityUnknown  bool
 }
 
 type cloudHTTPError struct {
@@ -49,13 +50,16 @@ func (e *cloudHTTPError) Error() string {
 // their existing, unconditional update semantics.
 func (c *cloudClient) discoverCapabilities() {
 	var health struct {
+		Status       string   `json:"status"`
 		Capabilities []string `json:"capabilities"`
 	}
 	c.conditionalUpdates = false
 	c.conditionalDeletes = false
-	if c.request(http.MethodGet, "/healthz", nil, &health) != nil {
+	c.capabilityUnknown = true
+	if c.request(http.MethodGet, "/healthz", nil, &health) != nil || health.Status != "ok" {
 		return
 	}
+	c.capabilityUnknown = false
 	for _, capability := range health.Capabilities {
 		if capability == "conditional-account-update" {
 			c.conditionalUpdates = true
@@ -227,6 +231,9 @@ func (c *cloudClient) removeWithRevision(id, revision string) error {
 	}
 	if id == "" || strings.ContainsAny(id, "/\\") {
 		return errors.New("无效的连接编号")
+	}
+	if c.capabilityUnknown {
+		return errors.New("无法确认服务的并发保护能力，请刷新云端连接后重试")
 	}
 	if c.conditionalDeletes {
 		if _, err := time.Parse(time.RFC3339Nano, revision); err != nil {
