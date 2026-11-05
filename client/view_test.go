@@ -100,6 +100,20 @@ func TestConnectionListSearchAndContextMenu(t *testing.T) {
 	}
 }
 
+func TestConnectionActionRequestsMissingPassword(t *testing.T) {
+	d := &desktop{settings: connectionSettings{Host: "example.test", Port: "22", User: "alice"}, active: connectionSettings{Host: "example.test", Port: "22", User: "alice", Fingerprint: "SHA256:trusted"}}
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	view := ui.NewTester(d.view, 1200, 1400)
+	if err := view.Click("连接：alice@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.editConnection || d.fingerprint != "" || d.expectedFingerprint != "SHA256:trusted" || !view.HasText("使用已信任指纹连接") {
+		t.Fatal("password connection did not open the verified reconnect form")
+	}
+}
+
 func TestConnectionGroupNavigation(t *testing.T) {
 	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice"}, profileGroup: "工作"}
 	if err := d.addProfile(); err != nil {

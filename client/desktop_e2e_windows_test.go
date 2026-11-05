@@ -4,7 +4,11 @@ package main
 
 import (
 	"bufio"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestDesktopNativeWindow(t *testing.T) {
@@ -98,7 +104,23 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "主机地址") || !strings.Contains(tree, "SSH 密码") {
 		t.Fatalf("missing connection fields: %s", tree)
 	}
-	settings, fingerprint, attempts := testSSHServer(t)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedKey, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "test-key.pem")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encodedKey}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	authorizedKey, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, fingerprint, attempts := testSSHServer(t, authorizedKey)
 	for key, value := range map[string]string{"host": settings.Host, "port": settings.Port, "user": settings.User, "password": settings.Password} {
 		call("act", map[string]any{"key": key, "action": "setValue", "text": value})
 	}
@@ -327,6 +349,96 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if strings.Contains(tree, "session-4") {
 		t.Fatalf("reconnected tab did not close: %s", tree)
+	}
+	// Save a key path on the already trusted profile, then connect from the
+	// list. The test server accepts only the temporary public key above.
+	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "profile-1") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "profile-1") {
+		t.Fatalf("profile missing before key setup: %s", tree)
+	}
+	call("act", map[string]any{"key": "profile-1", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "connect-trusted") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "key", "action": "setValue", "text": keyPath})
+	call("act", map[string]any{"key": "profile-add", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "连接已保存") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "连接已保存") {
+		t.Fatalf("key profile was not saved: %s", tree)
+	}
+	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "profile-connect-1") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "profile-connect-1") {
+		t.Fatalf("profile connect action missing: %s", tree)
+	}
+	call("act", map[string]any{"key": "profile-connect-1", "action": "press"})
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "session-5") && attempts.Load() == 3 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "session-5") || attempts.Load() != 3 {
+		t.Fatalf("key profile did not connect from the list: %s", tree)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "session-close-5" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				deadline = time.Time{}
+				break
+			}
+		}
+		if deadline.IsZero() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !deadline.IsZero() {
+		t.Fatal("key session did not become idle")
+	}
+	call("act", map[string]any{"key": "session-close-5", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if !strings.Contains(tree, "session-5") && strings.Contains(tree, "已关闭会话；当前：") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if strings.Contains(tree, "session-5") {
+		t.Fatalf("key session did not close: %s", tree)
 	}
 	call("act", map[string]any{"key": "session-2", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)

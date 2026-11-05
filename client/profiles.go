@@ -105,6 +105,20 @@ func (d *desktop) connectTrustedProfile() {
 	}
 }
 
+func (d *desktop) openProfileConnection(p profile) {
+	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
+		return
+	}
+	d.loadProfile(p)
+	if p.Settings.KeyPath != "" && d.trustedProfileFingerprint() != "" {
+		d.connectTrustedProfile()
+		return
+	}
+	if d.trustedProfileFingerprint() != "" {
+		d.status = "请输入密码或私钥口令，然后使用已信任指纹连接。"
+	}
+}
+
 func (d *desktop) profileView(c *ui.Context) {
 	width, _ := c.Size()
 	if !d.sidebarCollapsed {
@@ -215,7 +229,9 @@ func (d *desktop) profileView(c *ui.Context) {
 			if !compact {
 				ui.Text(c, "地址").Width(220).TextColor(c.Theme().TextMuted)
 			}
-			ui.Text(c, "操作").Width(60).TextColor(c.Theme().TextMuted)
+			if !compact {
+				ui.Text(c, "操作").Width(132).TextColor(c.Theme().TextMuted)
+			}
 		})
 	}
 	var moveFrom, moveTo profileID
@@ -260,6 +276,14 @@ func (d *desktop) profileView(c *ui.Context) {
 		if compact {
 			label += " · " + p.Settings.Host + ":" + p.Settings.Port
 		}
+		actions := func() {
+			if ui.Button(c.Key("profile-connect-"+string(p.ID)), "连接").Label("连接：" + p.Label).Width(60).Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+				d.openProfileConnection(p)
+			}
+			if ui.Button(c.Key("profile-edit-"+string(p.ID)), "编辑").Width(60).Clicked() {
+				d.loadProfile(p)
+			}
+		}
 		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 			favoriteLabel := "☆"
 			favoriteAction := "加入收藏"
@@ -302,11 +326,12 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 			if !compact {
 				ui.Text(c, p.Settings.Host+":"+p.Settings.Port).Width(220).TextColor(c.Theme().TextMuted)
-			}
-			if ui.Button(c.Key("profile-edit-"+string(p.ID)), "编辑").Width(60).Clicked() {
-				d.loadProfile(p)
+				actions()
 			}
 		})
+		if compact {
+			ui.Row(c).FillWidth().Gap(8).Children(actions)
+		}
 		if d.confirmProfileDelete == p.ID {
 			if d.confirmProfileDelete != "" {
 				var pending *profile

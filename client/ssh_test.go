@@ -17,7 +17,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func testSSHServer(t *testing.T) (connectionSettings, string, *atomic.Int32) {
+func testSSHServer(t *testing.T, authorized ...ssh.PublicKey) (connectionSettings, string, *atomic.Int32) {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -35,6 +35,15 @@ func testSSHServer(t *testing.T) (connectionSettings, string, *atomic.Int32) {
 		}
 		return nil, nil
 	}}
+	if len(authorized) > 0 {
+		config.PublicKeyCallback = func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+			attempts.Add(1)
+			if ssh.FingerprintSHA256(key) != ssh.FingerprintSHA256(authorized[0]) {
+				return nil, ssh.ErrNoAuth
+			}
+			return nil, nil
+		}
+	}
 	config.AddHostKey(signer)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
