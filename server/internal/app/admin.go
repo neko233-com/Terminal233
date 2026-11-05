@@ -112,7 +112,7 @@ func (s *Server) adminResource(w http.ResponseWriter, r *http.Request, user stri
 		s.error(w, http.StatusNotFound, "not_found", "接口不存在")
 		return
 	}
-	keys := []string{"admin:" + user, "admin-ip:" + requestClientIdentity(r)}
+	keys := []string{"admin:" + user, "admin-ip:" + s.requestClientIdentity(r)}
 	if retry, ok := s.adminLimiter.allow(time.Now(), keys...); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(retry)))
 		s.error(w, http.StatusTooManyRequests, "rate_limited", "管理员验证尝试过于频繁")

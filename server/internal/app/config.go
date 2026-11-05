@@ -5,20 +5,22 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
 var Version = "0.3.1"
 
 type Config struct {
-	AdminUsername       string
-	AdminBootstrapToken string
-	AdminTOTPSecret     string
-	Address             string
-	DataPath            string
-	MasterKey           string
-	OfficialToken       string
-	AllowedOrigins      map[string]struct{}
+	AdminUsername         string
+	AdminBootstrapToken   string
+	AdminTOTPSecret       string
+	Address               string
+	DataPath              string
+	MasterKey             string
+	OfficialToken         string
+	AllowedOrigins        map[string]struct{}
+	TrustCloudflareTunnel bool
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -49,6 +51,13 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if len(cfg.OfficialToken) < 32 {
 		return Config{}, errors.New("TERMINAL233_OFFICIAL_TOKEN 至少需要 32 个随机字符")
+	}
+	if value := strings.TrimSpace(os.Getenv("TERMINAL233_TRUST_CLOUDFLARE_TUNNEL")); value != "" {
+		trusted, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, errors.New("TERMINAL233_TRUST_CLOUDFLARE_TUNNEL 必须是布尔值")
+		}
+		cfg.TrustCloudflareTunnel = trusted
 	}
 	cfg.AllowedOrigins = parseOrigins(os.Getenv("TERMINAL233_ALLOWED_ORIGINS"))
 	return cfg, nil

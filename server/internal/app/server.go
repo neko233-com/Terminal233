@@ -120,7 +120,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &input) {
 		return
 	}
-	registerKeys := []string{"register@" + requestClientIdentity(r)}
+	registerKeys := []string{"register@" + s.requestClientIdentity(r)}
 	if retryAfter, ok := s.registerLimiter.allow(time.Now(), registerKeys...); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(retryAfter)))
 		s.error(w, http.StatusTooManyRequests, "rate_limited", "注册尝试过于频繁，请稍后再试")
@@ -177,7 +177,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &input) {
 		return
 	}
-	loginKeys := authAttemptKeys(r, input.Username)
+	loginKeys := s.authAttemptKeys(r, input.Username)
 	if retryAfter, ok := s.loginLimiter.allow(time.Now(), loginKeys...); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(retryAfter)))
 		s.error(w, http.StatusTooManyRequests, "rate_limited", "登录尝试过于频繁，请稍后再试")

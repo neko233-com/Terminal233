@@ -41,7 +41,7 @@ func (s *Server) teamJoin(w http.ResponseWriter, r *http.Request, user string) {
 	if !s.decode(w, r, &body) {
 		return
 	}
-	keys := []string{"invite:" + requestClientIdentity(r), "invite-user:" + user}
+	keys := []string{"invite:" + s.requestClientIdentity(r), "invite-user:" + user}
 	if retry, ok := s.inviteLimiter.allow(time.Now(), keys...); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(retry)))
 		s.error(w, http.StatusTooManyRequests, "rate_limited", "尝试过于频繁，请稍后再试")

@@ -3,6 +3,7 @@ package app
 import (
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -96,9 +97,27 @@ func (l *authAttemptLimiter) pruneLocked(now time.Time) {
 	}
 }
 
-func requestClientIdentity(r *http.Request) string {
-	if host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr)); err == nil && net.ParseIP(host) != nil {
-		return host
+func (s *Server) requestClientIdentity(r *http.Request) string {
+	peer := strings.TrimSpace(r.RemoteAddr)
+	if host, _, err := net.SplitHostPort(peer); err == nil {
+		peer = host
+	}
+	ip, err := netip.ParseAddr(peer)
+	if err == nil {
+		ip = ip.Unmap()
+		if s.cfg.TrustCloudflareTunnel && ip.IsLoopback() {
+			values := r.Header.Values("CF-Connecting-IP")
+			if len(values) == 1 {
+				visitor, err := netip.ParseAddr(strings.TrimSpace(values[0]))
+				if err == nil {
+					visitor = visitor.Unmap()
+					if visitor.Zone() == "" && visitor.IsGlobalUnicast() && !visitor.IsPrivate() {
+						return visitor.String()
+					}
+				}
+			}
+		}
+		return ip.String()
 	}
 	if value := strings.TrimSpace(r.RemoteAddr); value != "" {
 		return value
@@ -106,8 +125,8 @@ func requestClientIdentity(r *http.Request) string {
 	return "unknown"
 }
 
-func authAttemptKeys(r *http.Request, username string) []string {
-	client := requestClientIdentity(r)
+func (s *Server) authAttemptKeys(r *http.Request, username string) []string {
+	client := s.requestClientIdentity(r)
 	account := normalizeUsername(username)
 	return []string{
 		"ip:" + client,
