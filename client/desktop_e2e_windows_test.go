@@ -276,6 +276,26 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "本机终端已打开") {
 		t.Fatalf("local PowerShell terminal failed to start: %s", tree)
 	}
+	// Set a real PowerShell directory before enabling follow in the file view.
+	followDir := filepath.Join(t.TempDir(), "目录 with spaces")
+	if err := os.Mkdir(followDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	focusTree := call("tree")["result"].(map[string]any)
+	var localTerminalID string
+	for _, value := range focusTree["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["label"] == "Terminal" {
+			localTerminalID, _ = node["id"].(string)
+			break
+		}
+	}
+	if localTerminalID == "" {
+		t.Fatalf("local terminal missing: %s", tree)
+	}
+	call("act", map[string]any{"id": localTerminalID, "action": "focus"})
+	command := "Set-Location -LiteralPath '" + strings.ReplaceAll(followDir, "'", "''") + "'"
+	call("input", map[string]any{"events": []any{map[string]any{"type": "text", "text": command}, map[string]any{"type": "key", "key": "Enter"}}})
 	call("act", map[string]any{"key": "nav-files", "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -306,6 +326,45 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !deadline.IsZero() {
 		t.Fatal("local directory read did not finish")
 	}
+	call("act", map[string]any{"key": "file-follow-terminal", "action": "press"})
+	deadline = time.Now().Add(15 * time.Second)
+	followed := false
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "remote-dir" && strings.EqualFold(fmt.Sprint(node["value"]), followDir) {
+				followed = true
+				break
+			}
+		}
+		if followed {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !followed {
+		t.Fatal("file panel did not follow the real PowerShell working directory")
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "file-follow-terminal" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				deadline = time.Time{}
+				break
+			}
+		}
+		if deadline.IsZero() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !deadline.IsZero() {
+		t.Fatal("followed directory did not finish loading")
+	}
+	call("act", map[string]any{"key": "file-follow-terminal", "action": "press"})
 	// Exercise the native file workspace against an isolated directory.
 	localDirectory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(localDirectory, "original.txt"), []byte("content"), 0600); err != nil {
