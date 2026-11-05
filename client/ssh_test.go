@@ -224,6 +224,24 @@ func TestSFTPTransferAndExplicitDelete(t *testing.T) {
 	if err := downloadFile(shell, path.Join(remoteDir, "source.txt"), target); err == nil {
 		t.Fatal("download overwrote local file")
 	}
+	if err := os.WriteFile(filepath.Join(root, "remote", "existing.txt"), []byte("protected"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameFile(shell, remoteDir, "source.txt", "existing.txt"); err == nil {
+		t.Fatal("remote rename replaced existing file")
+	}
+	if err := renameFile(shell, remoteDir, "source.txt", "../escape"); err == nil {
+		t.Fatal("remote rename allowed traversal")
+	}
+	if err := renameFile(shell, remoteDir, "source.txt", "renamed.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "remote", "existing.txt")); err != nil || string(got) != "protected" {
+		t.Fatal("existing remote target changed")
+	}
+	if err := renameFile(shell, remoteDir, "renamed.txt", "source.txt"); err != nil {
+		t.Fatal(err)
+	}
 	if err := deleteRemote(shell, path.Join(remoteDir, "source.txt")); err != nil {
 		t.Fatal(err)
 	}

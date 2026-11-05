@@ -222,6 +222,9 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	// Exercise the native file workspace against an isolated directory.
 	localDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(localDirectory, "original.txt"), []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	call("act", map[string]any{"key": "remote-dir", "action": "setValue", "text": localDirectory})
 	call("act", map[string]any{"key": "file-refresh", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
@@ -244,6 +247,37 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if !localReady {
 		t.Fatal("isolated local directory did not finish loading")
+	}
+	call("act", map[string]any{"key": "file-original.txt", "action": "press"})
+	call("act", map[string]any{"key": "rename-name", "action": "setValue", "text": "renamed.txt"})
+	call("act", map[string]any{"key": "rename-selected", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, readErr := os.ReadFile(filepath.Join(localDirectory, "renamed.txt")); readErr == nil && string(data) == "content" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(localDirectory, "renamed.txt")); readErr != nil || string(data) != "content" {
+		t.Fatal("native rename did not finish")
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "file-refresh" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				deadline = time.Time{}
+				break
+			}
+		}
+		if deadline.IsZero() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !deadline.IsZero() {
+		t.Fatal("rename refresh did not finish")
 	}
 	call("act", map[string]any{"key": "new-directory-name", "action": "setValue", "text": "新目录"})
 	deadline = time.Now().Add(5 * time.Second)

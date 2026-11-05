@@ -54,7 +54,7 @@ type desktop struct {
 	nextProfileID                                                                           int
 	shell                                                                                   *remoteShell
 	fileDir, fileLocal, fileStatus, selectedFile, confirmDelete                             string
-	fileFilter, fileNewDirectory                                                            string
+	fileFilter, fileNewDirectory, fileRename                                                string
 	files                                                                                   []remoteFile
 	expectedFingerprint, changedFingerprint                                                 string
 	win                                                                                     *mygo.Window
@@ -480,7 +480,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.4"
+const version = "0.3.5"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

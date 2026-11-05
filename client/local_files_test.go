@@ -99,3 +99,38 @@ func TestCreateLocalDirectoryRejectsTraversalAndExistingEntries(t *testing.T) {
 		t.Fatal("directory was not created")
 	}
 }
+
+func TestRenameLocalDoesNotOverwriteOrEscape(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "source"), []byte("source"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "existing"), []byte("existing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, dest := range []string{"existing", "../escape", "a/b", ""} {
+		if err := renameFile(nil, root, "source", dest); err == nil {
+			t.Fatalf("accepted target %q", dest)
+		}
+	}
+	if err := renameFile(nil, root, "../source", "safe"); err == nil {
+		t.Fatal("source traversal accepted")
+	}
+	if err := renameFile(nil, root, "source", "renamed"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "renamed"))
+	if err != nil || string(data) != "source" {
+		t.Fatalf("source lost: %q %v", data, err)
+	}
+	data, err = os.ReadFile(filepath.Join(root, "existing"))
+	if err != nil || string(data) != "existing" {
+		t.Fatalf("existing target changed: %q %v", data, err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dir"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameFile(nil, root, "dir", "new-dir"); err != nil {
+		t.Fatal(err)
+	}
+}

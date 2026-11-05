@@ -78,6 +78,34 @@ func makeDirectory(shell *remoteShell, dir, name string) error {
 	})
 }
 
+// renameFile stays within the selected directory and never requests the
+// overwrite-capable OpenSSH posix-rename extension.
+func renameFile(shell *remoteShell, dir, oldName, newName string) error {
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("请先填写当前目录")
+	}
+	if oldName == "" || oldName == "." || oldName == ".." || strings.ContainsAny(oldName, "/\\\x00") || !validDirectoryName(newName) {
+		return errors.New("请输入单个有效文件名称")
+	}
+	if oldName == newName {
+		return errors.New("新名称与原名称相同")
+	}
+	if shell == nil {
+		return renameLocalNoReplace(filepath.Join(dir, oldName), filepath.Join(dir, newName))
+	}
+	return withSFTP(shell, func(client *sftp.Client) error {
+		target := path.Join(dir, newName)
+		if _, err := client.Lstat(target); err == nil {
+			return &os.PathError{Op: "rename", Path: target, Err: os.ErrExist}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		// SFTP v3 requires no overwrite, but some nonconforming servers can
+		// race this check and replace a file. The UI warns about this limit.
+		return client.Rename(path.Join(dir, oldName), target)
+	})
+}
+
 func withSFTP(shell *remoteShell, f func(*sftp.Client) error) error {
 	if shell == nil {
 		return errors.New("SSH 尚未连接")

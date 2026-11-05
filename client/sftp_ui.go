@@ -251,6 +251,38 @@ func (d *desktop) removeSelected() {
 	}()
 }
 
+func (d *desktop) renameSelected() {
+	if d.busy || d.term == nil || d.selectedFile == "" {
+		return
+	}
+	oldName, newName, shell, dir, sessionID := d.selectedFile, d.fileRename, d.shell, d.fileDir, d.currentSession
+	if !validDirectoryName(newName) {
+		d.fileStatus = "请输入单个有效文件名称"
+		return
+	}
+	d.busy = true
+	d.fileStatus = "正在重命名…"
+	go func() {
+		err := renameFile(shell, dir, oldName, newName)
+		d.win.Update(func() {
+			d.busy = false
+			if sessionID != d.currentSession || shell != d.shell {
+				return
+			}
+			if err != nil {
+				d.fileStatus = "重命名失败：" + transferErrorText(err)
+				return
+			}
+			if dir != d.fileDir {
+				d.fileStatus = "先前目录中的文件已重命名；当前目录未更改"
+				return
+			}
+			d.selectedFile, d.fileRename, d.confirmDelete = newName, "", ""
+			d.refreshFiles()
+		})
+	}()
+}
+
 func (d *desktop) createDirectory() {
 	if d.busy || d.term == nil {
 		return
@@ -293,7 +325,13 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	}
 	ui.Text(c, title).FontSize(16).Bold()
 	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
-	ui.TextInput(c.Key("remote-dir"), &d.fileDir).Label("当前目录").Placeholder("目录路径").OnChange(func() { d.selectedFile = ""; d.confirmDelete = ""; d.fileNewDirectory = ""; d.files = nil })
+	ui.TextInput(c.Key("remote-dir"), &d.fileDir).Label("当前目录").Placeholder("目录路径").OnChange(func() {
+		d.selectedFile = ""
+		d.confirmDelete = ""
+		d.fileNewDirectory = ""
+		d.fileRename = ""
+		d.files = nil
+	})
 	ui.Row(c).Gap(8).Children(func() {
 		if ui.Button(c.Key("file-parent"), "上一级").Disabled(d.busy || d.term == nil).Clicked() {
 			if local {
@@ -301,13 +339,12 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			} else {
 				d.fileDir = path.Join(d.fileDir, "..")
 			}
-			d.selectedFile, d.confirmDelete, d.fileStatus, d.fileNewDirectory = "", "", "", ""
+			d.selectedFile, d.confirmDelete, d.fileStatus, d.fileNewDirectory, d.fileRename = "", "", "", "", ""
 			d.files = nil
 			d.refreshFiles()
 		}
 		if ui.Button(c.Key("file-refresh"), "打开目录").Disabled(d.busy || d.term == nil).Clicked() {
-			d.selectedFile = ""
-			d.confirmDelete = ""
+			d.selectedFile, d.confirmDelete, d.fileRename = "", "", ""
 			d.refreshFiles()
 		}
 	})
@@ -321,6 +358,15 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			d.createDirectory()
 		}
 	})
+	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
+		ui.TextInput(c.Key("rename-name"), &d.fileRename).Label("新名称").Placeholder("输入选中文件的新名称").Grow(1)
+		if ui.Button(c.Key("rename-selected"), "重命名").Disabled(d.busy || d.term == nil || d.selectedFile == "" || d.fileRename == "").Clicked() {
+			d.renameSelected()
+		}
+	})
+	if d.shell != nil {
+		ui.Text(c, "远程重命名前会检查目标；并发写入时能否防覆盖取决于服务器。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+	}
 	ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录")
 	if len(d.files) > 0 {
 		ui.Row(c).FillWidth().Gap(12).Padding(8, 12).Background(c.Theme().Surface).Children(func() {
@@ -350,9 +396,13 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			row := ui.Button(c.Key("file-"+f.Name), label).Grow(1).Disabled(d.busy)
 			row.ContextMenu(func(menu *ui.Menu) {
 				if menu.Item("选择").Chosen() {
-					d.selectedFile = f.Name
+					d.selectedFile, d.fileRename = f.Name, f.Name
 					d.confirmDelete = ""
 					d.fileStatus = "已选择：" + f.Name
+				}
+				if menu.Item("重命名…").Chosen() {
+					d.selectedFile, d.fileRename, d.confirmDelete = f.Name, f.Name, ""
+					d.fileStatus = "请输入新名称，然后点击重命名：" + f.Name
 				}
 				if menu.Item("删除…").Chosen() {
 					d.selectedFile = f.Name
@@ -363,7 +413,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			if row.Clicked() {
 				d.confirmDelete = ""
 				if f.IsDir {
-					d.fileNewDirectory = ""
+					d.fileNewDirectory, d.fileRename = "", ""
 					if local {
 						d.fileDir = filepath.Join(d.fileDir, f.Name)
 					} else {
@@ -373,6 +423,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 					d.refreshFiles()
 				} else {
 					d.selectedFile = f.Name
+					d.fileRename = f.Name
 					d.fileStatus = "已选择：" + f.Name
 				}
 			}
