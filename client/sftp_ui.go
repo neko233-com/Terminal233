@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -317,6 +318,70 @@ func (d *desktop) createDirectory() {
 		})
 	}()
 }
+
+// displayedFiles sorts a copy so a view change cannot mutate a session's snapshot.
+func displayedFiles(files []remoteFile, query, order string, descending, hideDotfiles bool) []remoteFile {
+	query = strings.ToLower(strings.TrimSpace(query))
+	result := make([]remoteFile, 0, len(files))
+	for _, f := range files {
+		if hideDotfiles && strings.HasPrefix(f.Name, ".") {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(f.Name), query) {
+			continue
+		}
+		result = append(result, f)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		a, b := result[i], result[j]
+		if a.IsDir != b.IsDir {
+			return a.IsDir
+		}
+		if order == "size" || order == "time" {
+			av, bv := a.Size, b.Size
+			if order == "time" {
+				av, bv = a.Modified, b.Modified
+			}
+			unknownA, unknownB := av < 0, bv < 0
+			if order == "time" {
+				unknownA, unknownB = av <= 0, bv <= 0
+			}
+			if order == "size" {
+				unknownA, unknownB = unknownA || a.IsDir || a.IsLink, unknownB || b.IsDir || b.IsLink
+			}
+			if unknownA != unknownB {
+				return !unknownA
+			}
+			if !unknownA && av != bv {
+				if descending {
+					return av > bv
+				}
+				return av < bv
+			}
+		}
+		an, bn := strings.ToLower(a.Name), strings.ToLower(b.Name)
+		if an == bn {
+			return a.Name < b.Name
+		}
+		if order == "" || order == "name" {
+			if descending {
+				return an > bn
+			}
+		}
+		return an < bn
+	})
+	return result
+}
+
+func (d *desktop) setFileSort(order string) {
+	if d.fileSort == order || (d.fileSort == "" && order == "name") {
+		d.fileSort = order
+		d.fileSortDescending = !d.fileSortDescending
+	} else {
+		d.fileSort, d.fileSortDescending = order, false
+	}
+}
+
 func (d *desktop) fileView(c *ui.Context, compact bool) {
 	local := d.term != nil && d.shell == nil
 	title, help := "远程文件", "选择目录浏览，拖入单个文件上传；删除前需要再次确认。"
@@ -367,7 +432,34 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if d.shell != nil {
 		ui.Text(c, "远程重命名前会检查目标；并发写入时能否防覆盖取决于服务器。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 	}
-	ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录")
+	ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录").OnChange(func() {
+		d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""
+	})
+	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+		for _, column := range []struct{ key, label string }{{"name", "按名称"}, {"size", "按大小"}, {"time", "按修改时间"}} {
+			label := column.label
+			if d.fileSort == column.key || (d.fileSort == "" && column.key == "name") {
+				if d.fileSortDescending {
+					label += " ↓"
+				} else {
+					label += " ↑"
+				}
+			}
+			if ui.Button(c.Key("file-sort-"+column.key), label).Clicked() {
+				d.setFileSort(column.key)
+			}
+		}
+		label := "隐藏点文件"
+		if d.fileHideDotfiles {
+			label = "显示点文件"
+		}
+		if ui.Button(c.Key("file-toggle-dotfiles"), label).Clicked() {
+			d.fileHideDotfiles = !d.fileHideDotfiles
+			if d.fileHideDotfiles && strings.HasPrefix(d.selectedFile, ".") {
+				d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""
+			}
+		}
+	})
 	if len(d.files) > 0 {
 		ui.Row(c).FillWidth().Gap(12).Padding(8, 12).Background(c.Theme().Surface).Children(func() {
 			ui.Text(c, "名称").Grow(1).TextColor(c.Theme().TextMuted)
@@ -380,14 +472,9 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			}
 		})
 	}
-	query := strings.ToLower(strings.TrimSpace(d.fileFilter))
-	shown := 0
-	for _, entry := range d.files {
+	visible := displayedFiles(d.files, d.fileFilter, d.fileSort, d.fileSortDescending, d.fileHideDotfiles)
+	for _, entry := range visible {
 		f := entry
-		if query != "" && !strings.Contains(strings.ToLower(f.Name), query) {
-			continue
-		}
-		shown++
 		label := f.Name
 		if f.IsDir {
 			label = "📁 " + label
@@ -442,7 +529,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			}
 		})
 	}
-	if len(d.files) > 0 && shown == 0 {
+	if len(d.files) > 0 && len(visible) == 0 {
 		ui.Text(c, "没有匹配的文件").TextColor(c.Theme().TextMuted)
 	}
 }

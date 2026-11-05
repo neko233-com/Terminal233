@@ -665,3 +665,54 @@ func TestSplitSessionSwitchAndClosePreservesIndependentState(t *testing.T) {
 		t.Fatal("closing the split pane changed the active session")
 	}
 }
+
+func TestFileSortFilterAndHiddenSelection(t *testing.T) {
+	files := []remoteFile{{Name: "large", Size: 200, Modified: 10}, {Name: ".hidden", Size: 20, Modified: 30}, {Name: "folder", IsDir: true}, {Name: "small", Size: 3, Modified: 20}}
+	d := &desktop{workspace: "files", files: files, selectedFile: ".hidden", fileRename: ".hidden"}
+	view := ui.NewTester(d.view, 1200, 1500)
+	if err := view.Click("隐藏点文件"); err != nil {
+		t.Fatal(err)
+	}
+	if d.selectedFile != "" || d.fileRename != "" || view.HasText(".hidden") {
+		t.Fatal("hidden selected file remained actionable or visible")
+	}
+	if err := view.Click("按大小"); err != nil {
+		t.Fatal(err)
+	}
+	a, oka := view.Find("small")
+	b, okb := view.Find("large")
+	folder, okc := view.Find("📁 folder")
+	if !oka || !okb || !okc || folder.Y >= a.Y || a.Y >= b.Y {
+		t.Fatal("size order or directory precedence is wrong")
+	}
+	if err := view.Click("按大小 ↑"); err != nil {
+		t.Fatal(err)
+	}
+	a, _ = view.Find("small")
+	b, _ = view.Find("large")
+	if b.Y >= a.Y {
+		t.Fatal("descending size order is wrong")
+	}
+	if files[0].Name != "large" {
+		t.Fatal("sorting mutated the source snapshot")
+	}
+}
+
+func TestFileSortingUnknownValuesAndSessionState(t *testing.T) {
+	items := []remoteFile{{Name: "unknown", Size: -1}, {Name: "small", Size: 1}, {Name: "large", Size: 9}, {Name: "dir", IsDir: true}}
+	for _, descending := range []bool{false, true} {
+		got := displayedFiles(items, "", "size", descending, false)
+		if got[0].Name != "dir" || got[len(got)-1].Name != "unknown" {
+			t.Fatalf("invalid order: %+v", got)
+		}
+	}
+	d := &desktop{currentSession: 1, fileSort: "size", fileSortDescending: true, fileHideDotfiles: true, sessions: []*workspaceSession{{id: 1}, {id: 2, fileSort: "time"}}}
+	d.activateSession(2)
+	if d.fileSort != "time" || d.fileSortDescending || d.fileHideDotfiles {
+		t.Fatal("other session state not restored")
+	}
+	d.activateSession(1)
+	if d.fileSort != "size" || !d.fileSortDescending || !d.fileHideDotfiles {
+		t.Fatal("first session state not restored")
+	}
+}

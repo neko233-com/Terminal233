@@ -19,7 +19,8 @@ type workspaceSession struct {
 	shell                                        *remoteShell
 	active                                       connectionSettings
 	fileDir, fileLocal, fileStatus, selectedFile string
-	fileFilter                                   string
+	fileFilter, fileSort                         string
+	fileSortDescending, fileHideDotfiles         bool
 	files                                        []remoteFile
 	refreshPending                               bool
 }
@@ -34,7 +35,8 @@ func (d *desktop) saveSessionState() {
 			continue
 		}
 		s.fileDir, s.fileLocal, s.fileStatus, s.selectedFile = d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile
-		s.fileFilter = d.fileFilter
+		s.fileFilter, s.fileSort = d.fileFilter, d.fileSort
+		s.fileSortDescending, s.fileHideDotfiles = d.fileSortDescending, d.fileHideDotfiles
 		s.files = d.files
 		return
 	}
@@ -57,7 +59,8 @@ func (d *desktop) activateSession(id int) {
 		d.currentSession = id
 		d.term, d.shell, d.active = s.term, s.shell, s.active
 		d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile = s.fileDir, s.fileLocal, s.fileStatus, s.selectedFile
-		d.fileFilter = s.fileFilter
+		d.fileFilter, d.fileSort = s.fileFilter, s.fileSort
+		d.fileSortDescending, d.fileHideDotfiles = s.fileSortDescending, s.fileHideDotfiles
 		d.fileNewDirectory, d.fileRename = "", ""
 		d.files, d.confirmDelete = s.files, ""
 		d.workspace = "terminal"
@@ -118,7 +121,8 @@ func (d *desktop) closeSession(id int) {
 		d.splitSession, d.splitFirstSession = 0, 0
 		d.term, d.shell, d.active = nil, nil, connectionSettings{}
 		d.files, d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile, d.confirmDelete = nil, "", "", "", "", ""
-		d.fileFilter = ""
+		d.fileFilter, d.fileSort = "", ""
+		d.fileSortDescending, d.fileHideDotfiles = false, false
 		if len(d.sessions) == 0 {
 			d.workspace, d.status = "connections", "已断开"
 			return

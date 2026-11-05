@@ -225,6 +225,10 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(localDirectory, "original.txt"), []byte("content"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(localDirectory, ".hidden"), []byte("private"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
 	call("act", map[string]any{"key": "remote-dir", "action": "setValue", "text": localDirectory})
 	call("act", map[string]any{"key": "file-refresh", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
@@ -247,6 +251,30 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if !localReady {
 		t.Fatal("isolated local directory did not finish loading")
+	}
+	call("act", map[string]any{"key": "file-toggle-dotfiles", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "显示点文件") && !strings.Contains(tree, "file-.hidden") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "显示点文件") || strings.Contains(tree, "file-.hidden") {
+		t.Fatalf("dotfile toggle failed: %s", tree)
+	}
+	call("act", map[string]any{"key": "file-sort-size", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "按大小 ↑") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "按大小 ↑") {
+		t.Fatalf("file sort control failed: %s", tree)
 	}
 	call("act", map[string]any{"key": "file-original.txt", "action": "press"})
 	call("act", map[string]any{"key": "rename-name", "action": "setValue", "text": "renamed.txt"})
