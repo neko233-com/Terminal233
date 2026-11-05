@@ -64,6 +64,9 @@ func validDirectoryName(name string) bool {
 }
 
 func makeDirectory(shell *remoteShell, dir, name string) error {
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("请先填写当前目录")
+	}
 	if !validDirectoryName(name) {
 		return errors.New("请输入单个有效目录名称")
 	}

@@ -70,6 +70,10 @@ type desktop struct {
 	cloudURL, cloudUser, cloudPassword, cloudRegistration, cloudStatus                      string
 	cloudRegistrationLocal                                                                  bool
 	accounts                                                                                []cloudAccount
+	updateStatus, updatePath                                                                string
+	updateAvailable                                                                         *updateCandidate
+	updateChecking, updateDownloading                                                       bool
+	updateCancel                                                                            context.CancelFunc
 }
 
 var workspaceTheme = func() *ui.Theme {
@@ -327,6 +331,7 @@ func (d *desktop) view(c *ui.Context) {
 						}
 						ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
 						ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端").FontSize(11).TextColor(t.TextMuted).Wrap()
+						d.updateView(c)
 					})
 				})
 			}
@@ -461,7 +466,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.1"
+const version = "0.3.2"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -483,6 +488,7 @@ func main() {
 	mygo.App.WhenReady(func() {
 		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH", Width: 1200, Height: 760, MinWidth: 640, MinHeight: 480, Content: ui.View(d.view)})
 		d.win.OnClosed(d.closeAllSessions)
+		d.startUpdateCheck()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

@@ -81,6 +81,9 @@ func TestCancelledLocalCopyRemovesPartialTarget(t *testing.T) {
 
 func TestCreateLocalDirectoryRejectsTraversalAndExistingEntries(t *testing.T) {
 	root := t.TempDir()
+	if err := makeDirectory(nil, "", "safe-name"); err == nil {
+		t.Fatal("empty current directory was accepted")
+	}
 	for _, name := range []string{"", ".", "..", "../outside", "a/b", `a\b`, "a:b", "bad\tname", " name "} {
 		if err := makeDirectory(nil, root, name); err == nil {
 			t.Fatalf("accepted directory name %q", name)

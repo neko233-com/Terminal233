@@ -115,6 +115,8 @@ Desktop.ini
 
 # MyGo and Go build artifacts
 /build/
+.nekossh-update-*.part
+terminal233-setup-*.exe
 client/.mygo/
 client/build/
 server/terminal233-server

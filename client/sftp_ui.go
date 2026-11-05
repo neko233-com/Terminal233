@@ -163,6 +163,10 @@ func (d *desktop) transfer(upload bool) {
 	if d.busy || d.term == nil || d.fileLocal == "" {
 		return
 	}
+	if strings.TrimSpace(d.fileDir) == "" {
+		d.fileStatus = "请先填写当前目录"
+		return
+	}
 	shell, dir, local, selected, sessionID := d.shell, d.fileDir, d.fileLocal, d.selectedFile, d.currentSession
 	refresh := transferUpdatesDirectory(shell, dir, local, upload)
 	if !upload && selected == "" {

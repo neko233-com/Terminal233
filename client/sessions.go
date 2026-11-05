@@ -121,6 +121,9 @@ func (d *desktop) closeSession(id int) {
 }
 
 func (d *desktop) closeAllSessions() {
+	if d.updateCancel != nil {
+		d.updateCancel()
+	}
 	if d.cancelTransfer != nil {
 		d.cancelTransfer()
 	}
