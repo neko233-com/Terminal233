@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/egoist/mygo/ui"
+	"path/filepath"
 	"testing"
 )
 
@@ -151,6 +152,43 @@ func TestThemeSwitchKeepsWorkspaceUsable(t *testing.T) {
 	}
 	if d.lightTheme || !test.HasText("浅色") {
 		t.Fatal("dark theme was not restored")
+	}
+}
+
+func TestReloadAfterProfileConflictRequiresConfirmation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	first := &desktop{settings: connectionSettings{Host: "first.test", Port: "22", User: "alice"}}
+	second := &desktop{settings: connectionSettings{Host: "second.test", Port: "22", User: "bob"}}
+	if err := first.loadProfiles(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.loadProfiles(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.saveProfiles(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.saveProfiles(); err == nil {
+		t.Fatal("expected conflict")
+	}
+	test := ui.NewTester(second.view, 1200, 1200)
+	if err := test.Click("重新载入本机连接"); err != nil {
+		t.Fatal(err)
+	}
+	if len(second.profiles) != 1 || second.profiles[0].Settings.Host != "second.test" {
+		t.Fatal("first click discarded changes")
+	}
+	if err := test.Click("确认放弃本窗口未保存更改并重新载入"); err != nil {
+		t.Fatal(err)
+	}
+	if second.profileStoreConflict || len(second.profiles) != 1 || second.profiles[0].Settings.Host != "first.test" {
+		t.Fatalf("reload failed: %+v", second.profiles)
 	}
 }
 

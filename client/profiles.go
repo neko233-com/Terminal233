@@ -110,6 +110,28 @@ func (d *desktop) profileView(c *ui.Context) {
 	if d.status != "" {
 		ui.Text(c, d.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
+	if d.profileStoreConflict {
+		label := "重新载入本机连接"
+		if d.confirmProfileReload {
+			label = "确认放弃本窗口未保存更改并重新载入"
+		}
+		if ui.Button(c.Key("profile-reload"), label).Disabled(d.busy).Clicked() {
+			if !d.confirmProfileReload {
+				d.confirmProfileReload = true
+				d.status = "重新载入会放弃本窗口未保存的连接更改；再次点击确认。"
+			} else if err := d.loadProfiles(d.profilePath); err != nil {
+				d.confirmProfileReload = false
+				d.status = "重新载入失败，当前连接未更改：" + err.Error()
+			} else {
+				d.confirmProfileReload = false
+				d.selectedProfile = ""
+				d.profileFilter = ""
+				d.profileFavorites = false
+				d.profileRecent = false
+				d.status = "已重新载入本机连接"
+			}
+		}
+	}
 	ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接").Placeholder("搜索连接或分组")
 	ui.Row(c).Gap(8).Children(func() {
 		if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.selectedProfile == "" || d.profileRecent).Clicked() {

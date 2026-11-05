@@ -40,6 +40,8 @@ type desktop struct {
 	profileRecent                                                                           bool
 	profilePath                                                                             string
 	profileStoreBlocked                                                                     bool
+	profileStoreConflict                                                                    bool
+	confirmProfileReload                                                                    bool
 	profileExists                                                                           bool
 	profileRevision                                                                         [32]byte
 	nextProfileID                                                                           int

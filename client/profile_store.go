@@ -27,9 +27,11 @@ type diskProfiles struct {
 func (d *desktop) loadProfiles(path string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		d.profiles, d.nextProfileID = nil, 0
 		d.profilePath = path
 		d.profileExists = false
 		d.profileRevision = [32]byte{}
+		d.profileStoreConflict = false
 		return nil
 	}
 	if err != nil {
@@ -55,6 +57,7 @@ func (d *desktop) loadProfiles(path string) error {
 	}
 	d.profiles, d.nextProfileID, d.profilePath = profiles, len(profiles), path
 	d.profileExists, d.profileRevision = true, sha256.Sum256(data)
+	d.profileStoreConflict = false
 	return nil
 }
 
@@ -95,7 +98,8 @@ func (d *desktop) saveProfiles() error {
 	}
 	exists := err == nil
 	if exists != d.profileExists || (exists && sha256.Sum256(current) != d.profileRevision) {
-		return errors.New("连接文件已被其他窗口更改，当前更改尚未保存；请先处理其他窗口并重新启动")
+		d.profileStoreConflict = true
+		return errors.New("连接文件已被其他窗口更改，当前更改尚未保存；可返回连接列表重新载入")
 	}
 	f, err := os.CreateTemp(dir, ".profiles-*.tmp")
 	if err != nil {
@@ -119,5 +123,6 @@ func (d *desktop) saveProfiles() error {
 		return err
 	}
 	d.profileExists, d.profileRevision = true, sha256.Sum256(data)
+	d.profileStoreConflict = false
 	return nil
 }
