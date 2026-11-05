@@ -10,6 +10,40 @@ import (
 
 const maxWorkspaceSessions = 12
 
+type sessionDragID int
+
+func (d *desktop) neighborSession(id, delta int) int {
+	for i, s := range d.sessions {
+		if s.id == id && i+delta >= 0 && i+delta < len(d.sessions) {
+			return d.sessions[i+delta].id
+		}
+	}
+	return 0
+}
+
+// moveSession changes tab order without changing the active or split sessions.
+func (d *desktop) moveSession(from, to int) {
+	a, b := -1, -1
+	for i, s := range d.sessions {
+		if s.id == from {
+			a = i
+		}
+		if s.id == to {
+			b = i
+		}
+	}
+	if a < 0 || b < 0 || a == b {
+		return
+	}
+	s := d.sessions[a]
+	if a < b {
+		copy(d.sessions[a:b], d.sessions[a+1:b+1])
+	} else {
+		copy(d.sessions[b+1:a+1], d.sessions[b:a])
+	}
+	d.sessions[b] = s
+}
+
 func terminalEnded(term *terminal.Terminal) bool {
 	if term == nil {
 		return false

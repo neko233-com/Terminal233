@@ -199,3 +199,47 @@ func TestSplitSessionButtonFocusesSelectedTerminal(t *testing.T) {
 		t.Fatal("shortcut switched session while an operation is busy")
 	}
 }
+
+func TestSessionTabsReorderWithoutChangingActiveOrSplit(t *testing.T) {
+	left, peer := net.Pipe()
+	defer peer.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{workspace: "terminal", term: term, currentSession: 1, splitSession: 2, splitFirstSession: 1, sessions: []*workspaceSession{
+		{id: 1, label: "first", term: term}, {id: 2, label: "second"}, {id: 3, label: "third"},
+	}}
+	view := ui.NewTester(d.view, 1500, 900)
+	from, ok := view.Find("third")
+	if !ok {
+		t.Fatal("third tab missing")
+	}
+	to, ok := view.Find("first")
+	if !ok {
+		t.Fatal("first tab missing")
+	}
+	view.Press(from.X+from.W/2, from.Y+from.H/2)
+	view.Move(to.X+to.W/2, to.Y+to.H/2)
+	view.Release(to.X+to.W/2, to.Y+to.H/2)
+	if d.sessions[0].id != 3 || d.sessions[1].id != 1 || d.sessions[2].id != 2 {
+		t.Fatal("tab drag did not reorder")
+	}
+	if d.currentSession != 1 || d.splitSession != 2 || d.splitFirstSession != 1 {
+		t.Fatal("reordering changed active or split session")
+	}
+	if err := view.RightClick("first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.ChooseMenuItem("向右移动"); err != nil {
+		t.Fatal(err)
+	}
+	if d.sessions[0].id != 3 || d.sessions[1].id != 2 || d.sessions[2].id != 1 {
+		t.Fatal("tab menu did not reorder")
+	}
+	view.Key(ui.Cmd, ui.KeyTab)
+	if d.currentSession != 3 {
+		t.Fatal("session shortcut did not follow reordered tabs")
+	}
+}

@@ -411,12 +411,29 @@ func (d *desktop) view(c *ui.Context) {
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
 				if d.workspace == "terminal" {
 					closeSessionID := 0
+					var moveSessionFrom, moveSessionTo sessionDragID
 					ui.ScrollHorizontal(c).FillWidth().Padding(8, 12).Gap(6).Children(func() {
-						for _, session := range d.sessions {
+						for index, session := range d.sessions {
 							s := session
+							index := index
 							ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
-								if workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), s.id == d.currentSession).Disabled(!d.canSwitchSession()).Clicked() {
+								tab := workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), s.id == d.currentSession).Disabled(!d.canSwitchSession()).Drag(sessionDragID(s.id))
+								tab.ContextMenu(func(menu *ui.Menu) {
+									if menu.Item("向左移动").Disabled(index == 0).Chosen() {
+										moveSessionFrom, moveSessionTo = sessionDragID(s.id), sessionDragID(d.neighborSession(s.id, -1))
+									}
+									if menu.Item("向右移动").Disabled(index == len(d.sessions)-1).Chosen() {
+										moveSessionFrom, moveSessionTo = sessionDragID(s.id), sessionDragID(d.neighborSession(s.id, 1))
+									}
+									if menu.Item("关闭会话").Disabled(d.busy).Chosen() {
+										closeSessionID = s.id
+									}
+								})
+								if tab.Clicked() {
 									d.selectSession(s.id)
+								}
+								if dragged, ok := ui.Drop[sessionDragID](tab); ok {
+									moveSessionFrom, moveSessionTo = dragged, sessionDragID(s.id)
 								}
 								if ui.Button(c.Key(fmt.Sprintf("session-close-%d", s.id)), "×").Label("关闭会话：" + s.label).Disabled(d.busy).Clicked() {
 									closeSessionID = s.id
@@ -424,6 +441,10 @@ func (d *desktop) view(c *ui.Context) {
 							})
 						}
 					})
+					if moveSessionFrom != 0 {
+						d.moveSession(int(moveSessionFrom), int(moveSessionTo))
+						c.Invalidate()
+					}
 					if closeSessionID != 0 {
 						d.closeSession(closeSessionID)
 					}
@@ -625,7 +646,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.36"
+const version = "0.3.37"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
