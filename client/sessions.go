@@ -23,6 +23,7 @@ type workspaceSession struct {
 	fileSortDescending, fileHideDotfiles         bool
 	files                                        []remoteFile
 	refreshPending                               bool
+	forwards                                     []*localForward
 }
 
 func (d *desktop) canSwitchSession() bool {
@@ -57,6 +58,7 @@ func (d *desktop) activateSession(id int) {
 			d.splitFirstSession = id
 		}
 		d.currentSession = id
+		d.forwardStatus = ""
 		d.term, d.shell, d.active = s.term, s.shell, s.active
 		d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile = s.fileDir, s.fileLocal, s.fileStatus, s.selectedFile
 		d.fileFilter, d.fileSort = s.fileFilter, s.fileSort
@@ -106,6 +108,9 @@ func (d *desktop) closeSession(id int) {
 		if s.id != id {
 			continue
 		}
+		for _, forward := range s.forwards {
+			forward.Close()
+		}
 		if s.term != nil {
 			_ = s.term.Close()
 		}
@@ -144,7 +149,12 @@ func (d *desktop) closeAllSessions() {
 		d.cancelTransfer()
 	}
 	for _, s := range d.sessions {
-		_ = s.term.Close()
+		for _, forward := range s.forwards {
+			forward.Close()
+		}
+		if s.term != nil {
+			_ = s.term.Close()
+		}
 	}
 	d.sessions = nil
 	d.term, d.shell, d.active = nil, nil, connectionSettings{}

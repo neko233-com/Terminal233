@@ -71,6 +71,7 @@ type desktop struct {
 	cloudURL, cloudUser, cloudPassword, cloudRegistration, cloudStatus                      string
 	cloudRegistrationLocal                                                                  bool
 	accounts                                                                                []cloudAccount
+	forwardLocalPort, forwardHost, forwardPort, forwardStatus                               string
 	updateStatus, updatePath                                                                string
 	updateAvailable                                                                         *updateCandidate
 	updateChecking, updateDownloading                                                       bool
@@ -270,6 +271,9 @@ func (d *desktop) view(c *ui.Context) {
 								d.refreshFiles()
 							}
 						}
+						if workspaceButton(c, "nav-forward", "端口转发", d.workspace == "forward").Clicked() {
+							d.workspace = "forward"
+						}
 						if workspaceButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
 							d.workspace = "cloud"
 						}
@@ -412,6 +416,8 @@ func (d *desktop) view(c *ui.Context) {
 						case "files":
 							ui.Text(c, "文件管理").FontSize(22).Bold()
 							d.fileView(c, false)
+						case "forward":
+							d.forwardView(c)
 						case "cloud":
 							ui.Text(c, "云端工作区").FontSize(22).Bold()
 							d.cloudView(c)
@@ -481,7 +487,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.8"
+const version = "0.3.9"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -491,7 +497,7 @@ func main() {
 		fmt.Println("Terminal233 " + version)
 		return
 	}
-	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息", cloudURL: defaultCloudURL, teamInviteHours: "24", teamInviteUses: "1"}
+	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息", cloudURL: defaultCloudURL, forwardLocalPort: "0", forwardHost: "127.0.0.1", teamInviteHours: "24", teamInviteUses: "1"}
 	if dir, err := os.UserConfigDir(); err != nil {
 		d.profileStoreBlocked = true
 		d.status = "无法找到本机配置目录：" + err.Error()

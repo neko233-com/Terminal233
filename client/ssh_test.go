@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -91,6 +92,36 @@ func testSSHServerWithSlowSFTP(t *testing.T, slow *atomic.Bool, authorized ...ss
 				defer sc.Close()
 				go ssh.DiscardRequests(reqs)
 				for ch := range chans {
+					if ch.ChannelType() == "direct-tcpip" {
+						var request struct {
+							Host       string
+							Port       uint32
+							Origin     string
+							OriginPort uint32
+						}
+						if ssh.Unmarshal(ch.ExtraData(), &request) != nil || request.Host != "127.0.0.1" || request.Port > 65535 {
+							_ = ch.Reject(ssh.Prohibited, "loopback test targets only")
+							continue
+						}
+						target, dialErr := net.DialTimeout("tcp", net.JoinHostPort(request.Host, fmt.Sprint(request.Port)), time.Second)
+						if dialErr != nil {
+							_ = ch.Reject(ssh.ConnectionFailed, "test target unavailable")
+							continue
+						}
+						channel, requests, acceptErr := ch.Accept()
+						if acceptErr != nil {
+							_ = target.Close()
+							continue
+						}
+						go ssh.DiscardRequests(requests)
+						go func() {
+							defer target.Close()
+							defer channel.Close()
+							go io.Copy(target, channel)
+							_, _ = io.Copy(channel, target)
+						}()
+						continue
+					}
 					if ch.ChannelType() != "session" {
 						_ = ch.Reject(ssh.UnknownChannelType, "unsupported")
 						continue

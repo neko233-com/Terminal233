@@ -10,10 +10,12 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -176,6 +178,79 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if !deadline.IsZero() {
 		t.Fatal("initial file refresh did not finish")
+	}
+	// Exercise the native forwarding controls through the in-process SSH test server.
+	forwardTarget, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer forwardTarget.Close()
+	go func() {
+		for {
+			connection, acceptErr := forwardTarget.Accept()
+			if acceptErr != nil {
+				return
+			}
+			go func() { defer connection.Close(); _, _ = io.Copy(connection, connection) }()
+		}
+	}()
+	_, targetPort, _ := net.SplitHostPort(forwardTarget.Addr().String())
+	call("act", map[string]any{"key": "nav-forward", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "forward-port") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "forward-port") {
+		t.Fatalf("forward controls missing: %s", tree)
+	}
+	call("act", map[string]any{"key": "forward-port", "action": "setValue", "text": targetPort})
+	call("act", map[string]any{"key": "forward-start", "action": "press"})
+	var address string
+	forwardPattern := regexp.MustCompile(`已启动：(127\.0\.0\.1:[0-9]+)`)
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if match := forwardPattern.FindStringSubmatch(tree); len(match) == 2 {
+			address = match[1]
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if address == "" {
+		t.Fatalf("forward did not start: %s", tree)
+	}
+	forwardConn, err := net.DialTimeout("tcp", address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = forwardConn.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err = forwardConn.Write([]byte("test")); err != nil {
+		t.Fatal(err)
+	}
+	forwardReply := make([]byte, 4)
+	if _, err = io.ReadFull(forwardConn, forwardReply); err != nil || string(forwardReply) != "test" {
+		t.Fatalf("forward relay failed: %q %v", forwardReply, err)
+	}
+	_ = forwardConn.Close()
+	call("act", map[string]any{"key": "forward-stop-0", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "转发已停止") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "转发已停止") {
+		t.Fatalf("forward did not stop: %s", tree)
+	}
+	if conn, dialErr := net.DialTimeout("tcp", address, time.Second); dialErr == nil {
+		conn.Close()
+		t.Fatal("stopped forward still listening")
 	}
 	call("act", map[string]any{"key": "nav-connections", "action": "press"})
 	call("act", map[string]any{"key": "profile-local-terminal", "action": "press"})

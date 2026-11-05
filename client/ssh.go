@@ -56,6 +56,7 @@ func inspectHost(s connectionSettings) (string, error) {
 
 type remoteShell struct {
 	client  *ssh.Client
+	done    <-chan struct{}
 	session *ssh.Session
 	in      io.WriteCloser
 	out     io.Reader
@@ -135,6 +136,11 @@ func connectShell(s connectionSettings) (*remoteShell, error) {
 		_ = output.Close()
 		return fail(err)
 	}
-	go func() { _ = output.CloseWithError(session.Wait()) }()
-	return &remoteShell{client: client, session: session, in: in, out: out}, nil
+	go func() {
+		_ = output.CloseWithError(session.Wait())
+		_ = client.Close()
+	}()
+	done := make(chan struct{})
+	go func() { _ = client.Wait(); close(done) }()
+	return &remoteShell{client: client, done: done, session: session, in: in, out: out}, nil
 }
