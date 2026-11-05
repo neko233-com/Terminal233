@@ -41,6 +41,8 @@ type desktop struct {
 	profileFilter                                                                           string
 	profileFavorites                                                                        bool
 	profileRecent                                                                           bool
+	profileSort                                                                             string
+	profileSortDescending                                                                   bool
 	profilePath                                                                             string
 	profileStoreBlocked                                                                     bool
 	profileStoreConflict                                                                    bool

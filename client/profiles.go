@@ -110,6 +110,8 @@ func (d *desktop) profileView(c *ui.Context) {
 	help := "搜索、分组和管理 SSH 连接。右键可移除，拖动可调整顺序。"
 	if d.profileRecent {
 		help = "最近连接按成功连接时间排序。"
+	} else if d.profileSort != "" {
+		help = "正在按所选列排序；切换到自定义顺序后可拖动或移动连接。"
 	}
 	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
 	if d.status != "" {
@@ -138,11 +140,33 @@ func (d *desktop) profileView(c *ui.Context) {
 		}
 	}
 	ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接").Placeholder("搜索连接或分组")
-	ui.Row(c).Gap(8).Children(func() {
-		if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.selectedProfile == "" || d.profileRecent).Clicked() {
+	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+		for _, column := range []struct{ key, label string }{{"name", "名称排序"}, {"host", "地址排序"}} {
+			label := column.label
+			if d.profileSort == column.key && !d.profileRecent {
+				if d.profileSortDescending {
+					label += " ↓"
+				} else {
+					label += " ↑"
+				}
+			}
+			if ui.Button(c.Key("profile-sort-"+column.key), label).Disabled(d.profileRecent).Clicked() {
+				if d.profileSort == column.key {
+					d.profileSortDescending = !d.profileSortDescending
+				} else {
+					d.profileSort, d.profileSortDescending = column.key, false
+				}
+			}
+		}
+		if ui.Button(c.Key("profile-sort-custom"), "自定义顺序").Disabled(d.profileRecent || d.profileSort == "").Clicked() {
+			d.profileSort, d.profileSortDescending = "", false
+		}
+	})
+	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+		if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
 			d.moveSelectedProfile(-1)
 		}
-		if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.selectedProfile == "" || d.profileRecent).Clicked() {
+		if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
 			d.moveSelectedProfile(1)
 		}
 	})
@@ -167,6 +191,19 @@ func (d *desktop) profileView(c *ui.Context) {
 	if d.profileRecent {
 		items = append([]profile(nil), d.profiles...)
 		sort.SliceStable(items, func(i, j int) bool { return items[i].LastConnected > items[j].LastConnected })
+	} else if d.profileSort != "" {
+		items = append([]profile(nil), d.profiles...)
+		sort.SliceStable(items, func(i, j int) bool {
+			a, b := items[i].Label, items[j].Label
+			if d.profileSort == "host" {
+				a, b = items[i].Settings.Host, items[j].Settings.Host
+			}
+			a, b = strings.ToLower(a), strings.ToLower(b)
+			if d.profileSortDescending {
+				return a > b
+			}
+			return a < b
+		})
 	}
 	for _, item := range items {
 		p := item
@@ -211,7 +248,7 @@ func (d *desktop) profileView(c *ui.Context) {
 				}
 			}
 			row := ui.Button(c.Key("profile-"+string(p.ID)), label).Grow(1)
-			if !d.profileRecent {
+			if !d.profileRecent && d.profileSort == "" {
 				row = row.Drag(p.ID)
 			}
 			row.ContextMenu(func(menu *ui.Menu) {
@@ -225,7 +262,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			if row.Clicked() {
 				d.loadProfile(p)
 			}
-			if !d.profileRecent {
+			if !d.profileRecent && d.profileSort == "" {
 				if dragged, ok := ui.Drop[profileID](row); ok {
 					moveFrom, moveTo = dragged, p.ID
 				}

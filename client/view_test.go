@@ -156,6 +156,46 @@ func TestRecentConnectionsUseSuccessfulConnectionOrder(t *testing.T) {
 	}
 }
 
+func TestConnectionSortingPreservesCustomOrder(t *testing.T) {
+	d := &desktop{settings: connectionSettings{Host: "z.example", Port: "22", User: "alice"}, profileLabel: "Bravo"}
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	d.selectedProfile, d.profileLabel, d.settings.Host = "", "Alpha", "a.example"
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	view := ui.NewTester(d.view, 1200, 1400)
+	assertOrder := func(first, second string) {
+		t.Helper()
+		a, okA := view.Find(first)
+		b, okB := view.Find(second)
+		if !okA || !okB || a.Y >= b.Y {
+			t.Fatalf("unexpected displayed order %s then %s: %+v %+v", first, second, a, b)
+		}
+	}
+	assertOrder("Bravo", "Alpha")
+	if err := view.Click("名称排序"); err != nil {
+		t.Fatal(err)
+	}
+	assertOrder("Alpha", "Bravo")
+	if err := view.Click("名称排序 ↑"); err != nil {
+		t.Fatal(err)
+	}
+	assertOrder("Bravo", "Alpha")
+	if err := view.Click("地址排序"); err != nil {
+		t.Fatal(err)
+	}
+	assertOrder("Alpha", "Bravo")
+	if d.profiles[0].Label != "Bravo" {
+		t.Fatal("sorting changed the stored custom order")
+	}
+	if err := view.Click("自定义顺序"); err != nil {
+		t.Fatal(err)
+	}
+	assertOrder("Bravo", "Alpha")
+}
+
 func TestThemeSwitchKeepsWorkspaceUsable(t *testing.T) {
 	d := &desktop{}
 	test := ui.NewTester(d.view, 1200, 900)
