@@ -416,6 +416,10 @@ func nextAccountTimestamp(previous string) string {
 }
 
 func (s *Store) deleteAccount(owner, id string) error {
+	return s.deleteAccountIfVersion(owner, id, "")
+}
+
+func (s *Store) deleteAccountIfVersion(owner, id, expected string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.activeUserLocked(owner) {
@@ -424,6 +428,9 @@ func (s *Store) deleteAccount(owner, id string) error {
 	items := s.doc.Accounts[normalizeUsername(owner)]
 	for i, item := range items {
 		if item.ID == id {
+			if expected != "" && expected != item.UpdatedAt {
+				return errAccountConflict
+			}
 			key := normalizeUsername(owner)
 			updated := append([]storedAccount(nil), items[:i]...)
 			updated = append(updated, items[i+1:]...)

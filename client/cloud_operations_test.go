@@ -224,6 +224,13 @@ func TestLegacyCloudCapabilityFallback(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":"item"}`))
 			return
 		}
+		if r.Method == http.MethodDelete {
+			if r.Header.Get("X-Neko-Expected-Updated-At") != "" {
+				t.Error("legacy delete included an unsupported header")
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		_, _ = w.Write([]byte(`[{"id":"item"}]`))
 	}))
 	defer server.Close()
@@ -237,7 +244,7 @@ func TestLegacyCloudCapabilityFallback(t *testing.T) {
 		t.Fatal("legacy server was treated as conditional")
 	}
 	view := ui.NewTester((&desktop{workspace: "cloud", cloud: c}).view, 1200, 1400)
-	if !view.HasText("未确认当前服务支持并发修改保护；多设备同时更新可能覆盖，请先刷新并核对。") {
+	if !view.HasText("未确认当前服务支持并发修改或删除保护；多设备同时操作可能冲突，请先刷新并核对。") {
 		t.Fatal("legacy protection warning missing")
 	}
 	account := cloudAccount{ID: "item"}
@@ -246,6 +253,31 @@ func TestLegacyCloudCapabilityFallback(t *testing.T) {
 	}
 	if _, _, err, _ := saveCloudAndRefresh(c, account); err != nil {
 		t.Fatal(err)
+	}
+	if err := c.removeWithRevision("item", "old-version"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConditionalDeleteBindsSelectionAndReportsConflict(t *testing.T) {
+	c := &cloudClient{conditionalDeletes: true}
+	d := &desktop{cloud: c}
+	d.prepareCloudDelete(cloudAccount{ID: "item", Label: "test"})
+	if d.confirmCloudDelete != "" || !strings.Contains(d.cloudStatus, "刷新") {
+		t.Fatal("missing revision allowed deletion")
+	}
+	original := "2026-01-01T00:00:00Z"
+	d.prepareCloudDelete(cloudAccount{ID: "item", Label: "test", UpdatedAt: original})
+	if d.confirmCloudDelete != "item" || d.confirmCloudDeleteVersion != original {
+		t.Fatal("selection revision was not retained")
+	}
+	d.finishCloudDelete("item", nil, &cloudHTTPError{Status: http.StatusConflict, Code: "account_conflict", Message: "conflict"}, nil)
+	if !d.cloudListStale || !strings.Contains(d.cloudStatus, "本次未删除") {
+		t.Fatal("confirmed conflict was not explained")
+	}
+	d.finishCloudRefresh(nil, nil)
+	if d.confirmCloudDelete != "" || d.confirmCloudDeleteVersion != "" {
+		t.Fatal("refresh retained a stale delete confirmation")
 	}
 }
 

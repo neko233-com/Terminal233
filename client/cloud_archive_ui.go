@@ -135,6 +135,7 @@ func (d *desktop) finishArchiveImport(result archiveImportResult) {
 		d.accounts = result.accounts
 	}
 	d.confirmCloudDelete = ""
+	d.confirmCloudDeleteVersion = ""
 	if result.mutationErr != nil {
 		d.cloudListStale = true
 		d.archiveStatus = fmt.Sprintf("已确认导入 %d 条；下一条请求未确认，可能已生效。请刷新并核对后再操作：%v", result.imported, result.mutationErr)

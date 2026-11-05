@@ -88,7 +88,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version, "capabilities": []string{"conditional-account-update"}})
+		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version, "capabilities": []string{"conditional-account-update", "conditional-account-delete"}})
 	case r.URL.Path == "/api/v1/register" && r.Method == http.MethodPost:
 		s.register(w, r)
 	case r.URL.Path == "/api/v1/login" && r.Method == http.MethodPost:
@@ -266,11 +266,35 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, username 
 		s.error(w, http.StatusBadRequest, "invalid_account", "账号 ID 无效")
 		return
 	}
-	if err := s.store.deleteAccount(username, id); err != nil {
+	expected, ok := s.expectedDeleteRevision(w, r)
+	if !ok {
+		return
+	}
+	if err := s.store.deleteAccountIfVersion(username, id, expected); err != nil {
+		if errors.Is(err, errAccountConflict) {
+			s.error(w, http.StatusConflict, "account_conflict", "连接已被其他设备修改，请刷新后重试")
+			return
+		}
 		s.error(w, http.StatusNotFound, "account_not_found", "SSH 账号不存在")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) expectedDeleteRevision(w http.ResponseWriter, r *http.Request) (string, bool) {
+	values := r.Header.Values("X-Neko-Expected-Updated-At")
+	if len(values) == 0 {
+		return "", true
+	}
+	if len(values) != 1 || len(values[0]) > 64 {
+		s.error(w, http.StatusBadRequest, "invalid_revision", "连接版本无效")
+		return "", false
+	}
+	if _, err := time.Parse(time.RFC3339Nano, values[0]); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_revision", "连接版本无效")
+		return "", false
+	}
+	return values[0], true
 }
 
 func (s *Server) withUser(w http.ResponseWriter, r *http.Request, handler func(http.ResponseWriter, *http.Request, string)) {

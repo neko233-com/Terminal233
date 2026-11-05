@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -94,7 +95,7 @@ func (d *desktop) finishCloudRefresh(accounts []cloudAccount, err error) {
 		d.cloudStatus = "连接列表刷新失败，请重试：" + err.Error()
 		return
 	}
-	d.accounts, d.selectedCloudProfile, d.cloudListStale, d.confirmCloudDelete = accounts, "", false, ""
+	d.accounts, d.selectedCloudProfile, d.cloudListStale, d.confirmCloudDelete, d.confirmCloudDeleteVersion = accounts, "", false, "", ""
 	d.cloudStatus = "已刷新连接列表"
 }
 func cloneCloudSources(source map[string]string) map[string]string {
@@ -412,8 +413,8 @@ func (d *desktop) cloudView(c *ui.Context) {
 		return
 	}
 	ui.Text(c, "云端连接").FontSize(16).Bold()
-	if !d.cloud.conditionalUpdates {
-		ui.Text(c, "未确认当前服务支持并发修改保护；多设备同时更新可能覆盖，请先刷新并核对。").FontSize(12).Wrap()
+	if !d.cloud.conditionalUpdates || !d.cloud.conditionalDeletes {
+		ui.Text(c, "未确认当前服务支持并发修改或删除保护；多设备同时操作可能冲突，请先刷新并核对。").FontSize(12).Wrap()
 	}
 	if d.teamListStale {
 		ui.Text(c, "团队列表可能过期，请刷新团队后再执行管理操作。").FontSize(12).Wrap()
@@ -480,14 +481,28 @@ func (d *desktop) cloudView(c *ui.Context) {
 		row := ui.Button(c.Key("account-"+account.ID), account.Label).Disabled(d.busy)
 		row.ContextMenu(func(menu *ui.Menu) {
 			if d.canWriteCloudScope() && menu.Item("删除…").Chosen() {
-				d.confirmCloudDelete = account.ID
-				d.cloudStatus = "请点击删除按钮确认：" + account.Label
+				d.prepareCloudDelete(account)
 			}
 		})
 		if row.Clicked() {
 			d.loadCloudAccount(account)
 		}
 	}
+}
+
+func (d *desktop) prepareCloudDelete(account cloudAccount) {
+	if d.busy || d.cloudListStale || !d.canWriteCloudScope() {
+		return
+	}
+	if d.cloud.conditionalDeletes {
+		if _, err := time.Parse(time.RFC3339Nano, account.UpdatedAt); err != nil {
+			d.confirmCloudDelete, d.confirmCloudDeleteVersion = "", ""
+			d.cloudStatus = "缺少有效的连接版本，请刷新后重新选择。"
+			return
+		}
+	}
+	d.confirmCloudDelete, d.confirmCloudDeleteVersion = account.ID, account.UpdatedAt
+	d.cloudStatus = "请点击删除按钮确认：" + account.Label
 }
 
 func (d *desktop) cloudURLChanged() {
@@ -501,17 +516,22 @@ func (d *desktop) cloudDelete() {
 	if d.busy || !d.canWriteCloudScope() || d.cloudListStale || d.confirmCloudDelete == "" {
 		return
 	}
-	id, client := d.confirmCloudDelete, d.cloud
-	d.confirmCloudDelete = ""
+	id, revision, client := d.confirmCloudDelete, d.confirmCloudDeleteVersion, d.cloud
+	d.confirmCloudDelete, d.confirmCloudDeleteVersion = "", ""
 	d.busy = true
 	go func() {
-		accounts, mutationErr, refreshErr := mutateAndRefresh(func() error { return client.remove(id) }, client.list)
+		accounts, mutationErr, refreshErr := mutateAndRefresh(func() error { return client.removeWithRevision(id, revision) }, client.list)
 		d.win.Update(func() { d.busy = false; d.finishCloudDelete(id, accounts, mutationErr, refreshErr) })
 	}()
 }
 func (d *desktop) finishCloudDelete(id string, accounts []cloudAccount, mutationErr, refreshErr error) {
 	if mutationErr != nil {
 		d.cloudListStale = true
+		var httpErr *cloudHTTPError
+		if errors.As(mutationErr, &httpErr) && httpErr.Status == http.StatusConflict && httpErr.Code == "account_conflict" {
+			d.cloudStatus = "连接已被其他设备修改；本次未删除，请刷新并重新选择。"
+			return
+		}
 		d.cloudStatus = "删除请求未确认，可能已生效；请先刷新：" + mutationErr.Error()
 		return
 	}
@@ -579,7 +599,7 @@ func (d *desktop) clearCloudState() {
 	d.cloudStatus, d.teamStatus = "", ""
 	d.accounts, d.teams, d.members, d.teamInvites = nil, nil, nil, nil
 	d.teamInviteURL, d.teamInviteInput, d.teamInvitePassword = "", "", ""
-	d.confirmMember, d.selectedMember, d.confirmInvite, d.confirmCloudDelete = "", "", "", ""
+	d.confirmMember, d.selectedMember, d.confirmInvite, d.confirmCloudDelete, d.confirmCloudDeleteVersion = "", "", "", "", ""
 	d.adminUsers, d.adminTeams = nil, nil
 	d.adminConfirmTeam, d.adminConfirmUser, d.adminStatus, d.adminTOTP = "", "", "", ""
 	d.adminConfirmRestore = false

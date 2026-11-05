@@ -33,6 +33,7 @@ type cloudClient struct {
 	teamID             string
 	adminTOTP          string
 	conditionalUpdates bool
+	conditionalDeletes bool
 }
 
 type cloudHTTPError struct {
@@ -51,13 +52,16 @@ func (c *cloudClient) discoverCapabilities() {
 		Capabilities []string `json:"capabilities"`
 	}
 	c.conditionalUpdates = false
+	c.conditionalDeletes = false
 	if c.request(http.MethodGet, "/healthz", nil, &health) != nil {
 		return
 	}
 	for _, capability := range health.Capabilities {
 		if capability == "conditional-account-update" {
 			c.conditionalUpdates = true
-			return
+		}
+		if capability == "conditional-account-delete" {
+			c.conditionalDeletes = true
 		}
 	}
 }
@@ -73,6 +77,10 @@ func newCloudClient(raw string) (*cloudClient, error) {
 }
 
 func (c *cloudClient) request(method, path string, input, output any) error {
+	return c.requestWithRevision(method, path, input, output, "")
+}
+
+func (c *cloudClient) requestWithRevision(method, path string, input, output any, expected string) error {
 	u := *c.base
 	u.Path += path
 	var body io.Reader
@@ -89,6 +97,9 @@ func (c *cloudClient) request(method, path string, input, output any) error {
 	}
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if expected != "" {
+		req.Header.Set("X-Neko-Expected-Updated-At", expected)
 	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
@@ -208,6 +219,22 @@ func (c *cloudClient) remove(id string) error {
 		return errors.New("无效的连接编号")
 	}
 	return c.request(http.MethodDelete, c.accountsPath()+"/"+url.PathEscape(id), nil, nil)
+}
+
+func (c *cloudClient) removeWithRevision(id, revision string) error {
+	if c.token == "" {
+		return errors.New("请先登录同步服务")
+	}
+	if id == "" || strings.ContainsAny(id, "/\\") {
+		return errors.New("无效的连接编号")
+	}
+	if c.conditionalDeletes {
+		if _, err := time.Parse(time.RFC3339Nano, revision); err != nil {
+			return errors.New("缺少有效的原始连接版本，请刷新并重新选择")
+		}
+		return c.requestWithRevision(http.MethodDelete, c.accountsPath()+"/"+url.PathEscape(id), nil, nil, revision)
+	}
+	return c.remove(id)
 }
 
 func (c *cloudClient) accountsPath() string {

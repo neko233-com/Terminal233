@@ -168,7 +168,15 @@ func (s *Server) teamResource(w http.ResponseWriter, r *http.Request, user strin
 		}
 		s.json(w, http.StatusCreated, result)
 	case len(parts) == 3 && parts[1] == "accounts" && r.Method == http.MethodDelete:
-		if err := s.store.deleteTeamAccount(user, id, parts[2]); err != nil {
+		expected, valid := s.expectedDeleteRevision(w, r)
+		if !valid {
+			return
+		}
+		if err := s.store.deleteTeamAccountIfVersion(user, id, parts[2], expected); err != nil {
+			if errors.Is(err, errAccountConflict) {
+				s.error(w, http.StatusConflict, "account_conflict", "连接已被其他设备修改，请刷新后重试")
+				return
+			}
 			s.error(w, http.StatusNotFound, "not_found", "凭据不存在或无权操作")
 			return
 		}

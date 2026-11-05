@@ -48,6 +48,7 @@ type desktop struct {
 	selectedMember                                                                          string
 	teamInviteHours, teamInviteUses                                                         string
 	confirmCloudDelete                                                                      string
+	confirmCloudDeleteVersion                                                               string
 	profiles                                                                                []profile
 	profileSearch, profileGroup, selectedProfile, quickConnect                              string
 	confirmProfileDelete                                                                    profileID
@@ -694,7 +695,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.53"
+const version = "0.3.54"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

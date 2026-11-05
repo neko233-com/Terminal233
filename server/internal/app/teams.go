@@ -313,6 +313,10 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 	return a, nil
 }
 func (s *Store) deleteTeamAccount(user, id, accountID string) error {
+	return s.deleteTeamAccountIfVersion(user, id, accountID, "")
+}
+
+func (s *Store) deleteTeamAccountIfVersion(user, id, accountID, expected string) error {
 	user = normalizeUsername(user)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -324,6 +328,9 @@ func (s *Store) deleteTeamAccount(user, id, accountID string) error {
 	index := -1
 	for i, a := range t.Accounts {
 		if a.ID == accountID {
+			if expected != "" && expected != a.UpdatedAt {
+				return errAccountConflict
+			}
 			index = i
 			break
 		}

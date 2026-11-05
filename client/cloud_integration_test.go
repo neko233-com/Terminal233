@@ -75,7 +75,7 @@ func TestCloudAgainstGoServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.discoverCapabilities()
-	if !client.conditionalUpdates {
+	if !client.conditionalUpdates || !client.conditionalDeletes {
 		t.Fatal("server conditional-update capability missing")
 	}
 	account := cloudAccount{Label: "sample", Host: "example.test", Port: 22, Username: "me", Password: "ssh-password", HostKeyFingerprint: "SHA256:verified"}
@@ -115,6 +115,10 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	var httpErr *cloudHTTPError
 	if !errors.As(conflict, &httpErr) || httpErr.Status != http.StatusConflict || httpErr.Code != "account_conflict" {
 		t.Fatalf("stale update was not rejected: %v", conflict)
+	}
+	err = client.removeWithRevision(accounts[0].ID, accounts[0].UpdatedAt)
+	if !errors.As(err, &httpErr) || httpErr.Status != http.StatusConflict || httpErr.Code != "account_conflict" {
+		t.Fatalf("stale delete was not rejected: %v", err)
 	}
 	for _, item := range both {
 		if item.ID == accounts[0].ID && item.Password != "updated-first" {
