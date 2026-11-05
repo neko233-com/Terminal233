@@ -3,15 +3,17 @@ package main
 import (
 	"fmt"
 	"github.com/egoist/mygo/ui"
+	"sort"
 	"strings"
 )
 
 type profileID string
 type profile struct {
-	ID           profileID
-	Group, Label string
-	Favorite     bool
-	Settings     connectionSettings
+	ID            profileID
+	Group, Label  string
+	Favorite      bool
+	LastConnected int64
+	Settings      connectionSettings
 }
 
 func (d *desktop) addProfile() error {
@@ -38,7 +40,7 @@ func (d *desktop) addProfile() error {
 		if safe.Fingerprint == "" && old.Settings.Host == safe.Host && old.Settings.Port == safe.Port && old.Settings.User == safe.User {
 			safe.Fingerprint = old.Settings.Fingerprint
 		}
-		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: label, Favorite: old.Favorite, Settings: safe}
+		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: label, Favorite: old.Favorite, LastConnected: old.LastConnected, Settings: safe}
 		return nil
 	}
 	d.nextProfileID++
@@ -82,7 +84,9 @@ func (d *desktop) loadProfile(p profile) {
 func (d *desktop) profileView(c *ui.Context) {
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 		title := "连接列表"
-		if d.profileFavorites {
+		if d.profileRecent {
+			title = "最近连接"
+		} else if d.profileFavorites {
 			title = "收藏的连接"
 		} else if d.profileFilter != "" {
 			title = "分组 / " + d.profileFilter
@@ -98,16 +102,20 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.editConnection = true
 		}
 	})
-	ui.Text(c, "搜索、分组和管理 SSH 连接。右键可移除，拖动可调整顺序。").TextColor(c.Theme().TextMuted).Wrap()
+	help := "搜索、分组和管理 SSH 连接。右键可移除，拖动可调整顺序。"
+	if d.profileRecent {
+		help = "最近连接按成功连接时间排序。"
+	}
+	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
 	if d.status != "" {
 		ui.Text(c, d.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
 	ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接").Placeholder("搜索连接或分组")
 	ui.Row(c).Gap(8).Children(func() {
-		if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.selectedProfile == "").Clicked() {
+		if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.selectedProfile == "" || d.profileRecent).Clicked() {
 			d.moveSelectedProfile(-1)
 		}
-		if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.selectedProfile == "").Clicked() {
+		if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.selectedProfile == "" || d.profileRecent).Clicked() {
 			d.moveSelectedProfile(1)
 		}
 	})
@@ -126,8 +134,16 @@ func (d *desktop) profileView(c *ui.Context) {
 	}
 	var moveFrom, moveTo profileID
 	shown := 0
-	for _, item := range d.profiles {
+	items := d.profiles
+	if d.profileRecent {
+		items = append([]profile(nil), d.profiles...)
+		sort.SliceStable(items, func(i, j int) bool { return items[i].LastConnected > items[j].LastConnected })
+	}
+	for _, item := range items {
 		p := item
+		if d.profileRecent && p.LastConnected <= 0 {
+			continue
+		}
 		if d.profileFavorites && !p.Favorite {
 			continue
 		}
@@ -162,7 +178,10 @@ func (d *desktop) profileView(c *ui.Context) {
 					d.status = "收藏状态已更新"
 				}
 			}
-			row := ui.Button(c.Key("profile-"+string(p.ID)), label).Grow(1).Drag(p.ID)
+			row := ui.Button(c.Key("profile-"+string(p.ID)), label).Grow(1)
+			if !d.profileRecent {
+				row = row.Drag(p.ID)
+			}
 			row.ContextMenu(func(menu *ui.Menu) {
 				if menu.Item("载入").Chosen() {
 					d.loadProfile(p)
@@ -184,8 +203,10 @@ func (d *desktop) profileView(c *ui.Context) {
 			if row.Clicked() {
 				d.loadProfile(p)
 			}
-			if dragged, ok := ui.Drop[profileID](row); ok {
-				moveFrom, moveTo = dragged, p.ID
+			if !d.profileRecent {
+				if dragged, ok := ui.Drop[profileID](row); ok {
+					moveFrom, moveTo = dragged, p.ID
+				}
 			}
 			ui.Text(c, p.Settings.Host+":"+p.Settings.Port).Width(220).TextColor(c.Theme().TextMuted)
 			if ui.Button(c.Key("profile-edit-"+string(p.ID)), "编辑").Width(60).Clicked() {

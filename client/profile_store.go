@@ -12,7 +12,8 @@ import (
 // passphrases can never be serialized through this type.
 type diskProfile struct {
 	Group, Label, Host, Port, User, KeyPath, Fingerprint string
-	Favorite                                             bool `json:",omitempty"`
+	Favorite                                             bool  `json:",omitempty"`
+	LastConnected                                        int64 `json:",omitempty"`
 }
 
 type diskProfiles struct {
@@ -45,7 +46,7 @@ func (d *desktop) loadProfiles(path string) error {
 		if _, err := settings.address(); err != nil {
 			return fmt.Errorf("连接列表第 %d 项无效：%w", i+1, err)
 		}
-		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Group: p.Group, Label: p.Label, Favorite: p.Favorite, Settings: settings})
+		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Group: p.Group, Label: p.Label, Favorite: p.Favorite, LastConnected: p.LastConnected, Settings: settings})
 	}
 	d.profiles, d.nextProfileID, d.profilePath = profiles, len(profiles), path
 	return nil
@@ -61,7 +62,7 @@ func (d *desktop) saveProfiles() error {
 	saved := diskProfiles{Version: 1, Items: make([]diskProfile, 0, len(d.profiles))}
 	for _, p := range d.profiles {
 		s := p.Settings
-		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Favorite: p.Favorite, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint})
+		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Favorite: p.Favorite, LastConnected: p.LastConnected, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint})
 	}
 	data, err := json.MarshalIndent(saved, "", "  ")
 	if err != nil {

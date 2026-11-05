@@ -17,6 +17,7 @@ func TestProfileStoreRoundTripDoesNotWriteCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.profiles[0].Favorite = true
+	d.profiles[0].LastConnected = 12345
 	if err := d.saveProfiles(); err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +40,7 @@ func TestProfileStoreRoundTripDoesNotWriteCredentials(t *testing.T) {
 	if err := restored.loadProfiles(path); err != nil {
 		t.Fatal(err)
 	}
-	if len(restored.profiles) != 2 || !restored.profiles[0].Favorite || restored.profiles[0].Settings.Fingerprint != "SHA256:test" || restored.profiles[1].Settings.Host != "two.test" {
+	if len(restored.profiles) != 2 || !restored.profiles[0].Favorite || restored.profiles[0].LastConnected != 12345 || restored.profiles[0].Settings.Fingerprint != "SHA256:test" || restored.profiles[1].Settings.Host != "two.test" {
 		t.Fatalf("incorrect restored profiles: %+v", restored.profiles)
 	}
 	if restored.profiles[0].Settings.Password != "" || restored.profiles[0].Settings.Passphrase != "" {

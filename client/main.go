@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/terminal"
@@ -36,6 +37,7 @@ type desktop struct {
 	profileLabel                                                                            string
 	profileFilter                                                                           string
 	profileFavorites                                                                        bool
+	profileRecent                                                                           bool
 	profilePath                                                                             string
 	profileStoreBlocked                                                                     bool
 	nextProfileID                                                                           int
@@ -122,6 +124,7 @@ func (d *desktop) connect() {
 	d.status = "正在建立安全连接…"
 	settings := d.settings
 	settings.Fingerprint = d.fingerprint
+	profileID := d.selectedProfile
 	d.settings.Password = ""
 	d.settings.Passphrase = ""
 	go func() {
@@ -143,8 +146,9 @@ func (d *desktop) connect() {
 			d.refreshFiles()
 			d.status = "已连接"
 			for i, p := range d.profiles {
-				if string(p.ID) == d.selectedProfile && p.Settings.Host == settings.Host && p.Settings.Port == settings.Port && p.Settings.User == settings.User {
+				if string(p.ID) == profileID && p.Settings.Host == settings.Host && p.Settings.Port == settings.Port && p.Settings.User == settings.User {
 					d.profiles[i].Settings.Fingerprint = settings.Fingerprint
+					d.profiles[i].LastConnected = time.Now().Unix()
 					if err := d.saveProfiles(); err != nil {
 						d.status = "已连接，但主机指纹未保存：" + err.Error()
 					}
@@ -202,13 +206,18 @@ func (d *desktop) view(c *ui.Context) {
 						d.editConnection = false
 						d.profileFilter = ""
 						d.profileFavorites = false
+						d.profileRecent = false
 					}
 					counts := make(map[string]int)
 					var groups []string
 					favorites := 0
+					recent := 0
 					for _, p := range d.profiles {
 						if p.Favorite {
 							favorites++
+						}
+						if p.LastConnected > 0 {
+							recent++
 						}
 						if p.Group != "" {
 							if counts[p.Group] == 0 {
@@ -222,6 +231,14 @@ func (d *desktop) view(c *ui.Context) {
 						d.editConnection = false
 						d.profileFilter = ""
 						d.profileFavorites = true
+						d.profileRecent = false
+					}
+					if ui.Button(c.Key("group-recent"), fmt.Sprintf("最近连接  %d", recent)).Clicked() {
+						d.workspace = "connections"
+						d.editConnection = false
+						d.profileFilter = ""
+						d.profileFavorites = false
+						d.profileRecent = true
 					}
 					for _, group := range groups {
 						name := group
@@ -230,6 +247,7 @@ func (d *desktop) view(c *ui.Context) {
 							d.editConnection = false
 							d.profileFilter = name
 							d.profileFavorites = false
+							d.profileRecent = false
 						}
 					}
 					ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()

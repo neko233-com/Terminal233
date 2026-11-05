@@ -109,6 +109,34 @@ func TestFavoritesAndCustomNameSearch(t *testing.T) {
 	}
 }
 
+func TestRecentConnectionsUseSuccessfulConnectionOrder(t *testing.T) {
+	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice"}}
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	d.profiles[0].LastConnected = 10
+	d.selectedProfile, d.settings.Host = "", "two.test"
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	d.profiles[1].LastConnected = 20
+	test := ui.NewTester(d.view, 1200, 1200)
+	if err := test.Click("最近连接  2"); err != nil {
+		t.Fatal(err)
+	}
+	first, ok := test.Find("alice@two.test")
+	if !ok {
+		t.Fatal("latest connection missing")
+	}
+	second, ok := test.Find("alice@one.test")
+	if !ok {
+		t.Fatal("older connection missing")
+	}
+	if first.Y >= second.Y {
+		t.Fatalf("recent connections out of order: %v %v", first, second)
+	}
+}
+
 func TestThemeSwitchKeepsWorkspaceUsable(t *testing.T) {
 	d := &desktop{}
 	test := ui.NewTester(d.view, 1200, 900)
