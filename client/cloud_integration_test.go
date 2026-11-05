@@ -80,8 +80,42 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	if err != nil || len(accounts) != 1 || accounts[0].Password != "ssh-password" {
 		t.Fatalf("list=%v err=%v", accounts, err)
 	}
-	if err := client.remove(accounts[0].ID); err != nil {
+	// The same endpoint can have separate cloud records; only an explicit ID
+	// may update one of them.
+	settings := connectionSettings{Host: account.Host, Port: "22", User: account.Username, Password: "second-secret", Fingerprint: account.HostKeyFingerprint}
+	second, err := prepareCloudAccount(settings, "second", accounts, "")
+	if err != nil || second.ID != "" {
+		t.Fatal("new record selected an existing ID")
+	}
+	if err = client.save(second); err != nil {
 		t.Fatal(err)
+	}
+	both, err := client.list()
+	if err != nil || len(both) != 2 {
+		t.Fatalf("expected two independent records: %v", err)
+	}
+	settings.Password = "updated-first"
+	update, err := prepareCloudAccount(settings, "", both, accounts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.save(update); err != nil {
+		t.Fatal(err)
+	}
+	both, err = client.list()
+	if err != nil || len(both) != 2 {
+		t.Fatal("cloud update changed the record count")
+	}
+	for _, item := range both {
+		if item.ID == accounts[0].ID && item.Password != "updated-first" {
+			t.Fatal("selected record not updated")
+		}
+		if item.ID != accounts[0].ID && item.Password != "second-secret" {
+			t.Fatal("other same-address record was overwritten")
+		}
+		if err := client.remove(item.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	accounts, err = client.list()
 	if err != nil || len(accounts) != 0 {

@@ -17,9 +17,20 @@ func TestCloudRequiresHTTPSAndRefusesCredentialURLs(t *testing.T) {
 func TestPrepareCloudAccountRequiresVerifiedPasswordConnection(t *testing.T) {
 	valid := connectionSettings{Host: "example.test", Port: "22", User: "alice", Password: "secret", Fingerprint: "SHA256:verified"}
 	stored := []cloudAccount{{ID: "same", Host: "example.test", Port: 22, Username: "alice"}, {ID: "other", Host: "other.test", Port: 22, Username: "alice"}}
-	account, err := prepareCloudAccount(valid, "工作机", stored)
+	account, err := prepareCloudAccount(valid, "工作机", stored, "same")
 	if err != nil || account.ID != "same" || account.Label != "工作机" || account.Password != "secret" || account.HostKeyFingerprint != "SHA256:verified" {
 		t.Fatalf("could not prepare update to selected scope: %#v %v", account, err)
+	}
+	created, err := prepareCloudAccount(valid, "新连接", stored, "")
+	if err != nil || created.ID != "" {
+		t.Fatal("address match silently selected an existing connection")
+	}
+	other, err := prepareCloudAccount(valid, "", stored, "other")
+	if err != nil || other.ID != "other" {
+		t.Fatal("explicit connection ID was not selected")
+	}
+	if _, err := prepareCloudAccount(valid, "", stored, "missing"); err == nil {
+		t.Fatal("missing selected cloud connection was silently recreated")
 	}
 	for _, invalid := range []connectionSettings{
 		{Host: valid.Host, Port: valid.Port, User: valid.User, Password: valid.Password},
@@ -27,7 +38,7 @@ func TestPrepareCloudAccountRequiresVerifiedPasswordConnection(t *testing.T) {
 		{Host: valid.Host, Port: "0", User: valid.User, Password: valid.Password, Fingerprint: valid.Fingerprint},
 		{Host: valid.Host, Port: valid.Port, User: valid.User, Fingerprint: valid.Fingerprint},
 	} {
-		if _, err := prepareCloudAccount(invalid, "", nil); err == nil {
+		if _, err := prepareCloudAccount(invalid, "", nil, ""); err == nil {
 			t.Fatal("accepted unverified or unsupported credentials")
 		}
 	}

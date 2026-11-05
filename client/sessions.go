@@ -48,6 +48,7 @@ type workspaceSession struct {
 	lastTerminalDir                                          string
 	files                                                    []remoteFile
 	refreshPending                                           bool
+	cloudID, cloudScope                                      string
 	forwards                                                 []*localForward
 }
 

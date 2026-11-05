@@ -741,3 +741,32 @@ func TestFileListPrecedesControlsAndRemainsBounded(t *testing.T) {
 		t.Fatalf("large directory pushed controls too far away: %v", controls.Y-first.Y)
 	}
 }
+
+func TestCloudUpdateUsesOnlyExplicitSourceAndScope(t *testing.T) {
+	account := cloudAccount{ID: "one", Label: "已有连接", Host: "example.test", Port: 22, Username: "alice", Password: "secret", HostKeyFingerprint: "SHA256:key"}
+	d := &desktop{workspace: "connections", editConnection: true, cloud: &cloudClient{teamID: "team-one"}, accounts: []cloudAccount{account}}
+	d.loadCloudAccount(account)
+	d.fingerprint = "SHA256:key"
+	view := ui.NewTester(d.view, 1200, 1600)
+	if !view.HasText("将更新已载入的云端连接；其他相同地址的连接不会被修改。") {
+		t.Fatal("explicit update target is unclear")
+	}
+	d.cloud.teamID = "team-two"
+	view.Frame()
+	if !view.HasText("将新建云端连接；相同地址不会自动覆盖。") {
+		t.Fatal("cross-team save did not switch to create")
+	}
+	d.currentSession = 1
+	d.sessions = []*workspaceSession{{id: 1, cloudID: "one", cloudScope: "team-one"}}
+	if d.currentCloudSource() != "" {
+		t.Fatal("other team's source leaked into current scope")
+	}
+	d.cloud.teamID = "team-one"
+	if d.currentCloudSource() != "one" {
+		t.Fatal("explicit session source was lost")
+	}
+	d.clearCloudState()
+	if d.sessions[0].cloudID != "" || d.cloudEditingID != "" {
+		t.Fatal("cloud source survived logout")
+	}
+}

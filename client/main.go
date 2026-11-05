@@ -63,6 +63,7 @@ type desktop struct {
 	win                                                                                     *mygo.Window
 	settings                                                                                connectionSettings
 	settingsFromCloud                                                                       bool
+	cloudEditingID, cloudEditingScope                                                       string
 	fingerprint, status                                                                     string
 	busy                                                                                    bool
 	cancelTransfer                                                                          context.CancelFunc
@@ -183,6 +184,10 @@ func (d *desktop) connect() {
 	options := d.terminalOptions()
 	settings.Fingerprint = d.fingerprint
 	profileID := d.selectedProfile
+	cloudID, cloudScope := "", ""
+	if d.settingsFromCloud && d.cloud != nil {
+		cloudID, cloudScope = d.cloudEditingID, d.cloudEditingScope
+	}
 	d.settings.Password = ""
 	d.settings.Passphrase = ""
 	go func() {
@@ -194,6 +199,12 @@ func (d *desktop) connect() {
 				return
 			}
 			d.addSession(term, shell, settings, settings.User+"@"+settings.Host)
+			for _, session := range d.sessions {
+				if session.id == d.currentSession {
+					session.cloudID, session.cloudScope = cloudID, cloudScope
+					break
+				}
+			}
 			d.refreshFiles()
 			d.status = "已连接"
 			for i, p := range d.profiles {
@@ -516,13 +527,18 @@ func (d *desktop) connectionView(c *ui.Context) {
 		if d.cloudListStale {
 			ui.Text(c, "云端列表需要先刷新后才能同步。").FontSize(12).Wrap()
 		}
+		if d.settingsFromCloud && d.cloudEditingID != "" && d.cloudEditingScope == d.cloud.teamID {
+			ui.Text(c, "将更新已载入的云端连接；其他相同地址的连接不会被修改。").FontSize(12).Wrap()
+		} else {
+			ui.Text(c, "将新建云端连接；相同地址不会自动覆盖。").FontSize(12).Wrap()
+		}
 		ui.Button(c.Key("cloudsave-form"), "确认指纹并同步密码连接").Disabled(d.busy || d.cloudListStale || d.fingerprint == "" || d.settings.Password == "" || d.settings.KeyPath != "").OnClick(d.cloudSaveForm)
 	}
 	ui.PrimaryButton(c.Key("connect"), "确认指纹并连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions || d.fingerprint == "").OnClick(d.connect)
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.15"
+const version = "0.3.16"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

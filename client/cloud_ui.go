@@ -88,17 +88,35 @@ func (d *desktop) cloudRefresh() {
 		})
 	}()
 }
+func (d *desktop) currentCloudSource() string {
+	if d.cloud == nil {
+		return ""
+	}
+	for _, session := range d.sessions {
+		if session.id == d.currentSession && session.cloudScope == d.cloud.teamID {
+			return session.cloudID
+		}
+	}
+	return ""
+}
+
 func (d *desktop) cloudSave() {
-	d.saveCloudConnection(d.active, "")
+	d.saveCloudConnection(d.active, "", d.currentCloudSource())
 }
 
 func (d *desktop) cloudSaveForm() {
 	settings := d.settings
 	settings.Fingerprint = d.fingerprint
-	d.saveCloudConnection(settings, d.profileLabel)
+	sourceID := ""
+	if d.settingsFromCloud && d.cloud != nil && d.cloudEditingScope == d.cloud.teamID {
+		sourceID = d.cloudEditingID
+	}
+	d.saveCloudConnection(settings, d.profileLabel, sourceID)
 }
 
-func prepareCloudAccount(settings connectionSettings, label string, existing []cloudAccount) (cloudAccount, error) {
+// Updates require an explicitly loaded ID; matching an address is not proof
+// that two cloud entries represent the same credential.
+func prepareCloudAccount(settings connectionSettings, label string, existing []cloudAccount, selectedID string) (cloudAccount, error) {
 	if _, err := settings.address(); err != nil {
 		return cloudAccount{}, err
 	}
@@ -107,20 +125,28 @@ func prepareCloudAccount(settings connectionSettings, label string, existing []c
 	}
 	port, _ := strconv.Atoi(strings.TrimSpace(settings.Port))
 	label = strings.TrimSpace(label)
+	if selectedID != "" {
+		found := false
+		for _, item := range existing {
+			if item.ID == selectedID {
+				found = true
+				if label == "" {
+					label = item.Label
+				}
+				break
+			}
+		}
+		if !found {
+			return cloudAccount{}, fmt.Errorf("原云端连接不存在或已不可见，请刷新并重新选择")
+		}
+	}
 	if label == "" {
 		label = settings.User + "@" + settings.Host
 	}
-	account := cloudAccount{Label: label, Host: strings.TrimSpace(settings.Host), Port: port, Username: strings.TrimSpace(settings.User), Password: settings.Password, HostKeyFingerprint: settings.Fingerprint}
-	for _, item := range existing {
-		if item.Host == account.Host && item.Port == account.Port && item.Username == account.Username {
-			account.ID = item.ID
-			break
-		}
-	}
-	return account, nil
+	return cloudAccount{ID: selectedID, Label: label, Host: strings.TrimSpace(settings.Host), Port: port, Username: strings.TrimSpace(settings.User), Password: settings.Password, HostKeyFingerprint: settings.Fingerprint}, nil
 }
 
-func (d *desktop) saveCloudConnection(settings connectionSettings, label string) {
+func (d *desktop) saveCloudConnection(settings connectionSettings, label, sourceID string) {
 	if d.busy || d.cloud == nil {
 		return
 	}
@@ -128,7 +154,7 @@ func (d *desktop) saveCloudConnection(settings connectionSettings, label string)
 		d.cloudStatus, d.status = "连接列表需要先刷新，避免重复或覆盖错误连接。", "连接列表需要先刷新。"
 		return
 	}
-	account, err := prepareCloudAccount(settings, label, d.accounts)
+	account, err := prepareCloudAccount(settings, label, d.accounts, sourceID)
 	if err != nil {
 		d.cloudStatus, d.status = err.Error(), err.Error()
 		return
@@ -169,6 +195,10 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.profileLabel = account.Label
 	d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
 	d.settingsFromCloud = true
+	d.cloudEditingID, d.cloudEditingScope = account.ID, ""
+	if d.cloud != nil {
+		d.cloudEditingScope = d.cloud.teamID
+	}
 	d.fingerprint = ""
 	d.changedFingerprint = ""
 	d.expectedFingerprint = account.HostKeyFingerprint
@@ -209,6 +239,13 @@ func (d *desktop) cloudView(c *ui.Context) {
 	ui.Text(c, "云端连接").FontSize(16).Bold()
 	if d.cloud != nil {
 		ui.Text(c, "当前同步空间："+d.cloudScopeName()).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+	}
+	if d.cloud != nil && d.active.Password != "" {
+		if d.currentCloudSource() != "" {
+			ui.Text(c, "同步当前会话将更新它载入的云端连接。").FontSize(12).Wrap()
+		} else {
+			ui.Text(c, "同步当前会话将新建云端连接，不会按地址覆盖已有记录。").FontSize(12).Wrap()
+		}
 	}
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 		if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || d.cloud == nil || d.cloudListStale || d.active.Password == "" || d.active.KeyPath != "").Clicked() {
@@ -335,6 +372,10 @@ func (d *desktop) clearCloudState() {
 	}
 	d.cloudPassword, d.cloudRegistration = "", ""
 	d.cloudRegistrationLocal, d.cloudListStale = false, false
+	d.cloudEditingID, d.cloudEditingScope = "", ""
+	for _, session := range d.sessions {
+		session.cloudID, session.cloudScope = "", ""
+	}
 	d.cloudStatus, d.teamStatus = "", ""
 	d.accounts, d.teams, d.members, d.teamInvites = nil, nil, nil, nil
 	d.teamInviteURL, d.teamInviteInput, d.teamInvitePassword = "", "", ""

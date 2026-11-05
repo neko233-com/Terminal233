@@ -39,7 +39,7 @@ func TestCloudSaveSuccessWithRefreshFailureIsNotReportedAsFailed(t *testing.T) {
 	if !view.HasText("连接列表可能过期，请先刷新后再修改或删除。") {
 		t.Fatal("stale list warning missing")
 	}
-	d.saveCloudConnection(connectionSettings{Host: "host", Port: "22", User: "u", Password: "p", Fingerprint: "SHA256:key"}, "")
+	d.saveCloudConnection(connectionSettings{Host: "host", Port: "22", User: "u", Password: "p", Fingerprint: "SHA256:key"}, "", "")
 	if posts != 1 {
 		t.Fatal("write repeated while list was stale")
 	}
