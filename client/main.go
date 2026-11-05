@@ -243,7 +243,11 @@ func (d *desktop) view(c *ui.Context) {
 							d.workspace = "cloud"
 						}
 						ui.Text(c, "连接").FontSize(12).TextColor(t.TextMuted)
-						if ui.Button(c.Key("group-all"), fmt.Sprintf("全部连接  %d", len(d.profiles)+1)).Clicked() {
+						connectionCount := len(d.profiles) + 1
+						if d.cloud != nil {
+							connectionCount += len(d.accounts)
+						}
+						if ui.Button(c.Key("group-all"), fmt.Sprintf("全部连接  %d", connectionCount)).Clicked() {
 							d.workspace = "connections"
 							d.editConnection = false
 							d.profileFilter = ""

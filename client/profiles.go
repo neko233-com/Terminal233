@@ -206,7 +206,7 @@ func (d *desktop) profileView(c *ui.Context) {
 	}
 	if len(d.profiles) == 0 {
 		ui.Column(c).FillWidth().Padding(28).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
-			ui.Text(c, "还没有 SSH 连接").FontSize(18).Bold()
+			ui.Text(c, "还没有本机 SSH 连接").FontSize(18).Bold()
 			ui.Text(c, "创建连接后，可在这里快速查找和管理。也可以打开本机终端。").TextColor(c.Theme().TextMuted).Wrap()
 		})
 	} else {
@@ -347,7 +347,46 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		}
 	}
-	if len(d.profiles) > 0 && shown == 0 && !showLocal {
+	if d.cloud != nil && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent {
+		scope := "个人空间"
+		if d.cloud.teamID != "" {
+			scope = "团队空间"
+			for _, team := range d.teams {
+				if team.ID == d.cloud.teamID {
+					scope = team.Name
+					break
+				}
+			}
+		}
+		ui.Text(c, "云端连接 · "+scope).FontSize(16).Bold()
+		accounts := d.accounts
+		if d.profileSort != "" {
+			accounts = append([]cloudAccount(nil), d.accounts...)
+			sort.SliceStable(accounts, func(i, j int) bool {
+				a, b := accounts[i].Label, accounts[j].Label
+				if d.profileSort == "host" {
+					a, b = accounts[i].Host, accounts[j].Host
+				}
+				a, b = strings.ToLower(a), strings.ToLower(b)
+				if d.profileSortDescending {
+					return a > b
+				}
+				return a < b
+			})
+		}
+		for _, entry := range accounts {
+			account := entry
+			if query != "" && !strings.Contains(strings.ToLower(account.Label+" "+account.Host+" "+account.Username), query) {
+				continue
+			}
+			shown++
+			label := account.Label + " · " + account.Username + "@" + account.Host
+			if ui.Button(c.Key("profile-cloud-"+account.ID), label).Disabled(d.busy).Clicked() {
+				d.loadCloudAccount(account)
+			}
+		}
+	}
+	if (len(d.profiles) > 0 || d.cloud != nil || query != "") && shown == 0 && !showLocal {
 		ui.Text(c, "没有匹配的连接").TextColor(c.Theme().TextMuted)
 	}
 	if moveFrom != "" {

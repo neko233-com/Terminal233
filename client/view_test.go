@@ -23,6 +23,35 @@ func TestNativeViewLoadsSyncedAccountWithoutTrustingIt(t *testing.T) {
 	}
 }
 
+func TestConnectionListShowsCurrentCloudScopeWithoutTrustingIt(t *testing.T) {
+	d := &desktop{cloud: &cloudClient{teamID: "team-1"}, teams: []cloudTeam{{ID: "team-1", Name: "研发"}}, accounts: []cloudAccount{{ID: "cloud-1", Label: "测试机", Host: "example.test", Port: 22, Username: "alice", Password: "secret", HostKeyFingerprint: "SHA256:cloud"}, {ID: "cloud-2", Label: "Alpha", Host: "other.test", Port: 22, Username: "bob"}}}
+	view := ui.NewTester(d.view, 1200, 1400)
+	if !view.HasText("云端连接 · 研发") || !view.HasText("全部连接  3") || !view.HasText("测试机 · alice@example.test") {
+		t.Fatalf("cloud connection missing from workspace: %v", view.Texts())
+	}
+	if err := view.Click("名称排序"); err != nil {
+		t.Fatal(err)
+	}
+	a, okA := view.Find("Alpha · bob@other.test")
+	b, okB := view.Find("测试机 · alice@example.test")
+	if !okA || !okB || a.Y >= b.Y || d.accounts[0].ID != "cloud-1" {
+		t.Fatal("cloud sorting changed stored order or displayed incorrect order")
+	}
+	d.profileSearch = "missing"
+	view.Frame()
+	if view.HasText("测试机 · alice@example.test") || !view.HasText("没有匹配的连接") {
+		t.Fatal("cloud connection did not follow search")
+	}
+	d.profileSearch = "example.test"
+	view.Frame()
+	if err := view.Click("测试机 · alice@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if d.settings.Host != "example.test" || d.fingerprint != "" || d.expectedFingerprint != "SHA256:cloud" || d.trustedProfileFingerprint() != "" {
+		t.Fatal("cloud connection was not loaded safely")
+	}
+}
+
 func TestConnectionListSearchAndContextMenu(t *testing.T) {
 	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice", Password: "private"}, profileGroup: "工作"}
 	if err := d.addProfile(); err != nil {

@@ -100,6 +100,19 @@ func (d *desktop) cloudSave() {
 		})
 	}()
 }
+
+func (d *desktop) loadCloudAccount(account cloudAccount) {
+	d.workspace = "connections"
+	d.editConnection = true
+	d.selectedProfile = ""
+	d.profileGroup = ""
+	d.profileLabel = account.Label
+	d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
+	d.fingerprint = ""
+	d.expectedFingerprint = account.HostKeyFingerprint
+	d.status = "已载入连接，请重新获取并核对主机指纹。"
+}
+
 func (d *desktop) cloudView(c *ui.Context) {
 	ui.Text(c, "跨设备访问连接信息，或与团队共享凭据。").TextColor(c.Theme().TextMuted).Wrap()
 	ui.Column(c).FillWidth().Padding(18).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
@@ -163,15 +176,7 @@ func (d *desktop) cloudView(c *ui.Context) {
 			}
 		})
 		if row.Clicked() {
-			d.workspace = "connections"
-			d.editConnection = true
-			d.selectedProfile = ""
-			d.profileGroup = ""
-			d.profileLabel = account.Label
-			d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
-			d.fingerprint = ""
-			d.expectedFingerprint = account.HostKeyFingerprint
-			d.status = "已载入连接，请重新获取并核对主机指纹。"
+			d.loadCloudAccount(account)
 		}
 	}
 }
