@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
@@ -83,7 +84,15 @@ func (d *desktop) groupTree() ([]string, map[string]int) {
 }
 
 func validGroupName(name string) bool {
-	return name != "" && name == strings.TrimSpace(name) && utf8.RuneCountInString(name) <= 64 && !strings.ContainsAny(name, "/\\\r\n\x00") && name != "." && name != ".."
+	if name == "" || !utf8.ValidString(name) || name != strings.TrimSpace(name) || utf8.RuneCountInString(name) > 64 || strings.ContainsAny(name, "/\\") || name == "." || name == ".." {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (d *desktop) groupExists(group string) bool {

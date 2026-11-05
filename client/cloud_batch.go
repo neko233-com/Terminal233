@@ -15,7 +15,10 @@ func (d *desktop) clearCloudBatch() {
 }
 
 func (d *desktop) cloudAccountVisible(a cloudAccount) bool {
-	if d.cloud == nil || d.profileSource == "local" || d.profileFilter != "" || d.profileFavorites || d.profileRecent {
+	if d.cloud == nil || d.profileSource == "local" || d.profileFavorites || d.profileRecent {
+		return false
+	}
+	if d.profileFilter != "" && (d.profileSource != "cloud" || !groupWithin(d.cloudGroupSnapshot.Assignments[a.ID], d.profileFilter)) {
 		return false
 	}
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
@@ -46,11 +49,14 @@ func (d *desktop) selectVisibleCloudAccounts() {
 }
 
 type cloudBatchResult struct {
-	completed               int
-	accounts                []cloudAccount
-	cancelled, refreshDone  bool
-	preflightErr            error
-	mutationErr, refreshErr error
+	completed                     int
+	accounts                      []cloudAccount
+	cancelled, refreshDone        bool
+	preflightErr                  error
+	mutationErr, refreshErr       error
+	groupErr                      error
+	groupState                    cloudGroupSnapshot
+	groupsIncluded, groupsApplied bool
 }
 
 // A network failure can leave a request's outcome unknown. Stop immediately
@@ -88,6 +94,10 @@ func (d *desktop) cloudBatch(action string) {
 		d.confirmCloudBatchDelete = false
 		return
 	}
+	if action == "copy" && d.cloud.cloudGroups && (d.cloudGroupsStale || !cloudGroupAccountsMatch(d.cloudGroupSnapshot, d.accounts)) {
+		d.status = "云端分组需要先刷新，才能复制连接。"
+		return
+	}
 	items := make([]cloudAccount, 0, len(d.checkedCloud))
 	for _, a := range d.accounts {
 		if selected, ok := d.checkedCloud[a.ID]; ok {
@@ -107,6 +117,7 @@ func (d *desktop) cloudBatch(action string) {
 		return
 	}
 	client := d.cloud
+	sourceGroups := d.cloudGroupSnapshot
 	d.clearCloudBatch()
 	d.busy = true
 	d.status = "正在处理云端连接…"
@@ -119,8 +130,18 @@ func (d *desktop) cloudBatch(action string) {
 			for i := range items {
 				items[i].Label += "（副本）"
 			}
-			copied := importCloudAccounts(ctx, client, items)
-			result = cloudBatchResult{completed: copied.imported, accounts: copied.accounts, cancelled: copied.cancelled, refreshDone: copied.preflightDone, preflightErr: copied.preflightErr, mutationErr: copied.mutationErr, refreshErr: copied.refreshErr}
+			var copied archiveImportResult
+			if client.cloudGroups {
+				paths := make([]string, len(items))
+				for i, a := range items {
+					paths[i] = sourceGroups.Assignments[a.ID]
+				}
+				doc := cloudArchiveDocument{Version: 2, Accounts: items, Groups: sourceGroups.Groups, AccountGroups: paths}
+				copied = importCloudArchiveExpected(ctx, client, doc, sourceGroups.Revision)
+			} else {
+				copied = importCloudAccounts(ctx, client, items)
+			}
+			result = cloudBatchResult{completed: copied.imported, accounts: copied.accounts, cancelled: copied.cancelled, refreshDone: copied.preflightDone, preflightErr: copied.preflightErr, mutationErr: copied.mutationErr, refreshErr: copied.refreshErr, groupErr: copied.groupErr, groupState: copied.groupState, groupsIncluded: copied.groupsIncluded, groupsApplied: copied.groupsApplied}
 		} else {
 			result = deleteCloudBatch(ctx, client, items)
 		}
@@ -133,6 +154,7 @@ func (d *desktop) cloudBatch(action string) {
 }
 
 func (d *desktop) finishCloudBatch(action string, result cloudBatchResult) {
+	d.invalidateCloudGroups()
 	d.selectedCloudProfile = ""
 	verb := "复制"
 	if action == "delete" {
@@ -140,6 +162,9 @@ func (d *desktop) finishCloudBatch(action string, result cloudBatchResult) {
 	}
 	if result.refreshDone && result.preflightErr == nil && result.refreshErr == nil {
 		d.accounts = result.accounts
+	}
+	if result.groupsApplied {
+		d.setCloudGroupState(result.groupState, nil)
 	}
 	d.confirmCloudDelete, d.confirmCloudDeleteVersion = "", ""
 	if result.preflightErr != nil {
@@ -156,6 +181,9 @@ func (d *desktop) finishCloudBatch(action string, result cloudBatchResult) {
 	} else if result.refreshErr != nil {
 		d.cloudListStale = true
 		d.status = fmt.Sprintf("已%s %d 条，但列表刷新失败，请先刷新：%v", verb, result.completed, result.refreshErr)
+	} else if result.groupErr != nil {
+		d.cloudListStale = true
+		d.status = fmt.Sprintf("已确认%s %d 条；分组未确认或未恢复，请刷新核对：%v", verb, result.completed, result.groupErr)
 	} else if result.cancelled {
 		d.cloudListStale = false
 		d.status = fmt.Sprintf("已取消；已确认%s %d 条云端连接。", verb, result.completed)

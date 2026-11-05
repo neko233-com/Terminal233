@@ -75,7 +75,7 @@ func TestCloudAgainstGoServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.discoverCapabilities()
-	if !client.conditionalUpdates || !client.conditionalDeletes {
+	if !client.conditionalUpdates || !client.conditionalDeletes || !client.cloudGroups {
 		t.Fatal("server conditional-update capability missing")
 	}
 	account := cloudAccount{Label: "sample", Host: "example.test", Port: 22, Username: "me", Password: "ssh-password", HostKeyFingerprint: "SHA256:verified"}
@@ -85,6 +85,21 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	accounts, err := client.list()
 	if err != nil || len(accounts) != 1 || accounts[0].Password != "ssh-password" {
 		t.Fatalf("list=%v err=%v", accounts, err)
+	}
+	groupState, err := client.listCloudGroups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleGroups := groupState
+	groupState.Groups = []string{"work", "work/prod", "empty"}
+	groupState.Assignments = map[string]string{accounts[0].ID: "work/prod"}
+	savedGroups, err := client.replaceCloudGroups(groupState)
+	if err != nil || savedGroups.Assignments[accounts[0].ID] != "work/prod" {
+		t.Fatalf("cloud groups were not saved: %v", err)
+	}
+	staleGroups.Groups = []string{"stale"}
+	if _, err = client.replaceCloudGroups(staleGroups); err == nil {
+		t.Fatal("stale group revision accepted")
 	}
 	// The same endpoint can have separate cloud records; only an explicit ID
 	// may update one of them.
@@ -148,9 +163,33 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	if err = client.save(account); err != nil {
 		t.Fatal(err)
 	}
-	result := importCloudAccounts(context.Background(), client, portable)
+	currentAccounts, err := client.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentGroups, err := client.listCloudGroups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentGroups.Assignments[currentAccounts[0].ID] = "work/prod"
+	currentGroups, err = client.replaceCloudGroups(currentGroups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupArchive, err := encodeCloudArchiveWithGroups(currentAccounts, "backup-password-long", currentGroups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupDoc, err := decodeCloudArchiveDocument(groupArchive, "backup-password-long")
+	if err != nil || len(portable) != 1 {
+		t.Fatal("backup format compatibility failed")
+	}
+	result := importCloudArchive(context.Background(), client, groupDoc)
 	if result.mutationErr != nil || result.refreshErr != nil || result.imported != 1 || len(result.accounts) != 2 || result.accounts[0].ID == result.accounts[1].ID {
 		t.Fatal("portable import did not preserve the existing connection")
+	}
+	if !result.groupsApplied || result.groupErr != nil || result.groupState.Assignments[result.createdIDs[0]] != "work/prod" {
+		t.Fatalf("cloud group backup was not restored: %v", result.groupErr)
 	}
 	for _, item := range result.accounts {
 		if err := client.remove(item.ID); err != nil {

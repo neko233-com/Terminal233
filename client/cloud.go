@@ -34,6 +34,7 @@ type cloudClient struct {
 	adminTOTP          string
 	conditionalUpdates bool
 	conditionalDeletes bool
+	cloudGroups        bool
 	capabilityUnknown  bool
 }
 
@@ -55,6 +56,7 @@ func (c *cloudClient) discoverCapabilities() {
 	}
 	c.conditionalUpdates = false
 	c.conditionalDeletes = false
+	c.cloudGroups = false
 	c.capabilityUnknown = true
 	if c.request(http.MethodGet, "/healthz", nil, &health) != nil || health.Status != "ok" {
 		return
@@ -66,6 +68,9 @@ func (c *cloudClient) discoverCapabilities() {
 		}
 		if capability == "conditional-account-delete" {
 			c.conditionalDeletes = true
+		}
+		if capability == "cloud-groups-v1" {
+			c.cloudGroups = true
 		}
 	}
 }

@@ -52,6 +52,7 @@ type desktop struct {
 	profiles                                                                                []profile
 	profileGroups                                                                           []string
 	foldedGroups                                                                            map[string]bool
+	cloudFoldedGroups                                                                       map[string]bool
 	profileFormat                                                                           int
 	showGroupControls, showTerminalSettings                                                 bool
 	showCompactProfileTools                                                                 bool
@@ -63,6 +64,8 @@ type desktop struct {
 	confirmProfileBatchDelete                                                               bool
 	checkedCloud                                                                            map[string]cloudAccount
 	confirmCloudBatchDelete                                                                 bool
+	cloudGroupSnapshot                                                                      cloudGroupSnapshot
+	cloudGroupsStale                                                                        bool
 	cloudBatchCancel                                                                        context.CancelFunc
 	profileLabel                                                                            string
 	profileFilter                                                                           string
@@ -390,7 +393,13 @@ func (d *desktop) view(c *ui.Context) {
 							d.profileFavorites = false
 							d.profileRecent = false
 						}
+						isCloudGroups := d.profileSource == "cloud"
 						groups, counts := d.groupTree()
+						folded := d.foldedGroups
+						if isCloudGroups {
+							groups, counts = d.cloudGroupTree()
+							folded = d.cloudFoldedGroups
+						}
 						favorites := 0
 						recent := 0
 						for _, p := range d.profiles {
@@ -424,7 +433,7 @@ func (d *desktop) view(c *ui.Context) {
 						parents := groupsWithChildren(groups)
 						for _, group := range groups {
 							name := group
-							if groupHidden(name, d.foldedGroups) {
+							if groupHidden(name, folded) {
 								continue
 							}
 							ui.Row(c).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
@@ -433,20 +442,36 @@ func (d *desktop) view(c *ui.Context) {
 								}
 								if parents[name] {
 									label, title := "▾", "折叠分组："+name
-									if d.foldedGroups[name] {
+									if folded[name] {
 										label, title = "▸", "展开分组："+name
 									}
 									if ui.Button(c.Key("group-fold-"+name), label).Label(title).Width(32).Clicked() {
-										if d.foldedGroups == nil {
-											d.foldedGroups = make(map[string]bool)
+										if isCloudGroups {
+											if d.cloudFoldedGroups == nil {
+												d.cloudFoldedGroups = make(map[string]bool)
+											}
+											d.cloudFoldedGroups[name] = !d.cloudFoldedGroups[name]
+										} else {
+											if d.foldedGroups == nil {
+												d.foldedGroups = make(map[string]bool)
+											}
+											d.foldedGroups[name] = !d.foldedGroups[name]
 										}
-										d.foldedGroups[name] = !d.foldedGroups[name]
 									}
 								}
-								button := ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", groupLeaf(name), counts[name])).Label("分组：" + name).Disabled(d.busy).Grow(1)
+								groupLabel := "分组：" + name
+								if isCloudGroups {
+									groupLabel = "云端分组：" + name
+								}
+								button := ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", groupLeaf(name), counts[name])).Label(groupLabel).Disabled(d.busy).Grow(1)
 								button.ContextMenu(func(menu *ui.Menu) {
 									if menu.Item("管理分组").Chosen() {
-										d.workspace, d.editConnection, d.profileSource = "connections", false, "local"
+										d.workspace, d.editConnection = "connections", false
+										if isCloudGroups {
+											d.profileSource = "cloud"
+										} else {
+											d.profileSource = "local"
+										}
 										d.profileFilter, d.showGroupControls, d.confirmGroupDelete = name, true, false
 										d.profileFavorites, d.profileRecent = false, false
 									}
@@ -458,12 +483,18 @@ func (d *desktop) view(c *ui.Context) {
 									d.confirmGroupDelete = false
 									d.profileFavorites = false
 									d.profileRecent = false
-									if d.profileSource == "cloud" {
+									if !isCloudGroups && d.profileSource == "cloud" {
 										d.profileSource = "local"
 									}
 								}
-								if dragged, ok := ui.Drop[profileID](button); ok && !d.busy {
-									d.moveProfileToGroup(dragged, name)
+								if isCloudGroups {
+									if dragged, ok := ui.Drop[cloudGroupDragID](button); ok && !d.busy {
+										d.cloudGroupOperation("move", string(dragged), name)
+									}
+								} else {
+									if dragged, ok := ui.Drop[profileID](button); ok && !d.busy {
+										d.moveProfileToGroup(dragged, name)
+									}
 								}
 							})
 						}
@@ -751,7 +782,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.62"
+const version = "0.3.63"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

@@ -70,6 +70,62 @@ func TestCloudArchiveRejectsInvalidInputBeforeWrite(t *testing.T) {
 	}
 }
 
+func TestCloudArchivePreservesGroupsAndRejectsInconsistentSnapshot(t *testing.T) {
+	account := cloudAccount{ID: "id1", Label: "work", Host: "example.test", Port: 22, Username: "alice", Password: "secret", HostKeyFingerprint: "SHA256:verified"}
+	groups := cloudGroupSnapshot{Groups: []string{"work", "work/prod", "empty"}, Assignments: map[string]string{"id1": "work/prod"}, AccountIDs: []string{"id1"}, Revision: strings.Repeat("a", 64)}
+	data, err := encodeCloudArchiveWithGroups([]cloudAccount{account}, "backup-password-long", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("work/prod")) || bytes.Contains(data, []byte("secret")) {
+		t.Fatal("backup leaked sensitive group or credential data")
+	}
+	doc, err := decodeCloudArchiveDocument(data, "backup-password-long")
+	if err != nil || doc.Version != 2 || len(doc.Groups) != 3 || len(doc.AccountGroups) != 1 || doc.AccountGroups[0] != "work/prod" || doc.Accounts[0].ID != "" {
+		t.Fatal("backup did not preserve portable groups")
+	}
+	groups.AccountIDs = []string{"different"}
+	if _, err = encodeCloudArchiveWithGroups([]cloudAccount{account}, "backup-password-long", groups); err == nil {
+		t.Fatal("inconsistent group snapshot accepted")
+	}
+	groups = cloudGroupSnapshot{Groups: []string{}, Assignments: map[string]string{}, AccountIDs: []string{}, Revision: strings.Repeat("b", 64)}
+	data, err = encodeCloudArchiveWithGroups([]cloudAccount{}, "backup-password-long", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc, err = decodeCloudArchiveDocument(data, "backup-password-long"); err != nil || doc.Version != 2 || len(doc.Groups) != 0 {
+		t.Fatal("empty group backup failed")
+	}
+}
+
+func TestCloudGroupImportPreflightPreventsWrites(t *testing.T) {
+	requests := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			requests++
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_, _ = w.Write([]byte(`{"groups":[],"assignments":{},"accountIds":[],"revision":"` + strings.Repeat("b", 64) + `"}`))
+	}))
+	defer server.Close()
+	c, err := newCloudClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.http.Transport, c.token, c.cloudGroups = server.Client().Transport, "session", true
+	doc := cloudArchiveDocument{Version: 2, Accounts: []cloudAccount{}, Groups: []string{"work"}, AccountGroups: []string{}}
+	result := importCloudArchiveExpected(context.Background(), c, doc, strings.Repeat("a", 64))
+	if result.preflightErr == nil || requests != 0 {
+		t.Fatal("stale group revision allowed import writes")
+	}
+	c.cloudGroups = false
+	result = importCloudArchive(context.Background(), c, doc)
+	if result.preflightErr == nil || requests != 0 {
+		t.Fatal("old service accepted a group backup")
+	}
+}
+
 func TestArchivePartialImportRequiresReview(t *testing.T) {
 	posts := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +143,11 @@ func TestArchivePartialImportRequiresReview(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":"created"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`[{"id":"created","label":"first"}]`))
+		if posts == 0 {
+			_, _ = w.Write([]byte(`[]`))
+		} else {
+			_, _ = w.Write([]byte(`[{"id":"created","label":"first"}]`))
+		}
 	}))
 	defer server.Close()
 	c, err := newCloudClient(server.URL)

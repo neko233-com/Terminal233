@@ -58,6 +58,7 @@ func (d *desktop) cloudLogin(register bool) {
 				return
 			}
 			d.cloud, d.accounts, d.teams = client, loaded.accounts, loaded.teams
+			d.setCloudGroupState(loaded.groups, loaded.groupErr)
 			d.teamListStale = loaded.teamErr != nil
 			d.cloudListStale = loaded.accountErr != nil
 			d.cloudStatus = "同步服务已登录"
@@ -81,12 +82,20 @@ func (d *desktop) cloudRefresh() {
 		probe := *client
 		probe.discoverCapabilities()
 		accounts, err := client.list()
+		var groups cloudGroupSnapshot
+		var groupErr error
+		if err == nil && probe.cloudGroups {
+			groups, groupErr = probe.listCloudGroups()
+		}
 		d.win.Update(func() {
 			d.busy = false
 			if d.cloud == client {
-				client.conditionalUpdates, client.conditionalDeletes, client.capabilityUnknown = probe.conditionalUpdates, probe.conditionalDeletes, probe.capabilityUnknown
+				client.conditionalUpdates, client.conditionalDeletes, client.cloudGroups, client.capabilityUnknown = probe.conditionalUpdates, probe.conditionalDeletes, probe.cloudGroups, probe.capabilityUnknown
 			}
 			d.finishCloudRefresh(accounts, err)
+			if err == nil && d.cloud == client {
+				d.setCloudGroupState(groups, groupErr)
+			}
 		})
 	}()
 }
@@ -314,6 +323,7 @@ func (d *desktop) bindSavedCloudID(binding cloudSaveBinding, id, version string)
 
 func (d *desktop) finishCloudSave(accounts []cloudAccount, mutationErr, refreshErr error) {
 	d.clearCloudBatch()
+	d.invalidateCloudGroups()
 	if mutationErr != nil {
 		d.cloudListStale = true
 		var httpErr *cloudHTTPError
@@ -542,6 +552,7 @@ func (d *desktop) cloudDelete() {
 }
 func (d *desktop) finishCloudDelete(id string, accounts []cloudAccount, mutationErr, refreshErr error) {
 	d.clearCloudBatch()
+	d.invalidateCloudGroups()
 	if mutationErr != nil {
 		d.cloudListStale = true
 		var httpErr *cloudHTTPError
@@ -593,6 +604,7 @@ func (d *desktop) cloudLogout() {
 // Logging out and restoring a backup both invalidate the cloud session.
 func (d *desktop) clearCloudState() {
 	d.clearCloudBatch()
+	d.cloudGroupSnapshot, d.cloudGroupsStale = cloudGroupSnapshot{}, false
 	if d.cloud != nil {
 		d.cloud.token, d.cloud.adminTOTP = "", ""
 	}
@@ -600,7 +612,9 @@ func (d *desktop) clearCloudState() {
 	d.selectedCloudProfile = ""
 	if d.profileSource == "cloud" {
 		d.profileSource = ""
+		d.profileFilter = ""
 	}
+	d.cloudFoldedGroups = nil
 	if d.settingsFromCloud {
 		d.settings.Password, d.settings.Passphrase = "", ""
 		d.settingsFromCloud = false

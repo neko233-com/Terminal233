@@ -70,6 +70,8 @@ func (s *Server) teamResource(w http.ResponseWriter, r *http.Request, user strin
 	}
 	id := parts[0]
 	switch {
+	case len(parts) == 2 && parts[1] == "groups":
+		s.groupResource(w, r, user, id)
 	case len(parts) == 2 && parts[1] == "members" && r.Method == http.MethodGet:
 		result, err := s.store.teamMembers(user, id)
 		if err != nil {

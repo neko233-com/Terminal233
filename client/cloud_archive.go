@@ -27,8 +27,10 @@ type cloudArchiveEnvelope struct {
 }
 
 type cloudArchiveDocument struct {
-	Version  int            `json:"version"`
-	Accounts []cloudAccount `json:"accounts"`
+	Version       int            `json:"version"`
+	Accounts      []cloudAccount `json:"accounts"`
+	Groups        []string       `json:"groups"`
+	AccountGroups []string       `json:"accountGroups,omitempty"`
 }
 
 func validateArchivePassword(password string) error {
@@ -81,7 +83,26 @@ func encodeCloudArchive(accounts []cloudAccount, password string) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	plain, err := json.Marshal(cloudArchiveDocument{Version: 1, Accounts: items})
+	return encodeCloudArchiveDocument(cloudArchiveDocument{Version: 1, Accounts: items}, password)
+}
+
+func encodeCloudArchiveWithGroups(accounts []cloudAccount, password string, groups cloudGroupSnapshot) ([]byte, error) {
+	items, err := normalizeArchiveAccounts(accounts)
+	if err != nil {
+		return nil, err
+	}
+	if !cloudGroupAccountsMatch(groups, accounts) {
+		return nil, errors.New("连接列表与云端分组不一致，请刷新后重试")
+	}
+	paths := make([]string, len(accounts))
+	for i, a := range accounts {
+		paths[i] = groups.Assignments[a.ID]
+	}
+	return encodeCloudArchiveDocument(cloudArchiveDocument{Version: 2, Accounts: items, Groups: append([]string{}, groups.Groups...), AccountGroups: paths}, password)
+}
+
+func encodeCloudArchiveDocument(document cloudArchiveDocument, password string) ([]byte, error) {
+	plain, err := json.Marshal(document)
 	if err != nil || len(plain) > maxCloudArchivePlain {
 		return nil, errors.New("备份内容无法编码或过大")
 	}
@@ -103,27 +124,58 @@ func encodeCloudArchive(accounts []cloudAccount, password string) ([]byte, error
 }
 
 func decodeCloudArchive(data []byte, password string) ([]cloudAccount, error) {
+	doc, err := decodeCloudArchiveDocument(data, password)
+	return doc.Accounts, err
+}
+
+func decodeCloudArchiveDocument(data []byte, password string) (cloudArchiveDocument, error) {
+	var empty cloudArchiveDocument
 	if len(data) > maxCloudArchiveFile {
-		return nil, errors.New("备份文件过大")
+		return empty, errors.New("备份文件过大")
 	}
 	var envelope cloudArchiveEnvelope
 	if json.Unmarshal(data, &envelope) != nil || envelope.Format != cloudArchiveFormat || len(envelope.Salt) != 16 || len(envelope.Nonce) != 12 || len(envelope.Ciphertext) < 16 || len(envelope.Ciphertext) > maxCloudArchivePlain+16 {
-		return nil, errors.New("备份格式无效")
+		return empty, errors.New("备份格式无效")
 	}
 	aead, err := archiveCipher(password, envelope.Salt)
 	if err != nil {
-		return nil, err
+		return empty, err
 	}
 	plain, err := aead.Open(nil, envelope.Nonce, envelope.Ciphertext, []byte(cloudArchiveFormat))
 	if err != nil {
-		return nil, errors.New("备份密码错误或文件已损坏")
+		return empty, errors.New("备份密码错误或文件已损坏")
 	}
 	defer clear(plain)
 	var document cloudArchiveDocument
-	if json.Unmarshal(plain, &document) != nil || document.Version != 1 || document.Accounts == nil {
-		return nil, errors.New("备份内容无效")
+	if json.Unmarshal(plain, &document) != nil || (document.Version != 1 && document.Version != 2) || document.Accounts == nil {
+		return empty, errors.New("备份内容无效")
 	}
-	return normalizeArchiveAccounts(document.Accounts)
+	items, err := normalizeArchiveAccounts(document.Accounts)
+	if err != nil {
+		return empty, err
+	}
+	document.Accounts = items
+	if document.Version == 2 {
+		if !validCloudArchiveGroups(document) {
+			return empty, errors.New("备份分组无效")
+		}
+	}
+	return document, nil
+}
+
+func validCloudArchiveGroups(document cloudArchiveDocument) bool {
+	if len(document.AccountGroups) != len(document.Accounts) || document.Groups == nil {
+		return false
+	}
+	state := cloudGroupSnapshot{Groups: document.Groups, Assignments: map[string]string{}, AccountIDs: []string{}, Revision: strings.Repeat("0", 64)}
+	for i, path := range document.AccountGroups {
+		id := fmt.Sprint(i)
+		state.AccountIDs = append(state.AccountIDs, id)
+		if path != "" {
+			state.Assignments[id] = path
+		}
+	}
+	return validCloudGroupSnapshot(state)
 }
 
 func writeCloudArchive(path string, data []byte) error {
@@ -146,14 +198,20 @@ func writeCloudArchive(path string, data []byte) error {
 }
 
 func readCloudArchive(path, password string) ([]cloudAccount, error) {
+	doc, err := readCloudArchiveDocument(path, password)
+	return doc.Accounts, err
+}
+
+func readCloudArchiveDocument(path, password string) (cloudArchiveDocument, error) {
+	var empty cloudArchiveDocument
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return empty, err
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, maxCloudArchiveFile+1))
 	if err != nil {
-		return nil, err
+		return empty, err
 	}
-	return decodeCloudArchive(data, password)
+	return decodeCloudArchiveDocument(data, password)
 }

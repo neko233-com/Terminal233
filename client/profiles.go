@@ -180,7 +180,7 @@ func (d *desktop) profileView(c *ui.Context) {
 		help = "正在按所选列排序；切换到自定义顺序后可拖动或移动连接。"
 	}
 	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
-	if d.profileSource != "cloud" {
+	if d.profileSource != "cloud" || d.cloud != nil {
 		label := "分组管理"
 		if d.showGroupControls {
 			label = "收起分组管理"
@@ -192,7 +192,11 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		})
 		if d.showGroupControls {
-			d.groupControls(c)
+			if d.profileSource == "cloud" {
+				d.cloudGroupControls(c)
+			} else {
+				d.groupControls(c)
+			}
 		}
 	}
 	if d.status != "" {
@@ -230,9 +234,15 @@ func (d *desktop) profileView(c *ui.Context) {
 	})
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 		if workspaceButton(c, "profile-source-all", "全部来源", d.profileSource == "").Clicked() {
+			if d.profileSource == "cloud" {
+				d.profileFilter = ""
+			}
 			d.profileSource = ""
 		}
 		if workspaceButton(c, "profile-source-local", "本地仓库", d.profileSource == "local").Clicked() {
+			if d.profileSource == "cloud" {
+				d.profileFilter = ""
+			}
 			d.profileSource = "local"
 		}
 		if workspaceButton(c, "profile-source-cloud", "云端仓库", d.profileSource == "cloud").Disabled(d.cloud == nil).Clicked() {
@@ -534,8 +544,11 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		}
 	}
-	if d.cloud != nil && d.profileSource != "local" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent {
+	if d.cloud != nil && d.profileSource != "local" && (d.profileFilter == "" || d.profileSource == "cloud") && !d.profileFavorites && !d.profileRecent {
 		ui.Text(c, "云端连接 · "+d.cloudScopeName()).FontSize(16).Bold()
+		if d.cloud.cloudGroups && d.cloudGroupsStale {
+			ui.Text(c, "云端分组需要刷新后才能修改。").Wrap()
+		}
 		accounts := d.accounts
 		if d.profileSort != "" {
 			accounts = append([]cloudAccount(nil), d.accounts...)
@@ -563,7 +576,7 @@ func (d *desktop) profileView(c *ui.Context) {
 				if ui.Checkbox(c.Key("cloud-profile-check-"+account.ID), &checked, "").Label("勾选云端连接：" + account.Label).Disabled(d.busy || d.cloudListStale).Changed() {
 					d.checkCloudAccount(account, checked)
 				}
-				row := ui.Button(c.Key("profile-cloud-"+account.ID), label).Grow(1).Disabled(d.busy)
+				row := ui.Button(c.Key("profile-cloud-"+account.ID), label).Grow(1).Disabled(d.busy).Drag(cloudGroupDragID(account.ID))
 				if d.selectedCloudProfile == account.ID {
 					row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
 				}
@@ -584,6 +597,9 @@ func (d *desktop) profileView(c *ui.Context) {
 				if ui.Button(c.Key("profile-cloud-copy-"+account.ID), "复制地址").Label("复制云端地址：" + account.Label).Clicked() {
 					mygo.Clipboard.WriteText(net.JoinHostPort(account.Host, fmt.Sprint(account.Port)))
 					d.status = "已复制地址：" + account.Label
+				}
+				if d.cloudGroupSnapshot.Assignments[account.ID] != "" && ui.Button(c.Key("profile-cloud-ungroup-"+account.ID), "移出分组").Label("移出云端分组："+account.Label).Disabled(d.busy || d.cloudGroupsStale || d.cloudListStale || !d.canWriteCloudScope()).Clicked() {
+					d.cloudGroupOperation("move", account.ID, "")
 				}
 			})
 		}

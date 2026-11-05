@@ -18,12 +18,16 @@ type cloudInitialState struct {
 	teams                          []cloudTeam
 	members                        []cloudTeamMember
 	accountErr, teamErr, memberErr error
+	groups                         cloudGroupSnapshot
+	groupErr                       error
 }
 
 type cloudScopeState struct {
 	accounts              []cloudAccount
 	members               []cloudTeamMember
 	accountErr, memberErr error
+	groups                cloudGroupSnapshot
+	groupErr              error
 }
 
 // The connection list determines whether the scope can be selected. Members
@@ -33,6 +37,9 @@ func loadCloudScope(client *cloudClient, id string) cloudScopeState {
 	next.teamID = id
 	state := cloudScopeState{}
 	state.accounts, state.accountErr = next.list()
+	if state.accountErr == nil && next.cloudGroups {
+		state.groups, state.groupErr = next.listCloudGroups()
+	}
 	if state.accountErr == nil && id != "" {
 		state.members, state.memberErr = next.members()
 	}
@@ -49,6 +56,9 @@ func loadCloudInitialState(c *cloudClient, selectSoleTeam bool) cloudInitialStat
 		state.members, state.memberErr = c.members()
 	}
 	state.accounts, state.accountErr = c.list()
+	if state.accountErr == nil && c.cloudGroups {
+		state.groups, state.groupErr = c.listCloudGroups()
+	}
 	return state
 }
 

@@ -1434,6 +1434,17 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("local terminal failed to close: %s", tree)
 	}
 	call("act", map[string]any{"key": "terminal-settings-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "font-larger") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "font-larger") {
+		t.Fatalf("terminal settings did not open: %s", tree)
+	}
 	call("act", map[string]any{"key": "font-larger", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

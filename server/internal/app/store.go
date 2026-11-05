@@ -31,6 +31,7 @@ type storeDocument struct {
 	Accounts    map[string][]storedAccount `json:"accounts"`
 	Teams       map[string]teamRecord      `json:"teams,omitempty"`
 	Invitations map[string]teamInvitation  `json:"invitations,omitempty"`
+	Groups      map[string]cloudGroupState `json:"groups,omitempty"`
 }
 
 type userRecord struct {
@@ -187,7 +188,7 @@ func openStore(path, masterKey string) (result *Store, err error) {
 	return s, nil
 }
 func (s *Store) validateDocument() error {
-	if s.doc.Version != 1 || s.doc.Users == nil || s.doc.Accounts == nil {
+	if (s.doc.Version != 1 && s.doc.Version != 2) || s.doc.Users == nil || s.doc.Accounts == nil {
 		return errors.New("数据文件版本不受支持")
 	}
 	if s.doc.Teams == nil {
@@ -196,7 +197,7 @@ func (s *Store) validateDocument() error {
 	if s.doc.Invitations == nil {
 		s.doc.Invitations = map[string]teamInvitation{}
 	}
-	return nil
+	return validateCloudGroupDocument(s.doc)
 }
 func openSQLite(path string) (*sql.DB, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
@@ -434,12 +435,15 @@ func (s *Store) deleteAccountIfVersion(owner, id, expected string) error {
 			key := normalizeUsername(owner)
 			updated := append([]storedAccount(nil), items[:i]...)
 			updated = append(updated, items[i+1:]...)
-			s.doc.Accounts[key] = updated
-			if err := s.saveLocked(); err != nil {
-				s.doc.Accounts[key] = items
-				return err
-			}
-			return nil
+			return s.transactionalLocked(func() error {
+				s.doc.Accounts[key] = updated
+				state := s.doc.Groups[key]
+				if state.Assignments != nil {
+					delete(state.Assignments, id)
+					s.doc.Groups[key] = state
+				}
+				return nil
+			})
 		}
 	}
 	return errAccountNotFound

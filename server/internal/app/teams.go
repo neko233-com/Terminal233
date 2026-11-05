@@ -21,6 +21,7 @@ type teamRecord struct {
 	Accounts  []storedAccount   `json:"accounts"`
 	CreatedAt string            `json:"createdAt"`
 	Disabled  bool              `json:"disabled,omitempty"`
+	Groups    *cloudGroupState  `json:"groups,omitempty"`
 }
 type teamInvitation struct {
 	TeamID       string `json:"teamId"`
@@ -342,6 +343,9 @@ func (s *Store) deleteTeamAccountIfVersion(user, id, accountID, expected string)
 		items := append([]storedAccount(nil), t.Accounts[:index]...)
 		items = append(items, t.Accounts[index+1:]...)
 		t.Accounts = items
+		if t.Groups != nil && t.Groups.Assignments != nil {
+			delete(t.Groups.Assignments, accountID)
+		}
 		s.doc.Teams[id] = t
 		return nil
 	})

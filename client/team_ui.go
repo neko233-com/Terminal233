@@ -106,6 +106,7 @@ func (d *desktop) finishCloudScopeSelection(id string, state cloudScopeState) {
 		return
 	}
 	d.applyCloudScope(id, state.accounts, state.members)
+	d.setCloudGroupState(state.groups, state.groupErr)
 	d.teamStatus = "已切换同步空间"
 	if state.memberErr != nil {
 		d.teamStatus += "；成员列表加载失败，请重新选择团队刷新：" + state.memberErr.Error()
@@ -115,6 +116,11 @@ func (d *desktop) finishCloudScopeSelection(id string, state cloudScopeState) {
 // Pending confirmations and invitation links belong to the previous scope.
 func (d *desktop) applyCloudScope(id string, accounts []cloudAccount, members []cloudTeamMember) {
 	d.clearCloudBatch()
+	d.cloudGroupSnapshot, d.cloudGroupsStale = cloudGroupSnapshot{}, true
+	d.cloudFoldedGroups = nil
+	if d.profileSource == "cloud" {
+		d.profileFilter = ""
+	}
 	d.cloud.teamID = id
 	d.selectedCloudProfile = ""
 	d.cloudListStale = false
@@ -498,6 +504,7 @@ func (d *desktop) registerWithInvite() {
 				return
 			}
 			d.cloud, d.teams, d.accounts, d.members = c, loaded.teams, loaded.accounts, loaded.members
+			d.setCloudGroupState(loaded.groups, loaded.groupErr)
 			d.teamListStale = loaded.teamErr != nil
 			d.cloudListStale = loaded.accountErr != nil
 			d.teamStatus = "已注册并加入团队"

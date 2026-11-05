@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-var Version = "0.3.5"
+var Version = "0.3.6"
 
 type Config struct {
 	AdminUsername         string
