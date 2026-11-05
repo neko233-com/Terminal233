@@ -23,14 +23,43 @@ type cloudAccount struct {
 	HostKeyFingerprint string `json:"hostKeyFingerprint"`
 	CreatedAt          string `json:"createdAt,omitempty"`
 	UpdatedAt          string `json:"updatedAt,omitempty"`
+	ExpectedUpdatedAt  string `json:"expectedUpdatedAt,omitempty"`
 }
 
 type cloudClient struct {
-	base      *url.URL
-	http      *http.Client
-	token     string
-	teamID    string
-	adminTOTP string
+	base               *url.URL
+	http               *http.Client
+	token              string
+	teamID             string
+	adminTOTP          string
+	conditionalUpdates bool
+}
+
+type cloudHTTPError struct {
+	Status        int
+	Code, Message string
+}
+
+func (e *cloudHTTPError) Error() string {
+	return fmt.Sprintf("同步服务拒绝请求（%d）：%s", e.Status, e.Message)
+}
+
+// Older services do not advertise capabilities and continue to work with
+// their existing, unconditional update semantics.
+func (c *cloudClient) discoverCapabilities() {
+	var health struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	c.conditionalUpdates = false
+	if c.request(http.MethodGet, "/healthz", nil, &health) != nil {
+		return
+	}
+	for _, capability := range health.Capabilities {
+		if capability == "conditional-account-update" {
+			c.conditionalUpdates = true
+			return
+		}
+	}
 }
 
 func newCloudClient(raw string) (*cloudClient, error) {
@@ -87,12 +116,13 @@ func (c *cloudClient) request(method, path string, input, output any) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var e struct {
 			Message string `json:"message"`
+			Code    string `json:"code"`
 		}
 		_ = json.Unmarshal(data, &e)
 		if e.Message == "" {
 			e.Message = http.StatusText(resp.StatusCode)
 		}
-		return fmt.Errorf("同步服务拒绝请求（%d）：%s", resp.StatusCode, e.Message)
+		return &cloudHTTPError{Status: resp.StatusCode, Code: e.Code, Message: e.Message}
 	}
 	if output != nil {
 		if err := json.Unmarshal(data, output); err != nil {
@@ -135,19 +165,30 @@ func (c *cloudClient) save(a cloudAccount) error {
 // saveReturningID uses the server's exact response ID, avoiding endpoint-based
 // guesses when several credentials have the same address.
 func (c *cloudClient) saveReturningID(a cloudAccount) (string, error) {
+	record, err := c.saveReturningRecord(a)
+	return record.ID, err
+}
+
+func (c *cloudClient) saveReturningRecord(a cloudAccount) (cloudAccount, error) {
 	if c.token == "" {
-		return "", errors.New("请先登录同步服务")
+		return cloudAccount{}, errors.New("请先登录同步服务")
 	}
 	var result struct {
-		ID string `json:"id"`
+		ID        string `json:"id"`
+		UpdatedAt string `json:"updatedAt"`
 	}
 	if err := c.request(http.MethodPost, c.accountsPath(), a, &result); err != nil {
-		return "", err
+		return cloudAccount{}, err
 	}
 	if result.ID == "" || len(result.ID) > 128 || strings.ContainsAny(result.ID, "/\\\x00") || (a.ID != "" && result.ID != a.ID) {
-		return "", errors.New("服务未返回可确认的连接编号")
+		return cloudAccount{}, errors.New("服务未返回可确认的连接编号")
 	}
-	return result.ID, nil
+	if c.conditionalUpdates {
+		if _, err := time.Parse(time.RFC3339Nano, result.UpdatedAt); err != nil {
+			return cloudAccount{}, errors.New("服务未返回可确认的连接版本")
+		}
+	}
+	return cloudAccount{ID: result.ID, UpdatedAt: result.UpdatedAt}, nil
 }
 
 func (c *cloudClient) logout() error {

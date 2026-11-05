@@ -88,6 +88,7 @@ type desktop struct {
 	settings                                                                                connectionSettings
 	settingsFromCloud                                                                       bool
 	cloudFormSources                                                                        map[string]string
+	cloudFormVersions                                                                       map[string]string
 	fingerprint, status                                                                     string
 	busy                                                                                    bool
 	cancelTransfer                                                                          context.CancelFunc
@@ -219,9 +220,10 @@ func (d *desktop) connect() {
 	options := d.terminalOptions()
 	settings.Fingerprint = d.fingerprint
 	profileID := d.selectedProfile
-	var cloudSources map[string]string
+	var cloudSources, cloudVersions map[string]string
 	if d.settingsFromCloud && d.cloud != nil {
 		cloudSources = cloneCloudSources(d.cloudFormSources)
+		cloudVersions = cloneCloudSources(d.cloudFormVersions)
 	}
 	d.settings.Password = ""
 	d.settings.Passphrase = ""
@@ -237,6 +239,7 @@ func (d *desktop) connect() {
 			for _, session := range d.sessions {
 				if session.id == d.currentSession {
 					session.cloudSources = cloudSources
+					session.cloudVersions = cloudVersions
 					break
 				}
 			}
@@ -674,6 +677,9 @@ func (d *desktop) connectionView(c *ui.Context) {
 	}
 	if d.cloud != nil {
 		ui.Text(c, "同步目标："+d.cloudScopeName()+"；团队空间的成员可访问共享连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+		if !d.cloud.conditionalUpdates {
+			ui.Text(c, "未确认同步服务支持并发修改保护；更新可能覆盖其他设备的更改。").FontSize(12).Wrap()
+		}
 		if d.cloudListStale {
 			ui.Text(c, "云端列表需要先刷新后才能同步。").FontSize(12).Wrap()
 		}
@@ -688,7 +694,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.52"
+const version = "0.3.53"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

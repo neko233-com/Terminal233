@@ -90,6 +90,7 @@ type workspaceSession struct {
 	terminalSearchText                                       string
 	refreshPending                                           bool
 	cloudSources                                             map[string]string
+	cloudVersions                                            map[string]string
 	forwards                                                 []*localForward
 }
 

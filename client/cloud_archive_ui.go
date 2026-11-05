@@ -41,6 +41,7 @@ func importCloudAccounts(ctx context.Context, c *cloudClient, items []cloudAccou
 			break
 		}
 		item.ID = ""
+		item.ExpectedUpdatedAt = ""
 		if _, err := c.saveReturningID(item); err != nil {
 			result.mutationErr = err
 			break

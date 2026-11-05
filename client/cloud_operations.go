@@ -42,6 +42,7 @@ func loadCloudScope(client *cloudClient, id string) cloudScopeState {
 // A successful login remains usable even if either independent read fails.
 func loadCloudInitialState(c *cloudClient, selectSoleTeam bool) cloudInitialState {
 	var state cloudInitialState
+	c.discoverCapabilities()
 	state.teams, state.teamErr = c.teams()
 	if selectSoleTeam && state.teamErr == nil && len(state.teams) == 1 {
 		c.teamID = state.teams[0].ID
@@ -52,15 +53,20 @@ func loadCloudInitialState(c *cloudClient, selectSoleTeam bool) cloudInitialStat
 }
 
 func saveCloudAndRefresh(c *cloudClient, account cloudAccount) (string, []cloudAccount, error, error) {
-	id, mutationErr := c.saveReturningID(account)
+	saved, accounts, mutationErr, refreshErr := saveCloudAndRefreshVersioned(c, account)
+	return saved.ID, accounts, mutationErr, refreshErr
+}
+
+func saveCloudAndRefreshVersioned(c *cloudClient, account cloudAccount) (cloudAccount, []cloudAccount, error, error) {
+	saved, mutationErr := c.saveReturningRecord(account)
 	if mutationErr != nil {
-		return "", nil, mutationErr, nil
+		return cloudAccount{}, nil, mutationErr, nil
 	}
 	accounts, refreshErr := c.list()
 	if refreshErr == nil {
 		found := false
 		for _, account := range accounts {
-			if account.ID == id {
+			if account.ID == saved.ID {
 				found = true
 				break
 			}
@@ -69,5 +75,5 @@ func saveCloudAndRefresh(c *cloudClient, account cloudAccount) (string, []cloudA
 			refreshErr = errors.New("服务确认的连接未出现在刷新结果中")
 		}
 	}
-	return id, accounts, nil, refreshErr
+	return saved, accounts, nil, refreshErr
 }

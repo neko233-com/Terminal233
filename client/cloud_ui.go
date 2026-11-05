@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -125,11 +127,31 @@ func (d *desktop) formCloudSource() string {
 	return d.cloudFormSources[d.cloud.teamID]
 }
 
+func (d *desktop) currentCloudVersion() string {
+	if d.cloud == nil {
+		return ""
+	}
+	for _, session := range d.sessions {
+		if session.id == d.currentSession {
+			return session.cloudVersions[d.cloud.teamID]
+		}
+	}
+	return ""
+}
+
+func (d *desktop) formCloudVersion() string {
+	if d.cloud == nil || !d.settingsFromCloud {
+		return ""
+	}
+	return d.cloudFormVersions[d.cloud.teamID]
+}
+
 func (d *desktop) cloudSave() {
 	binding := cloudSaveBinding{client: d.cloud, sessionID: d.currentSession, sessionSettings: d.active}
 	if d.cloud != nil {
 		binding.scope = d.cloud.teamID
 		binding.sourceID = d.currentCloudSource()
+		binding.sourceVersion = d.currentCloudVersion()
 	}
 	d.saveCloudConnection(d.active, "", binding.sourceID, binding)
 }
@@ -141,6 +163,7 @@ func (d *desktop) cloudSaveForm() {
 	if d.cloud != nil {
 		binding.scope = d.cloud.teamID
 		binding.sourceID = d.formCloudSource()
+		binding.sourceVersion = d.formCloudVersion()
 	}
 	d.saveCloudConnection(settings, d.profileLabel, binding.sourceID, binding)
 }
@@ -194,17 +217,21 @@ func (d *desktop) saveCloudConnection(settings connectionSettings, label, source
 		d.cloudStatus, d.status = err.Error(), err.Error()
 		return
 	}
+	if err := applyConditionalVersion(d.cloud, &account, binding.sourceVersion); err != nil {
+		d.cloudStatus, d.status = err.Error(), "请重新载入云端连接。"
+		return
+	}
 	client := d.cloud
 	d.busy = true
 	d.cloudStatus = "正在加密传输连接信息…"
 	d.status = d.cloudStatus
 	go func() {
-		id, accounts, mutationErr, refreshErr := saveCloudAndRefresh(client, account)
+		saved, accounts, mutationErr, refreshErr := saveCloudAndRefreshVersioned(client, account)
 		d.win.Update(func() {
 			d.busy = false
 			bound := false
 			if mutationErr == nil {
-				bound = d.bindSavedCloudID(binding, id)
+				bound = d.bindSavedCloudID(binding, saved.ID, saved.UpdatedAt)
 			}
 			d.finishCloudSave(accounts, mutationErr, refreshErr)
 			if mutationErr == nil && !bound {
@@ -213,6 +240,17 @@ func (d *desktop) saveCloudConnection(settings connectionSettings, label, source
 			}
 		})
 	}()
+}
+
+func applyConditionalVersion(c *cloudClient, account *cloudAccount, version string) error {
+	if c == nil || !c.conditionalUpdates || account.ID == "" {
+		return nil
+	}
+	if version == "" {
+		return errors.New("缺少原始连接版本，请从云端列表重新载入后再同步。")
+	}
+	account.ExpectedUpdatedAt = version
+	return nil
 }
 
 // A response may arrive after the user has moved to a different form or
@@ -226,15 +264,15 @@ type cloudSaveBinding struct {
 	formSettings                              connectionSettings
 	formFingerprint, formLabel, formProfileID string
 	formFromCloud                             bool
-	sourceID                                  string
+	sourceID, sourceVersion                   string
 }
 
-func (d *desktop) bindSavedCloudID(binding cloudSaveBinding, id string) bool {
+func (d *desktop) bindSavedCloudID(binding cloudSaveBinding, id, version string) bool {
 	if id == "" || d.cloud == nil || d.cloud != binding.client || d.cloud.teamID != binding.scope {
 		return false
 	}
 	if binding.form {
-		if d.settings != binding.formSettings || d.fingerprint != binding.formFingerprint || d.profileLabel != binding.formLabel || d.selectedProfile != binding.formProfileID || d.settingsFromCloud != binding.formFromCloud || d.formCloudSource() != binding.sourceID {
+		if d.settings != binding.formSettings || d.fingerprint != binding.formFingerprint || d.profileLabel != binding.formLabel || d.selectedProfile != binding.formProfileID || d.settingsFromCloud != binding.formFromCloud || d.formCloudSource() != binding.sourceID || d.formCloudVersion() != binding.sourceVersion {
 			return false
 		}
 		if d.cloudFormSources == nil {
@@ -242,14 +280,22 @@ func (d *desktop) bindSavedCloudID(binding cloudSaveBinding, id string) bool {
 		}
 		d.settingsFromCloud = true
 		d.cloudFormSources[binding.scope] = id
+		if d.cloudFormVersions == nil {
+			d.cloudFormVersions = make(map[string]string)
+		}
+		d.cloudFormVersions[binding.scope] = version
 		return true
 	}
 	for _, session := range d.sessions {
-		if session.id == binding.sessionID && session.active == binding.sessionSettings && session.cloudSources[binding.scope] == binding.sourceID {
+		if session.id == binding.sessionID && session.active == binding.sessionSettings && session.cloudSources[binding.scope] == binding.sourceID && session.cloudVersions[binding.scope] == binding.sourceVersion {
 			if session.cloudSources == nil {
 				session.cloudSources = make(map[string]string)
 			}
 			session.cloudSources[binding.scope] = id
+			if session.cloudVersions == nil {
+				session.cloudVersions = make(map[string]string)
+			}
+			session.cloudVersions[binding.scope] = version
 			return true
 		}
 	}
@@ -259,6 +305,12 @@ func (d *desktop) bindSavedCloudID(binding cloudSaveBinding, id string) bool {
 func (d *desktop) finishCloudSave(accounts []cloudAccount, mutationErr, refreshErr error) {
 	if mutationErr != nil {
 		d.cloudListStale = true
+		var httpErr *cloudHTTPError
+		if errors.As(mutationErr, &httpErr) && httpErr.Status == http.StatusConflict && httpErr.Code == "account_conflict" {
+			d.cloudStatus = "连接已被其他设备修改；本次未保存，请刷新并重新载入。"
+			d.status = d.cloudStatus
+			return
+		}
 		d.cloudStatus = "同步请求未确认，可能已生效；请先刷新：" + mutationErr.Error()
 		d.status = d.cloudStatus
 		return
@@ -283,8 +335,10 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
 	d.settingsFromCloud = true
 	d.cloudFormSources = nil
+	d.cloudFormVersions = nil
 	if d.cloud != nil && account.ID != "" {
 		d.cloudFormSources = map[string]string{d.cloud.teamID: account.ID}
+		d.cloudFormVersions = map[string]string{d.cloud.teamID: account.UpdatedAt}
 	}
 	d.fingerprint = ""
 	d.changedFingerprint = ""
@@ -358,6 +412,9 @@ func (d *desktop) cloudView(c *ui.Context) {
 		return
 	}
 	ui.Text(c, "云端连接").FontSize(16).Bold()
+	if !d.cloud.conditionalUpdates {
+		ui.Text(c, "未确认当前服务支持并发修改保护；多设备同时更新可能覆盖，请先刷新并核对。").FontSize(12).Wrap()
+	}
 	if d.teamListStale {
 		ui.Text(c, "团队列表可能过期，请刷新团队后再执行管理操作。").FontSize(12).Wrap()
 	}
@@ -514,8 +571,10 @@ func (d *desktop) clearCloudState() {
 	d.archivePassword, d.archiveStatus, d.archiveConfirm = "", "", false
 	d.cloudRegistrationLocal, d.cloudListStale, d.teamListStale = false, false, false
 	d.cloudFormSources = nil
+	d.cloudFormVersions = nil
 	for _, session := range d.sessions {
 		session.cloudSources = nil
+		session.cloudVersions = nil
 	}
 	d.cloudStatus, d.teamStatus = "", ""
 	d.accounts, d.teams, d.members, d.teamInvites = nil, nil, nil, nil

@@ -78,6 +78,7 @@ func (d *desktop) loadProfile(p profile) {
 	d.editConnection = true
 	d.settingsFromCloud = false
 	d.cloudFormSources = nil
+	d.cloudFormVersions = nil
 	d.settings = p.Settings
 	d.profileGroup = p.Group
 	d.profileLabel = p.Label
@@ -145,6 +146,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.settings = connectionSettings{Port: "22"}
 			d.settingsFromCloud = false
 			d.cloudFormSources = nil
+			d.cloudFormVersions = nil
 			d.profileGroup = ""
 			d.profileLabel = ""
 			d.fingerprint = ""

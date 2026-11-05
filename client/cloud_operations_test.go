@@ -151,12 +151,12 @@ func TestSavedIDLinksOnlyUnchangedFormAcrossScopes(t *testing.T) {
 	settings := connectionSettings{Host: "example.test", Port: "22", User: "alice", Password: "secret"}
 	d := &desktop{cloud: c, settings: settings, fingerprint: "SHA256:key", profileLabel: "work"}
 	binding := cloudSaveBinding{client: c, scope: "personal", form: true, formSettings: settings, formFingerprint: d.fingerprint, formLabel: d.profileLabel}
-	if !d.bindSavedCloudID(binding, "first") || d.formCloudSource() != "first" {
+	if !d.bindSavedCloudID(binding, "first", "") || d.formCloudSource() != "first" {
 		t.Fatal("saved ID was not linked to originating form")
 	}
 	c.teamID = "team"
 	binding = cloudSaveBinding{client: c, scope: "team", form: true, formSettings: settings, formFingerprint: d.fingerprint, formLabel: d.profileLabel, formFromCloud: true}
-	if !d.bindSavedCloudID(binding, "second") || d.formCloudSource() != "second" {
+	if !d.bindSavedCloudID(binding, "second", "") || d.formCloudSource() != "second" {
 		t.Fatal("second space was not linked")
 	}
 	c.teamID = "personal"
@@ -165,8 +165,87 @@ func TestSavedIDLinksOnlyUnchangedFormAcrossScopes(t *testing.T) {
 	}
 	binding = cloudSaveBinding{client: c, scope: "personal", sourceID: "first", form: true, formSettings: settings, formFingerprint: d.fingerprint, formLabel: d.profileLabel, formFromCloud: true}
 	d.settings.User = "bob"
-	if d.bindSavedCloudID(binding, "wrong") || d.cloudFormSources["personal"] != "first" {
+	if d.bindSavedCloudID(binding, "wrong", "") || d.cloudFormSources["personal"] != "first" {
 		t.Fatal("late response attached to changed form")
+	}
+}
+
+func TestConditionalUpdateUsesOriginalRevisionAndKeepsScopeBindings(t *testing.T) {
+	c := &cloudClient{teamID: "one", conditionalUpdates: true}
+	a := cloudAccount{ID: "item"}
+	if err := applyConditionalVersion(c, &a, ""); err == nil {
+		t.Fatal("missing source revision was accepted")
+	}
+	if err := applyConditionalVersion(c, &a, "old-revision"); err != nil || a.ExpectedUpdatedAt != "old-revision" {
+		t.Fatal("source revision not applied")
+	}
+	legacy := &cloudClient{}
+	b := cloudAccount{ID: "item"}
+	if err := applyConditionalVersion(legacy, &b, "old-revision"); err != nil || b.ExpectedUpdatedAt != "" {
+		t.Fatal("legacy service received unsupported field")
+	}
+	d := &desktop{cloud: c, settingsFromCloud: true, cloudFormSources: map[string]string{"one": "item"}, cloudFormVersions: map[string]string{"one": "old-revision"}}
+	binding := cloudSaveBinding{client: c, scope: "one", form: true, formFromCloud: true, sourceID: "item", sourceVersion: "old-revision"}
+	if !d.bindSavedCloudID(binding, "item", "new-revision") || d.formCloudVersion() != "new-revision" {
+		t.Fatal("confirmed revision was not bound")
+	}
+	d.finishCloudRefresh([]cloudAccount{{ID: "item", UpdatedAt: "changed-elsewhere"}}, nil)
+	if d.formCloudVersion() != "new-revision" {
+		t.Fatal("refresh silently advanced an open form's revision")
+	}
+	if d.bindSavedCloudID(binding, "item", "late-revision") || d.formCloudVersion() != "new-revision" {
+		t.Fatal("late response replaced newer revision")
+	}
+	d.finishCloudSave(nil, &cloudHTTPError{Status: http.StatusConflict, Code: "account_conflict", Message: "conflict"}, nil)
+	if !d.cloudListStale || !strings.Contains(d.cloudStatus, "本次未保存") {
+		t.Fatal("confirmed conflict was reported as uncertain")
+	}
+	d.clearCloudState()
+	if len(d.cloudFormVersions) != 0 {
+		t.Fatal("logout retained cloud revisions")
+	}
+}
+
+func TestLegacyCloudCapabilityFallback(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			_, _ = w.Write([]byte(`{"status":"ok","version":"0.3.2"}`))
+			return
+		}
+		if r.Method == http.MethodPost {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+				return
+			}
+			if _, ok := body["expectedUpdatedAt"]; ok {
+				t.Error("legacy request included an unsupported field")
+			}
+			_, _ = w.Write([]byte(`{"id":"item"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"id":"item"}]`))
+	}))
+	defer server.Close()
+	c, err := newCloudClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.http.Transport, c.token = server.Client().Transport, "token"
+	c.discoverCapabilities()
+	if c.conditionalUpdates {
+		t.Fatal("legacy server was treated as conditional")
+	}
+	view := ui.NewTester((&desktop{workspace: "cloud", cloud: c}).view, 1200, 1400)
+	if !view.HasText("未确认当前服务支持并发修改保护；多设备同时更新可能覆盖，请先刷新并核对。") {
+		t.Fatal("legacy protection warning missing")
+	}
+	account := cloudAccount{ID: "item"}
+	if err := applyConditionalVersion(c, &account, "original"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err, _ := saveCloudAndRefresh(c, account); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -176,16 +255,22 @@ func TestSavedIDLinksToExactSessionAndClearsOnLogout(t *testing.T) {
 	session := &workspaceSession{id: 3, active: settings, cloudSources: map[string]string{"other": "keep"}}
 	d := &desktop{cloud: c, currentSession: 3, active: settings, sessions: []*workspaceSession{session}}
 	binding := cloudSaveBinding{client: c, scope: "one", sessionID: 3, sessionSettings: settings}
-	if !d.bindSavedCloudID(binding, "new") || session.cloudSources["one"] != "new" || session.cloudSources["other"] != "keep" {
+	if !d.bindSavedCloudID(binding, "new", "revision-1") || session.cloudSources["one"] != "new" || session.cloudSources["other"] != "keep" || session.cloudVersions["one"] != "revision-1" {
 		t.Fatal("session lost scope links")
 	}
 	binding.sourceID = "new"
+	binding.sourceVersion = "revision-1"
+	session.cloudVersions["one"] = "revision-2"
+	if d.bindSavedCloudID(binding, "new", "late") {
+		t.Fatal("late response replaced a newer session revision")
+	}
+	session.cloudVersions["one"] = "revision-1"
 	session.cloudSources["one"] = "changed"
-	if d.bindSavedCloudID(binding, "stale") {
+	if d.bindSavedCloudID(binding, "stale", "") {
 		t.Fatal("late result overwrote a newer source")
 	}
 	d.clearCloudState()
-	if len(session.cloudSources) != 0 {
+	if len(session.cloudSources) != 0 || len(session.cloudVersions) != 0 {
 		t.Fatal("session mappings survived logout")
 	}
 }
@@ -255,7 +340,7 @@ func TestSavedIDSurvivesRefreshFailureAndUncertainResponses(t *testing.T) {
 	}
 	d := &desktop{cloud: c, settings: connectionSettings{Host: "example.test", Port: "22", User: "alice", Password: "secret"}, fingerprint: "SHA256:key"}
 	binding := cloudSaveBinding{client: c, form: true, formSettings: d.settings, formFingerprint: d.fingerprint}
-	if !d.bindSavedCloudID(binding, id) {
+	if !d.bindSavedCloudID(binding, id, "") {
 		t.Fatal("confirmed ID not bound after refresh failure")
 	}
 	d.finishCloudSave(nil, mutationErr, refreshErr)

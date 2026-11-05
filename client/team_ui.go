@@ -218,6 +218,7 @@ func (d *desktop) applyRefreshedTeams(teams []cloudTeam) bool {
 			if d.settingsFromCloud && d.cloudFormSources[oldScope] != "" {
 				d.settings.Password, d.settings.Passphrase, d.settingsFromCloud = "", "", false
 				d.cloudFormSources = nil
+				d.cloudFormVersions = nil
 			}
 			d.applyCloudScope("", nil, nil)
 			d.cloudListStale = true

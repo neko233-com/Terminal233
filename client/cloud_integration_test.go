@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"encoding/base32"
 	binenc "encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -73,6 +74,10 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	if err := client.login("alice", "long-password"); err != nil {
 		t.Fatal(err)
 	}
+	client.discoverCapabilities()
+	if !client.conditionalUpdates {
+		t.Fatal("server conditional-update capability missing")
+	}
 	account := cloudAccount{Label: "sample", Host: "example.test", Port: 22, Username: "me", Password: "ssh-password", HostKeyFingerprint: "SHA256:verified"}
 	if err := client.save(account); err != nil {
 		t.Fatal(err)
@@ -97,9 +102,19 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := applyConditionalVersion(client, &update, accounts[0].UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	stale := update
+	stale.Password = "stale-overwrite"
 	updatedID, both, mutationErr, refreshErr := saveCloudAndRefresh(client, update)
 	if mutationErr != nil || refreshErr != nil || updatedID != accounts[0].ID || len(both) != 2 {
 		t.Fatal("cloud update changed the record count or ID")
+	}
+	_, _, conflict, _ := saveCloudAndRefresh(client, stale)
+	var httpErr *cloudHTTPError
+	if !errors.As(conflict, &httpErr) || httpErr.Status != http.StatusConflict || httpErr.Code != "account_conflict" {
+		t.Fatalf("stale update was not rejected: %v", conflict)
 	}
 	for _, item := range both {
 		if item.ID == accounts[0].ID && item.Password != "updated-first" {
