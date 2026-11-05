@@ -597,7 +597,45 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("file sort control failed: %s", tree)
 	}
 	call("act", map[string]any{"key": "file-original.txt", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	selectedReady := false
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "rename-name" && strings.Contains(fmt.Sprint(node), "original.txt") {
+				selectedReady = true
+				break
+			}
+		}
+		if selectedReady {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !selectedReady {
+		t.Fatal("file selection did not populate rename field")
+	}
 	call("act", map[string]any{"key": "rename-name", "action": "setValue", "text": "renamed.txt"})
+	deadline = time.Now().Add(5 * time.Second)
+	renameReady := false
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "rename-name" && strings.Contains(fmt.Sprint(node), "renamed.txt") {
+				renameReady = true
+				break
+			}
+		}
+		if renameReady {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !renameReady {
+		t.Fatal("rename field did not update")
+	}
 	call("act", map[string]any{"key": "rename-selected", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

@@ -25,6 +25,7 @@ type desktop struct {
 	sidebarCollapsed                                                                        bool
 	sessions                                                                                []*workspaceSession
 	currentSession, nextSession, splitSession, splitFirstSession, splitFocusedSession       int
+	pendingTerminalFocus                                                                    int
 	showTeams, showAdmin                                                                    bool
 	teamInvites                                                                             []cloudInvite
 	confirmInvite                                                                           string
@@ -404,7 +405,7 @@ func (d *desktop) view(c *ui.Context) {
 							s := session
 							ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
 								if workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), s.id == d.currentSession).Disabled(!d.canSwitchSession()).Clicked() {
-									d.activateSession(s.id)
+									d.selectSession(s.id)
 								}
 								if ui.Button(c.Key(fmt.Sprintf("session-close-%d", s.id)), "×").Label("关闭会话：" + s.label).Disabled(d.busy).Clicked() {
 									closeSessionID = s.id
@@ -613,7 +614,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.32"
+const version = "0.3.33"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

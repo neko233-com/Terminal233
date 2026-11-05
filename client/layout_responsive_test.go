@@ -69,3 +69,43 @@ func TestSplitTerminalsRemainVisibleWithPanels(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitSessionButtonFocusesSelectedTerminal(t *testing.T) {
+	firstConn, firstPeer := net.Pipe()
+	defer firstPeer.Close()
+	secondConn, secondPeer := net.Pipe()
+	defer secondPeer.Close()
+	first, err := terminal.New(terminal.Options{Conn: firstConn, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := terminal.New(terminal.Options{Conn: secondConn, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	d := &desktop{workspace: "terminal", term: first, currentSession: 1, splitSession: 2, splitFirstSession: 1, sessions: []*workspaceSession{{id: 1, label: "first", term: first}, {id: 2, label: "second", term: second}}}
+	view := ui.NewTester(d.view, 1500, 900)
+	if err := view.Click("终端：first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.Click("切换到：second"); err != nil {
+		t.Fatal(err)
+	}
+	if d.currentSession != 2 || !view.Focused("终端：second") {
+		t.Fatalf("selected session=%d, second terminal focused=%v", d.currentSession, view.Focused("终端：second"))
+	}
+	if err := view.Click("切换到：first"); err != nil {
+		t.Fatal(err)
+	}
+	if d.currentSession != 1 || !view.Focused("终端：first") {
+		t.Fatalf("selected session=%d, first terminal focused=%v", d.currentSession, view.Focused("终端：first"))
+	}
+	if err := view.Click("second"); err != nil {
+		t.Fatal(err)
+	}
+	if d.currentSession != 2 || !view.Focused("终端：second") {
+		t.Fatalf("tab selected session=%d, second terminal focused=%v", d.currentSession, view.Focused("终端：second"))
+	}
+}

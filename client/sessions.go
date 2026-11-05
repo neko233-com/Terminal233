@@ -213,7 +213,7 @@ func (d *desktop) closeAllSessions() {
 	}
 	d.sessions = nil
 	d.term, d.shell, d.active = nil, nil, connectionSettings{}
-	d.currentSession, d.splitSession, d.splitFirstSession = 0, 0, 0
+	d.currentSession, d.splitSession, d.splitFirstSession, d.pendingTerminalFocus = 0, 0, 0, 0
 }
 
 // toggleSplit displays a second, already open session without duplicating its terminal.
@@ -243,7 +243,11 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 	}
 	if second == nil {
 		d.splitFocusedSession = 0
-		terminal.View(c, d.term).Fill()
+		view := terminal.View(c, d.term).Fill()
+		if d.pendingTerminalFocus == d.currentSession && d.currentSession != 0 {
+			view.Focus()
+			d.pendingTerminalFocus = 0
+		}
 		return
 	}
 	stacked := width < 1100 || (d.showFilePanel && width < 1450)
@@ -267,9 +271,14 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 				label = "当前会话：" + s.label
 			}
 			if ui.Button(c.Key(fmt.Sprintf("split-focus-%d", s.id)), label).Disabled(current || !d.canSwitchSession()).Clicked() {
-				d.activateSession(s.id)
+				d.selectSession(s.id)
 			}
 			view := terminal.View(c, s.term).Label("终端：" + s.label).Grow(1).FillWidth()
+			if d.pendingTerminalFocus == s.id {
+				view.Focus()
+				d.pendingTerminalFocus = 0
+				focusedID = s.id
+			}
 			if view.Focused() {
 				focusedID = s.id
 			}
@@ -310,5 +319,13 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 		d.splitFocusedSession = 0
 	} else {
 		d.splitFocusedSession = focusedID
+	}
+}
+
+// Explicit tab and pane selection also directs subsequent typing to that session.
+func (d *desktop) selectSession(id int) {
+	d.activateSession(id)
+	if d.currentSession == id {
+		d.pendingTerminalFocus = id
 	}
 }
