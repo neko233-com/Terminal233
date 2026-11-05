@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -199,5 +202,82 @@ func TestSFTPTransferAndExplicitDelete(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "remote", "source.txt")); !os.IsNotExist(err) {
 		t.Fatalf("file still exists: %v", err)
+	}
+}
+
+func TestSFTPStreamsLargeFilesAndCleansCancelledTransfers(t *testing.T) {
+	settings, fingerprint, _ := testSSHServer(t)
+	settings.Fingerprint = fingerprint
+	shell, err := connectShell(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shell.Close()
+	root := t.TempDir()
+	source := filepath.Join(root, "large.bin")
+	f, err := os.Create(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Truncate(17 << 20); err == nil {
+		_, err = f.WriteAt([]byte("end"), (17<<20)-3)
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteDir := filepath.Join(root, "remote")
+	if err = os.Mkdir(remoteDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = uploadFile(shell, source, filepath.ToSlash(remoteDir)); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "download.bin")
+	if err = downloadFile(shell, path.Join(filepath.ToSlash(remoteDir), "large.bin"), target); err != nil {
+		t.Fatal(err)
+	}
+	hashFile := func(name string) [32]byte {
+		t.Helper()
+		f, err := os.Open(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		h := sha256.New()
+		if _, err = io.Copy(h, f); err != nil {
+			t.Fatal(err)
+		}
+		var sum [32]byte
+		copy(sum[:], h.Sum(nil))
+		return sum
+	}
+	if hashFile(source) != hashFile(target) {
+		t.Fatal("large transfer changed file contents")
+	}
+	localCopy := filepath.Join(root, "copy.bin")
+	if err = copyLocalFile(source, localCopy); err != nil || hashFile(source) != hashFile(localCopy) {
+		t.Fatalf("large local copy failed: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cancelledSource := filepath.Join(root, "cancelled-upload.bin")
+	if err = os.WriteFile(cancelledSource, []byte("data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = uploadFileContext(ctx, shell, cancelledSource, filepath.ToSlash(remoteDir)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled upload returned %v", err)
+	}
+	if _, err = os.Stat(filepath.Join(remoteDir, "cancelled-upload.bin")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cancelled upload left a partial file: %v", err)
+	}
+	cancelledTarget := filepath.Join(root, "cancelled.bin")
+	if err = downloadFileContext(ctx, shell, path.Join(filepath.ToSlash(remoteDir), "large.bin"), cancelledTarget); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled download returned %v", err)
+	}
+	if _, err = os.Stat(cancelledTarget); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cancelled download left a partial file: %v", err)
 	}
 }

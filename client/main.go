@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -59,6 +60,7 @@ type desktop struct {
 	settings                                                                                connectionSettings
 	fingerprint, status                                                                     string
 	busy                                                                                    bool
+	cancelTransfer                                                                          context.CancelFunc
 	term                                                                                    *terminal.Terminal
 	active                                                                                  connectionSettings
 	cloud                                                                                   *cloudClient

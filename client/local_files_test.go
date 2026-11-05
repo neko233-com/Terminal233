@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,5 +44,21 @@ func TestLocalFilesBrowseCopyAndDeleteSafely(t *testing.T) {
 	data, err := os.ReadFile(source)
 	if err != nil || string(data) != "hello" {
 		t.Fatalf("source changed: %q %v", data, err)
+	}
+}
+
+func TestCancelledLocalCopyRemovesPartialTarget(t *testing.T) {
+	root := t.TempDir()
+	source, target := filepath.Join(root, "source"), filepath.Join(root, "target")
+	if err := os.WriteFile(source, []byte("data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := copyLocalFileContext(ctx, source, target); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled copy returned %v", err)
+	}
+	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial target remains: %v", err)
 	}
 }

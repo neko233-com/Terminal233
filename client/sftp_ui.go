@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"github.com/egoist/mygo/ui"
 	"path"
@@ -75,27 +77,31 @@ func (d *desktop) transfer(upload bool) {
 	}
 	d.busy = true
 	d.fileStatus = "正在传输…"
+	ctx, cancel := context.WithCancel(context.Background())
+	d.cancelTransfer = cancel
 	go func() {
+		defer cancel()
 		var err error
 		if shell == nil && upload {
 			var target string
 			target, err = localItemPath(dir, filepath.Base(local))
 			if err == nil {
-				err = copyLocalFile(local, target)
+				err = copyLocalFileContext(ctx, local, target)
 			}
 		} else if shell == nil {
 			var source string
 			source, err = localItemPath(dir, selected)
 			if err == nil {
-				err = copyLocalFile(source, local)
+				err = copyLocalFileContext(ctx, source, local)
 			}
 		} else if upload {
-			err = uploadFile(shell, local, dir)
+			err = uploadFileContext(ctx, shell, local, dir)
 		} else {
-			err = downloadFile(shell, path.Join(dir, selected), local)
+			err = downloadFileContext(ctx, shell, path.Join(dir, selected), local)
 		}
 		d.win.Update(func() {
 			d.busy = false
+			d.cancelTransfer = nil
 			if sessionID != d.currentSession || shell != d.shell {
 				return
 			}
@@ -105,6 +111,10 @@ func (d *desktop) transfer(upload bool) {
 				} else {
 					d.fileStatus = "先前目录的传输已完成；当前目录已改变，请刷新"
 				}
+				return
+			}
+			if errors.Is(err, context.Canceled) {
+				d.fileStatus = "传输已取消；未完成的目标文件已清理"
 				return
 			}
 			if err != nil {
@@ -303,6 +313,10 @@ func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {
 		}
 		if ui.Button(c.Key("delete"), deleteShort).Label("删除选中文件（需确认）").Disabled(d.busy || d.term == nil || d.selectedFile == "").Clicked() {
 			d.removeSelected()
+		}
+		if d.cancelTransfer != nil && ui.Button(c.Key("cancel-transfer"), "取消传输").Clicked() {
+			d.cancelTransfer()
+			d.fileStatus = "正在取消传输…"
 		}
 	})
 	ui.Text(c, d.fileStatus).FontSize(12)

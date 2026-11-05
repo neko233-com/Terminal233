@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +14,25 @@ import (
 	"github.com/pkg/sftp"
 )
 
-const maxTransferBytes = 16 << 20
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(p)
+}
+
+func copyTransfer(ctx context.Context, dst io.Writer, src io.Reader) error {
+	_, err := io.Copy(dst, contextReader{ctx: ctx, r: src})
+	if err == nil {
+		err = ctx.Err()
+	}
+	return err
+}
 
 type remoteFile struct {
 	Name     string
@@ -60,6 +79,9 @@ func listRemote(shell *remoteShell, dir string) ([]remoteFile, error) {
 	return result, err
 }
 func uploadFile(shell *remoteShell, local, dir string) error {
+	return uploadFileContext(context.Background(), shell, local, dir)
+}
+func uploadFileContext(ctx context.Context, shell *remoteShell, local, dir string) error {
 	file, err := os.Open(local)
 	if err != nil {
 		return err
@@ -69,8 +91,8 @@ func uploadFile(shell *remoteShell, local, dir string) error {
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Size() > maxTransferBytes {
-		return errors.New("只能上传不超过 16 MiB 的普通文件")
+	if !info.Mode().IsRegular() {
+		return errors.New("只能上传普通文件")
 	}
 	name := filepath.Base(local)
 	if name == "." || name == string(filepath.Separator) || name == "" {
@@ -82,29 +104,33 @@ func uploadFile(shell *remoteShell, local, dir string) error {
 		if err != nil {
 			return err
 		}
-		n, copyErr := io.Copy(dst, io.LimitReader(file, maxTransferBytes+1))
+		copyErr := copyTransfer(ctx, dst, file)
 		closeErr := dst.Close()
-		if copyErr != nil || closeErr != nil || n > maxTransferBytes {
-			_ = client.Remove(remote)
+		if copyErr != nil || closeErr != nil {
+			if removeErr := client.Remove(remote); removeErr != nil {
+				return fmt.Errorf("传输未完成，清理远程目标文件失败：%w", removeErr)
+			}
 			if copyErr != nil {
 				return copyErr
 			}
 			if closeErr != nil {
 				return closeErr
 			}
-			return errors.New("文件超过 16 MiB")
 		}
 		return nil
 	})
 }
 func downloadFile(shell *remoteShell, remote, local string) error {
+	return downloadFileContext(context.Background(), shell, remote, local)
+}
+func downloadFileContext(ctx context.Context, shell *remoteShell, remote, local string) error {
 	return withSFTP(shell, func(client *sftp.Client) error {
 		info, err := client.Lstat(remote)
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() || info.Size() > maxTransferBytes {
-			return errors.New("只能下载不超过 16 MiB 的普通文件")
+		if !info.Mode().IsRegular() {
+			return errors.New("只能下载普通文件")
 		}
 		src, err := client.Open(remote)
 		if err != nil {
@@ -115,17 +141,18 @@ func downloadFile(shell *remoteShell, remote, local string) error {
 		if err != nil {
 			return err
 		}
-		n, copyErr := io.Copy(dst, io.LimitReader(src, maxTransferBytes+1))
+		copyErr := copyTransfer(ctx, dst, src)
 		closeErr := dst.Close()
-		if copyErr != nil || closeErr != nil || n > maxTransferBytes {
-			_ = os.Remove(local)
+		if copyErr != nil || closeErr != nil {
+			if removeErr := os.Remove(local); removeErr != nil {
+				return fmt.Errorf("传输未完成，清理本机目标文件失败：%w", removeErr)
+			}
 			if copyErr != nil {
 				return copyErr
 			}
 			if closeErr != nil {
 				return closeErr
 			}
-			return errors.New("文件超过 16 MiB")
 		}
 		return nil
 	})

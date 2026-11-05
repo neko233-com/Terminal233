@@ -293,7 +293,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "profile-1") {
 		t.Fatalf("saved connection missing from search: %s", tree)
 	}
-	call("act", map[string]any{"key": "profile-1", "action": "press"})
+	call("act", map[string]any{"key": "profile-edit-1", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -364,7 +364,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "profile-1") {
 		t.Fatalf("profile missing before key setup: %s", tree)
 	}
-	call("act", map[string]any{"key": "profile-1", "action": "press"})
+	call("act", map[string]any{"key": "profile-edit-1", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

@@ -110,6 +110,9 @@ func (d *desktop) closeSession(id int) {
 }
 
 func (d *desktop) closeAllSessions() {
+	if d.cancelTransfer != nil {
+		d.cancelTransfer()
+	}
 	for _, s := range d.sessions {
 		_ = s.term.Close()
 	}

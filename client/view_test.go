@@ -1,10 +1,24 @@
 package main
 
 import (
+	"context"
 	"github.com/egoist/mygo/ui"
 	"path/filepath"
 	"testing"
 )
+
+func TestTransferCancellationIsAvailableWhileBusy(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &desktop{workspace: "files", busy: true, cancelTransfer: cancel}
+	view := ui.NewTester(d.view, 1200, 1200)
+	if err := view.Click("取消传输"); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() != context.Canceled || !view.HasText("正在取消传输") {
+		t.Fatal("cancel did not reach the active transfer")
+	}
+}
 
 func TestNativeViewLoadsSyncedAccountWithoutTrustingIt(t *testing.T) {
 	d := &desktop{settings: connectionSettings{Port: "22"}, accounts: []cloudAccount{{ID: "test", Label: "示例服务器", Host: "example.test", Port: 22, Username: "alice", Password: "secret", HostKeyFingerprint: "SHA256:old"}}}

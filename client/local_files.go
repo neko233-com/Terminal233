@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -47,12 +48,15 @@ func listLocal(dir string) ([]remoteFile, error) {
 }
 
 func copyLocalFile(source, target string) error {
+	return copyLocalFileContext(context.Background(), source, target)
+}
+func copyLocalFileContext(ctx context.Context, source, target string) error {
 	info, err := os.Lstat(source)
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Size() > maxTransferBytes {
-		return errors.New("只能复制不超过 16 MiB 的普通文件")
+	if !info.Mode().IsRegular() {
+		return errors.New("只能复制普通文件")
 	}
 	src, err := os.Open(source)
 	if err != nil {
@@ -63,17 +67,18 @@ func copyLocalFile(source, target string) error {
 	if err != nil {
 		return err
 	}
-	n, copyErr := io.Copy(dst, io.LimitReader(src, maxTransferBytes+1))
+	copyErr := copyTransfer(ctx, dst, src)
 	closeErr := dst.Close()
-	if copyErr != nil || closeErr != nil || n > maxTransferBytes {
-		_ = os.Remove(target)
+	if copyErr != nil || closeErr != nil {
+		if removeErr := os.Remove(target); removeErr != nil {
+			return fmt.Errorf("复制未完成，清理目标文件失败：%w", removeErr)
+		}
 		if copyErr != nil {
 			return copyErr
 		}
 		if closeErr != nil {
 			return closeErr
 		}
-		return errors.New("文件超过 16 MiB")
 	}
 	return nil
 }
