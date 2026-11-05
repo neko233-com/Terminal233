@@ -114,6 +114,7 @@ func (d *desktop) finishCloudScopeSelection(id string, state cloudScopeState) {
 
 // Pending confirmations and invitation links belong to the previous scope.
 func (d *desktop) applyCloudScope(id string, accounts []cloudAccount, members []cloudTeamMember) {
+	d.clearCloudBatch()
 	d.cloud.teamID = id
 	d.selectedCloudProfile = ""
 	d.cloudListStale = false

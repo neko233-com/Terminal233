@@ -241,6 +241,9 @@ func (d *desktop) profileView(c *ui.Context) {
 		if d.profileSource != "cloud" && ui.Button(c.Key("profile-batch-select-visible"), "勾选当前显示的本机连接").Disabled(d.busy || len(d.profiles) == 0).Clicked() {
 			d.selectVisibleProfiles()
 		}
+		if d.cloud != nil && d.profileSource != "local" && ui.Button(c.Key("cloud-batch-select-visible"), "勾选当前显示的云端连接").Disabled(d.busy || d.cloudListStale).Clicked() {
+			d.selectVisibleCloudAccounts()
+		}
 	})
 	if d.profileSource != "cloud" && len(d.checkedProfiles) > 0 {
 		ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
@@ -263,6 +266,34 @@ func (d *desktop) profileView(c *ui.Context) {
 				}
 				if ui.Button(c.Key("profile-batch-delete-cancel"), "取消批量移除").Clicked() {
 					d.confirmProfileBatchDelete = false
+				}
+			})
+		}
+	}
+	if d.cloud != nil && d.profileSource != "local" && len(d.checkedCloud) > 0 {
+		ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, fmt.Sprintf("已勾选 %d 个云端连接（包括筛选隐藏项）", len(d.checkedCloud))).Wrap()
+			if ui.Button(c.Key("cloud-batch-copy"), "复制选中云端连接").Disabled(d.busy || d.cloudListStale || !d.canWriteCloudScope()).Clicked() {
+				d.cloudBatch("copy")
+			}
+			if ui.Button(c.Key("cloud-batch-delete"), "删除选中云端连接…").Disabled(d.busy || d.cloudListStale || !d.canWriteCloudScope()).Clicked() {
+				d.confirmCloudBatchDelete = true
+			}
+			if ui.Button(c.Key("cloud-batch-clear"), "清除云端勾选").Disabled(d.busy).Clicked() {
+				d.clearCloudBatch()
+			}
+		})
+		if d.confirmCloudBatchDelete {
+			ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+				ui.Text(c, fmt.Sprintf("确认删除全部 %d 个已勾选的云端连接？", len(d.checkedCloud))).Wrap()
+				if !d.cloud.conditionalDeletes {
+					ui.Text(c, "当前服务未确认支持并发删除保护，其他设备的更改可能被删除。").Wrap()
+				}
+				if ui.Button(c.Key("cloud-batch-delete-confirm"), "确认批量删除云端连接").Disabled(d.busy).Clicked() {
+					d.cloudBatch("delete")
+				}
+				if ui.Button(c.Key("cloud-batch-delete-cancel"), "取消批量删除云端连接").Clicked() {
+					d.confirmCloudBatchDelete = false
 				}
 			})
 		}
@@ -472,12 +503,16 @@ func (d *desktop) profileView(c *ui.Context) {
 		}
 		for _, entry := range accounts {
 			account := entry
-			if query != "" && !strings.Contains(strings.ToLower(account.Label+" "+account.Host+" "+account.Username), query) {
+			if !d.cloudAccountVisible(account) {
 				continue
 			}
 			shown++
 			label := account.Label + " · " + account.Username + "@" + account.Host
 			ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
+				_, checked := d.checkedCloud[account.ID]
+				if ui.Checkbox(c.Key("cloud-profile-check-"+account.ID), &checked, "").Label("勾选云端连接：" + account.Label).Disabled(d.busy || d.cloudListStale).Changed() {
+					d.checkCloudAccount(account, checked)
+				}
 				row := ui.Button(c.Key("profile-cloud-"+account.ID), label).Grow(1).Disabled(d.busy)
 				if d.selectedCloudProfile == account.ID {
 					row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)

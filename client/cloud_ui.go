@@ -100,6 +100,7 @@ func (d *desktop) finishCloudRefresh(accounts []cloudAccount, err error) {
 		d.cloudStatus = "连接列表刷新失败，请重试：" + err.Error()
 		return
 	}
+	d.clearCloudBatch()
 	d.accounts, d.selectedCloudProfile, d.cloudListStale, d.confirmCloudDelete, d.confirmCloudDeleteVersion = accounts, "", false, "", ""
 	d.cloudStatus = "已刷新连接列表"
 }
@@ -312,6 +313,7 @@ func (d *desktop) bindSavedCloudID(binding cloudSaveBinding, id, version string)
 }
 
 func (d *desktop) finishCloudSave(accounts []cloudAccount, mutationErr, refreshErr error) {
+	d.clearCloudBatch()
 	if mutationErr != nil {
 		d.cloudListStale = true
 		var httpErr *cloudHTTPError
@@ -539,6 +541,7 @@ func (d *desktop) cloudDelete() {
 	}()
 }
 func (d *desktop) finishCloudDelete(id string, accounts []cloudAccount, mutationErr, refreshErr error) {
+	d.clearCloudBatch()
 	if mutationErr != nil {
 		d.cloudListStale = true
 		var httpErr *cloudHTTPError
@@ -589,6 +592,7 @@ func (d *desktop) cloudLogout() {
 
 // Logging out and restoring a backup both invalidate the cloud session.
 func (d *desktop) clearCloudState() {
+	d.clearCloudBatch()
 	if d.cloud != nil {
 		d.cloud.token, d.cloud.adminTOTP = "", ""
 	}

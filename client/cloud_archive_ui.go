@@ -122,6 +122,7 @@ func (d *desktop) cloudArchiveAction(action string) {
 }
 
 func (d *desktop) finishArchiveImport(result archiveImportResult) {
+	d.clearCloudBatch()
 	if result.cancelled && !result.preflightDone {
 		d.archiveStatus = "导入已取消，未写入连接。"
 		return
