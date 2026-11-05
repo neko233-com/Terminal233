@@ -567,6 +567,15 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "本机文件") {
 		t.Fatalf("local file workspace missing: %s", tree)
 	}
+	call("act", map[string]any{"key": "file-tools-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "pick-batch-upload") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if !strings.Contains(tree, "pick-batch-upload") || !strings.Contains(tree, "选择多文件并复制到此") {
 		t.Fatalf("native batch picker entry missing: %s", tree)
 	}

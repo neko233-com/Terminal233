@@ -29,6 +29,7 @@ type desktop struct {
 	monitorData                                                                             monitorDisplay
 	terminalLightTheme, terminalDarkTheme                                                   *terminal.Theme
 	showFilePanel                                                                           bool
+	showFileTools                                                                           bool
 	sidebarCollapsed                                                                        bool
 	sessions                                                                                []*workspaceSession
 	currentSession, nextSession, splitSession, splitFirstSession, splitFocusedSession       int
@@ -55,6 +56,7 @@ type desktop struct {
 	cloudFoldedGroups                                                                       map[string]bool
 	profileFormat                                                                           int
 	showGroupControls, showTerminalSettings                                                 bool
+	showShortcutHelp                                                                        bool
 	showCompactProfileTools                                                                 bool
 	groupInput                                                                              string
 	confirmGroupDelete                                                                      bool
@@ -127,24 +129,24 @@ type desktop struct {
 
 var workspaceTheme = func() *ui.Theme {
 	t := ui.DarkTheme()
-	t.Background = ui.Hex("#10151b")
-	t.Surface = ui.Hex("#182129")
-	t.SurfaceHover = ui.Hex("#22313a")
-	t.SurfacePressed = ui.Hex("#2a3c44")
-	t.Border = ui.Hex("#30404a")
-	t.Accent = ui.Hex("#218a67")
-	t.AccentHover = ui.Hex("#2baa80")
-	t.AccentPressed = ui.Hex("#186d51")
-	t.Focus = ui.Hex("#6ad9a4")
+	t.Background = ui.Hex("#101325")
+	t.Surface = ui.Hex("#20243a")
+	t.SurfaceHover = ui.Hex("#2a304a")
+	t.SurfacePressed = ui.Hex("#343b59")
+	t.Border = ui.Hex("#353c55")
+	t.Accent = ui.Hex("#645bd1")
+	t.AccentHover = ui.Hex("#776ee0")
+	t.AccentPressed = ui.Hex("#5048ae")
+	t.Focus = ui.Hex("#aaa6ff")
 	return t
 }()
 
 var workspaceLightTheme = func() *ui.Theme {
 	t := ui.LightTheme()
-	t.Accent = ui.Hex("#197a50")
-	t.AccentHover = ui.Hex("#238f60")
-	t.AccentPressed = ui.Hex("#135e3e")
-	t.Focus = ui.Hex("#197a50")
+	t.Accent = ui.Hex("#554bb8")
+	t.AccentHover = ui.Hex("#675dc9")
+	t.AccentPressed = ui.Hex("#453d99")
+	t.Focus = ui.Hex("#554bb8")
 	return t
 }()
 
@@ -156,10 +158,16 @@ func workspaceButton(c *ui.Context, key, label string, active bool) ui.Element {
 }
 
 func navigationButton(c *ui.Context, key, label string, active bool) ui.Element {
-	button := ui.Button(c.Key(key), label).BorderWidth(0).Justify(ui.Start).Padding(8, 12).Radius(7)
+	button := ui.Button(c.Key(key), "").Label(label).BorderWidth(0).Justify(ui.Start).Padding(8, 12).Gap(10).Radius(7)
 	if active {
-		button = button.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
+		button = button.Background(c.Theme().SurfacePressed)
 	}
+	button.Children(func() {
+		if icon := navigationIcons[key]; icon != nil {
+			ui.Icon(c, icon).Width(16).Height(16)
+		}
+		ui.Text(c, label).FontSize(13)
+	})
 	return button
 }
 
@@ -304,14 +312,12 @@ func (d *desktop) view(c *ui.Context) {
 			if d.sidebarCollapsed {
 				sidebarLabel = "展开侧栏"
 			}
-			if ui.Button(c.Key("toggle-sidebar"), sidebarLabel).Clicked() {
+			if ui.Button(c.Key("toggle-sidebar"), "☰").Label(sidebarLabel).Tooltip(sidebarLabel).Width(38).Clicked() {
 				d.sidebarCollapsed = !d.sidebarCollapsed
 				d.savePreference("sidebar", d.sidebarCollapsed)
 			}
 			if d.preferencesStatus != "" {
 				ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).Grow(1).Wrap()
-			} else if width >= 900 {
-				ui.Text(c, "安全连接 · 本地与云端").FontSize(12).TextColor(t.TextMuted).Grow(1)
 			} else {
 				ui.Box(c).Grow(1)
 			}
@@ -319,7 +325,7 @@ func (d *desktop) view(c *ui.Context) {
 			if d.lightTheme {
 				themeLabel = "深色"
 			}
-			if ui.Button(c.Key("theme-toggle"), themeLabel).Clicked() {
+			if ui.Button(c.Key("theme-toggle"), "◐").Label(themeLabel).Tooltip("切换" + themeLabel + "主题").Width(38).Clicked() {
 				d.lightTheme = !d.lightTheme
 				d.savePreference("light", d.lightTheme)
 			}
@@ -508,8 +514,12 @@ func (d *desktop) view(c *ui.Context) {
 								}
 							})
 						}
-						ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
-						ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端\nCtrl+Shift+F 查找终端输出\nCtrl+Tab / Ctrl+Shift+Tab 切换会话").FontSize(11).TextColor(t.TextMuted).Wrap()
+						if ui.Button(c.Key("shortcut-help-toggle"), "快捷键").Clicked() {
+							d.showShortcutHelp = !d.showShortcutHelp
+						}
+						if d.showShortcutHelp {
+							ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端\nCtrl+Shift+F 查找终端输出\nCtrl+Tab / Ctrl+Shift+Tab 切换会话").FontSize(11).TextColor(t.TextMuted).Wrap()
+						}
 						d.updateView(c)
 					})
 				})
@@ -639,7 +649,18 @@ func (d *desktop) view(c *ui.Context) {
 						}
 					})
 					if d.term == nil {
-						ui.Text(c, "选择连接，或打开本机终端").FontSize(18).TextColor(t.TextMuted)
+						ui.Column(c).FillWidth().Padding(32).Gap(10).Children(func() {
+							ui.Text(c, "开始使用终端").FontSize(20).Bold()
+							ui.Text(c, "打开本机终端，或选择 SSH 连接开始远程会话。").TextColor(t.TextMuted).Wrap()
+							ui.Row(c).Wrap().Gap(8).Children(func() {
+								if ui.PrimaryButton(c.Key("terminal-empty-local"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+									d.openLocalTerminal()
+								}
+								if ui.Button(c.Key("terminal-empty-connections"), "选择 SSH 连接").Clicked() {
+									d.workspace, d.editConnection = "connections", false
+								}
+							})
+						})
 					} else {
 						if d.monitorCancel != nil {
 							if width < 900 {
@@ -823,7 +844,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.64"
+const version = "0.3.65"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

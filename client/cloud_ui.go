@@ -369,7 +369,7 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 
 func (d *desktop) cloudView(c *ui.Context) {
 	ui.Text(c, "跨设备访问连接信息，或与团队共享凭据。").TextColor(c.Theme().TextMuted).Wrap()
-	ui.Column(c).FillWidth().Padding(18).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
+	ui.Column(c).FillWidth().MaxWidth(680).Padding(20).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
 		ui.Text(c, "同步账号").FontSize(16).Bold()
 		if d.cloud != nil {
 			if d.cloudUser != "" {
@@ -383,25 +383,33 @@ func (d *desktop) cloudView(c *ui.Context) {
 			}
 			return
 		}
+		ui.Text(c, "同步服务地址").FontSize(12).TextColor(c.Theme().TextMuted)
 		ui.TextInput(c.Key("cloudurl"), &d.cloudURL).Label("同步服务 HTTPS 地址").Placeholder("同步服务 HTTPS 地址").Disabled(d.busy || d.cloud != nil).OnChange(d.cloudURLChanged)
+		ui.Text(c, "账号").FontSize(12).TextColor(c.Theme().TextMuted)
 		ui.TextInput(c.Key("clouduser"), &d.cloudUser).Label("同步账号").Placeholder("同步账号").Disabled(d.busy || d.cloud != nil)
+		ui.Text(c, "密码").FontSize(12).TextColor(c.Theme().TextMuted)
 		ui.TextInput(c.Key("cloudpassword"), &d.cloudPassword).Label("同步密码").Placeholder("同步密码").Password().Disabled(d.busy || d.cloud != nil)
-		ui.TextInput(c.Key("cloudregistration"), &d.cloudRegistration).Label("注册令牌").Placeholder("注册令牌（仅注册时需要）").Password().Disabled(d.busy || d.cloud != nil)
-		if d.cloud == nil && localRegistrationAvailable(d.cloudURL) {
-			if ui.Button(c.Key("cloud-local-registration"), "使用本机部署注册令牌").Disabled(d.busy).Clicked() {
-				if token, err := readLocalRegistrationToken(); err != nil {
-					d.cloudStatus = err.Error()
-				} else {
-					d.cloudRegistration = token
-					d.cloudRegistrationLocal = true
-					d.cloudStatus = "已载入本机注册令牌；填写账号和密码后注册。"
-				}
-			}
-		}
-		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+		ui.Row(c).FillWidth().Children(func() {
 			if ui.PrimaryButton(c.Key("cloudlogin"), "登录同步服务").Disabled(d.busy || d.cloud != nil).Clicked() {
 				d.cloudLogin(false)
 			}
+		})
+		ui.Text(c, "注册令牌（注册新账号时填写）").FontSize(12).TextColor(c.Theme().TextMuted)
+		ui.TextInput(c.Key("cloudregistration"), &d.cloudRegistration).Label("注册令牌").Placeholder("注册令牌（仅注册时需要）").Password().Disabled(d.busy || d.cloud != nil)
+		if d.cloud == nil && localRegistrationAvailable(d.cloudURL) {
+			ui.Row(c).FillWidth().Children(func() {
+				if ui.Button(c.Key("cloud-local-registration"), "使用本机部署注册令牌").Disabled(d.busy).Clicked() {
+					if token, err := readLocalRegistrationToken(); err != nil {
+						d.cloudStatus = err.Error()
+					} else {
+						d.cloudRegistration = token
+						d.cloudRegistrationLocal = true
+						d.cloudStatus = "已载入本机注册令牌；填写账号和密码后注册。"
+					}
+				}
+			})
+		}
+		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 			if ui.Button(c.Key("cloudregister"), "注册并登录").Disabled(d.busy || d.cloud != nil).Clicked() {
 				d.cloudLogin(true)
 			}
@@ -411,13 +419,15 @@ func (d *desktop) cloudView(c *ui.Context) {
 			if d.showInviteEntry || d.showTeams {
 				label = "收起团队邀请注册"
 			}
-			if ui.Button(c.Key("cloud-invite-entry"), label).Disabled(d.busy).Clicked() {
-				if d.showInviteEntry || d.showTeams {
-					d.showInviteEntry, d.showTeams = false, false
-				} else {
-					d.showInviteEntry = true
+			ui.Row(c).FillWidth().Children(func() {
+				if ui.Button(c.Key("cloud-invite-entry"), label).Disabled(d.busy).Clicked() {
+					if d.showInviteEntry || d.showTeams {
+						d.showInviteEntry, d.showTeams = false, false
+					} else {
+						d.showInviteEntry = true
+					}
 				}
-			}
+			})
 			if d.showInviteEntry || d.showTeams {
 				d.inviteJoinView(c)
 				if d.teamStatus != "" {
@@ -468,39 +478,41 @@ func (d *desktop) cloudView(c *ui.Context) {
 	if d.cloudListStale {
 		ui.Text(c, "连接列表可能过期，请先刷新后再修改或删除。").FontSize(12).Wrap()
 	}
-	archiveLabel := "展开连接备份"
-	if d.showArchive {
-		archiveLabel = "收起连接备份"
-	}
-	if ui.Button(c.Key("toggle-archive"), archiveLabel).Clicked() {
-		d.showArchive = !d.showArchive
-	}
+	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+		archiveLabel := "展开连接备份"
+		if d.showArchive {
+			archiveLabel = "收起连接备份"
+		}
+		if ui.Button(c.Key("toggle-archive"), archiveLabel).Clicked() {
+			d.showArchive = !d.showArchive
+		}
+		teamLabel := "展开团队管理"
+		if d.showTeams {
+			teamLabel = "收起团队管理"
+		}
+		if ui.Button(c.Key("toggle-teams"), teamLabel).Clicked() {
+			d.showTeams = !d.showTeams
+		}
+		adminLabel := "展开服务器管理"
+		if d.showAdmin {
+			adminLabel = "收起服务器管理"
+		}
+		if ui.Button(c.Key("toggle-admin"), adminLabel).Clicked() {
+			d.showAdmin = !d.showAdmin
+		}
+	})
 	if d.showArchive {
 		d.cloudArchiveView(c)
 	}
-	teamLabel := "展开团队管理"
-	if d.showTeams {
-		teamLabel = "收起团队管理"
-	}
-	if ui.Button(c.Key("toggle-teams"), teamLabel).Clicked() {
-		d.showTeams = !d.showTeams
-	}
 	if d.showTeams {
 		d.teamView(c)
-	}
-	adminLabel := "展开服务器管理"
-	if d.showAdmin {
-		adminLabel = "收起服务器管理"
-	}
-	if ui.Button(c.Key("toggle-admin"), adminLabel).Clicked() {
-		d.showAdmin = !d.showAdmin
 	}
 	if d.showAdmin {
 		d.adminView(c)
 	}
 	for _, item := range d.accounts {
 		account := item
-		row := ui.Button(c.Key("account-"+account.ID), account.Label).Disabled(d.busy)
+		row := ui.Button(c.Key("account-"+account.ID), account.Label).BorderWidth(0).Justify(ui.Start).Disabled(d.busy)
 		row.ContextMenu(func(menu *ui.Menu) {
 			if d.canWriteCloudScope() && menu.Item("删除…").Chosen() {
 				d.prepareCloudDelete(account)

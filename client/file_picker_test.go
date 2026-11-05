@@ -113,6 +113,9 @@ func containsMenuItem(items []string, wanted string) bool {
 func TestFileWorkspaceExposesBatchPicker(t *testing.T) {
 	d := &desktop{workspace: "files", term: &terminal.Terminal{}}
 	view := ui.NewTester(d.view, 1200, 1400)
+	if err := view.Click("文件操作"); err != nil {
+		t.Fatal(err)
+	}
 	if !view.HasText("选择多文件并复制到此…") {
 		t.Fatal("batch file picker is missing")
 	}

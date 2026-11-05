@@ -10,6 +10,10 @@ import (
 	"testing"
 )
 
+func precedesInGrid(a, b ui.Rect) bool {
+	return a.Y < b.Y || (a.Y == b.Y && a.X < b.X)
+}
+
 func TestTransferErrorsAndLocalRefresh(t *testing.T) {
 	exists := &os.PathError{Op: "open", Path: "existing", Err: os.ErrExist}
 	if got := transferErrorText(exists); got != "目标文件已存在，不会覆盖" {
@@ -111,7 +115,7 @@ func TestConnectionListShowsCurrentCloudScopeWithoutTrustingIt(t *testing.T) {
 	}
 	a, okA := view.Find("Alpha · bob@other.test")
 	b, okB := view.Find("测试机 · alice@example.test")
-	if !okA || !okB || a.Y >= b.Y || d.accounts[0].ID != "cloud-1" {
+	if !okA || !okB || !precedesInGrid(a, b) || d.accounts[0].ID != "cloud-1" {
 		t.Fatal("cloud sorting changed stored order or displayed incorrect order")
 	}
 	d.profileSearch = "missing"
@@ -355,7 +359,7 @@ func TestConnectionGroupNavigation(t *testing.T) {
 func TestBuiltinLocalTerminalIsDiscoverableAndFiltered(t *testing.T) {
 	d := &desktop{}
 	view := ui.NewTester(d.view, 1200, 900)
-	if !view.HasText("内置本机连接") || !view.HasText("打开本机终端") {
+	if !view.HasText("打开本机终端") {
 		t.Fatal("built-in local terminal missing from the connection list")
 	}
 	if !view.HasText("全部连接  1") {
@@ -363,17 +367,17 @@ func TestBuiltinLocalTerminalIsDiscoverableAndFiltered(t *testing.T) {
 	}
 	d.profileSearch = "powershell"
 	view.Frame()
-	if !view.HasText("内置本机连接") {
+	if !view.HasText("打开本机终端") {
 		t.Fatal("local terminal was not found by search")
 	}
 	d.profileSearch = "remote-only"
 	view.Frame()
-	if view.HasText("内置本机连接") {
+	if view.HasText("打开本机终端") {
 		t.Fatal("local terminal did not follow search")
 	}
 	d.profileSearch, d.profileFavorites = "", true
 	view.Frame()
-	if view.HasText("内置本机连接") {
+	if view.HasText("打开本机终端") {
 		t.Fatal("built-in item appeared in the favorites filter")
 	}
 }
@@ -433,7 +437,7 @@ func TestRecentConnectionsUseSuccessfulConnectionOrder(t *testing.T) {
 	if !ok {
 		t.Fatal("older connection missing")
 	}
-	if first.Y >= second.Y {
+	if !precedesInGrid(first, second) {
 		t.Fatalf("recent connections out of order: %v %v", first, second)
 	}
 }
@@ -452,7 +456,7 @@ func TestConnectionSortingPreservesCustomOrder(t *testing.T) {
 		t.Helper()
 		a, okA := view.Find(first)
 		b, okB := view.Find(second)
-		if !okA || !okB || a.Y >= b.Y {
+		if !okA || !okB || !precedesInGrid(a, b) {
 			t.Fatalf("unexpected displayed order %s then %s: %+v %+v", first, second, a, b)
 		}
 	}
@@ -551,6 +555,10 @@ func TestNarrowWorkspaceActionsRemainVisible(t *testing.T) {
 			if tc.loggedIn {
 				d.cloud = &cloudClient{}
 			}
+			if tc.workspace == "files" {
+				d.files = []remoteFile{{Name: "example.txt"}}
+				d.showFileTools = true
+			}
 			view := ui.NewTester(d.view, 640, 1800)
 			for _, label := range tc.labels {
 				r, ok := view.Find(label)
@@ -641,7 +649,7 @@ func TestConnectionListDragOrder(t *testing.T) {
 	test.Frame()
 	first, _ := test.Find("alice@two.test")
 	second, _ := test.Find("alice@one.test")
-	if first.Y >= second.Y {
+	if !precedesInGrid(first, second) {
 		t.Fatalf("view did not render new order: %v %v", first, second)
 	}
 }
@@ -808,7 +816,7 @@ func TestFileListPrecedesControlsAndRemainsBounded(t *testing.T) {
 	for i := range files {
 		files[i] = remoteFile{Name: fmt.Sprintf("file-%02d", i), Size: int64(i)}
 	}
-	d := &desktop{workspace: "files", files: files}
+	d := &desktop{workspace: "files", files: files, showFileTools: true}
 	view := ui.NewTester(d.view, 1200, 1500)
 	first, ok := view.Find("file-00")
 	controls, hasControls := view.Find("本地文件路径")

@@ -544,9 +544,9 @@ func (d *desktop) setFileSort(order string) {
 func (d *desktop) fileView(c *ui.Context, compact bool) {
 	d.syncCheckedDirectory()
 	local := d.term != nil && d.shell == nil
-	title, help := "远程文件", "选择目录浏览，拖入文件上传；删除前需要再次确认。"
+	title := "远程文件"
 	if local {
-		title, help = "本机文件", "选择目录浏览，拖入文件复制；删除前需要再次确认。"
+		title = "本机文件"
 	}
 	ui.Text(c, title).FontSize(16).Bold()
 	for _, session := range d.sessions {
@@ -555,7 +555,25 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			break
 		}
 	}
-	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
+	if d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0 {
+		ui.Column(c).FillWidth().Padding(24).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
+			ui.Text(c, "先打开一个终端").FontSize(17).Bold()
+			ui.Text(c, "连接 SSH 后浏览远程文件，或打开本机终端浏览本机文件。").FontSize(13).TextColor(c.Theme().TextMuted).Wrap()
+			ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+				if ui.PrimaryButton(c.Key("files-open-local"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+					d.openLocalTerminal()
+				}
+				if ui.Button(c.Key("files-open-connections"), "选择 SSH 连接").Clicked() {
+					d.workspace, d.editConnection = "connections", false
+				}
+			})
+		})
+		d.fileDropView(c, local)
+		if d.fileStatus != "" {
+			ui.Text(c, d.fileStatus).FontSize(12).Wrap()
+		}
+		return
+	}
 	ui.TextInput(c.Key("remote-dir"), &d.fileDir).Label("当前目录").Placeholder("目录路径").OnChange(func() {
 		d.selectedFile = ""
 		d.confirmDelete = ""
@@ -589,18 +607,18 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			d.selectedFile, d.confirmDelete, d.fileRename = "", "", ""
 			d.refreshFiles()
 		}
-	})
-	label := "跟随终端目录：关"
-	if d.fileFollowTerminal {
-		label = "跟随终端目录：开"
-	}
-	if ui.Button(c.Key("file-follow-terminal"), label).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
-		d.fileFollowTerminal = !d.fileFollowTerminal
-		d.lastTerminalDir = ""
+		label := "跟随终端目录：关"
 		if d.fileFollowTerminal {
-			d.followReportedDirectory(true)
+			label = "跟随终端目录：开"
 		}
-	}
+		if ui.Button(c.Key("file-follow-terminal"), label).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
+			d.fileFollowTerminal = !d.fileFollowTerminal
+			d.lastTerminalDir = ""
+			if d.fileFollowTerminal {
+				d.followReportedDirectory(true)
+			}
+		}
+	})
 	if d.term == nil {
 		ui.Text(c, "连接 SSH 或打开本机终端后可浏览文件。").TextColor(c.Theme().TextMuted).Wrap()
 	} else if terminalEnded(d.term) {
@@ -683,9 +701,10 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 				if f.IsDir {
 					label = "📁 " + label
 				}
-				ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).FillWidth().Padding(3, 8).Gap(12).AlignItems(ui.Center).Background(c.Theme().Surface).Radius(6).Children(func() {
 					checked := d.fileChecked[f.Name]
 					if ui.Checkbox(c.Key("file-check-"+f.Name), &checked, "").Label("多选文件：" + f.Name).Disabled(d.busy || d.fileSessionUnavailable() || !eligibleBatchFile(f)).Changed() {
+						d.showFileTools = true
 						if checked && len(d.fileChecked) >= maxBatchFiles {
 							d.fileStatus = fmt.Sprintf("每次最多选择 %d 个文件", maxBatchFiles)
 						} else if checked {
@@ -697,7 +716,10 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							delete(d.fileChecked, f.Name)
 						}
 					}
-					row := ui.Button(c.Key("file-"+f.Name), label).Grow(1).Disabled(d.busy || d.fileSessionUnavailable())
+					row := ui.Button(c.Key("file-"+f.Name), label).BorderWidth(0).Justify(ui.Start).Grow(1).Disabled(d.busy || d.fileSessionUnavailable())
+					if d.selectedFile == f.Name {
+						row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
+					}
 					row.ContextMenu(func(menu *ui.Menu) {
 						if eligibleBatchFile(f) {
 							label := "下载到…"
@@ -709,15 +731,18 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							}
 						}
 						if menu.Item("选择").Chosen() {
+							d.showFileTools = true
 							d.selectedFile, d.fileRename = f.Name, f.Name
 							d.confirmDelete = ""
 							d.fileStatus = "已选择：" + f.Name
 						}
 						if menu.Item("重命名…").Chosen() {
+							d.showFileTools = true
 							d.selectedFile, d.fileRename, d.confirmDelete = f.Name, f.Name, ""
 							d.fileStatus = "请输入新名称，然后点击重命名：" + f.Name
 						}
 						if menu.Item("删除…").Chosen() {
+							d.showFileTools = true
 							d.selectedFile = f.Name
 							d.confirmDelete = ""
 							d.removeSelected()
@@ -735,6 +760,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							d.selectedFile = ""
 							d.refreshFiles()
 						} else {
+							d.showFileTools = true
 							d.selectedFile = f.Name
 							d.fileRename = f.Name
 							d.fileStatus = "已选择：" + f.Name
@@ -760,6 +786,19 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 
 	if len(d.files) > 0 && len(visible) == 0 {
 		ui.Text(c, "没有匹配的文件").TextColor(c.Theme().TextMuted)
+	}
+	toolsOpen := d.showFileTools || d.cancelTransfer != nil
+	toolsLabel := "文件操作"
+	if toolsOpen {
+		toolsLabel = "收起文件操作"
+	}
+	ui.Row(c).FillWidth().Children(func() {
+		if ui.Button(c.Key("file-tools-toggle"), toolsLabel).Disabled(d.cancelTransfer != nil).Clicked() {
+			d.showFileTools = !d.showFileTools
+		}
+	})
+	if !toolsOpen {
+		return
 	}
 	ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, fmt.Sprintf("多选 %d/%d", len(d.fileChecked), maxBatchFiles)).FontSize(12)

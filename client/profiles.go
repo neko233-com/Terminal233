@@ -140,6 +140,13 @@ func (d *desktop) profileView(c *ui.Context) {
 		width -= workspaceSidebarWidth(width)
 	}
 	compact := width < 600
+	columns := 1
+	if width >= 950 {
+		columns = 3
+	} else if width >= 610 {
+		columns = 2
+	}
+	cardWidth := (width - 48 - float32(columns-1)*10) / float32(columns)
 	if d.cloudBatchCancel != nil {
 		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 			ui.Text(c, "云端批量操作进行中；取消会等待当前请求结束。").Wrap()
@@ -173,13 +180,9 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.editConnection = true
 		}
 	})
-	help := "单击选择，双击连接；右键管理，拖动可调整顺序。"
-	if d.profileRecent {
-		help = "最近连接按成功连接时间排序。"
-	} else if d.profileSort != "" {
-		help = "正在按所选列排序；切换到自定义顺序后可拖动或移动连接。"
+	if d.profileSort != "" && !d.profileRecent {
+		ui.Text(c, "按所选列排序；切换到自定义顺序后可拖动连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
-	ui.Text(c, help).TextColor(c.Theme().TextMuted).Wrap()
 	if d.status != "" {
 		ui.Text(c, d.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
@@ -350,193 +353,189 @@ func (d *desktop) profileView(c *ui.Context) {
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
 	showLocal := d.profileSource != "cloud" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
 		(query == "" || strings.Contains("本机终端 local terminal powershell", query))
-	if showLocal {
-		ui.Row(c).FillWidth().Padding(12, 16).Gap(12).AlignItems(ui.Center).Background(c.Theme().Surface).Radius(8).Children(func() {
-			ui.Column(c).Grow(1).Gap(3).Children(func() {
-				ui.Text(c, "本机终端").FontSize(15).Bold()
-				if !compact {
-					ui.Text(c, "内置本机连接，通过 PowerShell 直接使用这台电脑。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-				}
-			})
-			ui.Button(c.Key("profile-local-terminal"), "打开终端").Label("打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
-		})
-	}
-	if d.profileSource != "cloud" && len(d.profiles) == 0 {
-		ui.Column(c).FillWidth().Padding(28).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
-			ui.Text(c, "还没有本机 SSH 连接").FontSize(18).Bold()
-			ui.Text(c, "创建连接后，可在这里快速查找和管理。也可以打开本机终端。").TextColor(c.Theme().TextMuted).Wrap()
-		})
-	} else if d.profileSource != "cloud" {
-		ui.Row(c).FillWidth().Padding(8, 12).Gap(12).Background(c.Theme().Surface).Children(func() {
-			ui.Text(c, "名称 / 分组").Grow(1).TextColor(c.Theme().TextMuted)
-			if !compact {
-				ui.Text(c, "地址").Width(220).TextColor(c.Theme().TextMuted)
-			}
-			if !compact {
-				ui.Text(c, "操作").Width(220).TextColor(c.Theme().TextMuted)
-			}
-		})
-	}
+	ui.Text(c, "主机").FontSize(13).TextColor(c.Theme().TextMuted)
 	var moveFrom, moveTo profileID
 	shown := 0
-	items := d.profiles
-	if d.profileRecent {
-		items = append([]profile(nil), d.profiles...)
-		sort.SliceStable(items, func(i, j int) bool { return items[i].LastConnected > items[j].LastConnected })
-	} else if d.profileSort != "" {
-		items = append([]profile(nil), d.profiles...)
-		sort.SliceStable(items, func(i, j int) bool {
-			a, b := items[i].Label, items[j].Label
-			if d.profileSort == "host" {
-				a, b = items[i].Settings.Host, items[j].Settings.Host
-			}
-			a, b = strings.ToLower(a), strings.ToLower(b)
-			if d.profileSortDescending {
-				return a > b
-			}
-			return a < b
-		})
-	}
-	for _, item := range items {
-		if d.profileSource == "cloud" {
-			break
-		}
-		p := item
-		if !d.profileVisible(p) {
-			continue
-		}
-		shown++
-		label := p.Label
-		if p.Group != "" {
-			label = p.Group + " / " + label
-		}
-		if compact {
-			label += " · " + p.Settings.Host + ":" + p.Settings.Port
-		}
-		actions := func() {
-			if ui.Button(c.Key("profile-connect-"+string(p.ID)), "连接").Label("连接：" + p.Label).Width(60).Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
-				d.openProfileConnection(p)
-			}
-			if ui.Button(c.Key("profile-edit-"+string(p.ID)), "编辑").Width(60).Clicked() {
-				d.loadProfile(p)
-			}
-			if ui.Button(c.Key("profile-copy-"+string(p.ID)), "复制地址").Label("复制地址：" + p.Label).Clicked() {
-				mygo.Clipboard.WriteText(net.JoinHostPort(p.Settings.Host, p.Settings.Port))
-				d.status = "已复制地址：" + p.Label
-			}
-		}
-		ui.Row(c).FillWidth().Padding(4, 8).Gap(12).AlignItems(ui.Center).Background(c.Theme().Surface).Radius(7).Children(func() {
-			checked := d.checkedProfiles[p.ID]
-			if ui.Checkbox(c.Key("profile-check-"+string(p.ID)), &checked, "").Label("勾选本机连接：" + p.Label).Disabled(d.busy).Changed() {
-				if d.checkedProfiles == nil {
-					d.checkedProfiles = make(map[profileID]bool)
-				}
-				if checked {
-					d.checkedProfiles[p.ID] = true
-				} else {
-					delete(d.checkedProfiles, p.ID)
-				}
-				d.confirmProfileBatchDelete = false
-			}
-			favoriteLabel := "☆"
-			favoriteAction := "加入收藏"
-			if p.Favorite {
-				favoriteLabel = "★"
-				favoriteAction = "取消收藏"
-			}
-			if ui.Button(c.Key("profile-favorite-"+string(p.ID)), favoriteLabel).Label(favoriteAction + "：" + p.Label).Width(36).Clicked() {
-				for i := range d.profiles {
-					if d.profiles[i].ID == p.ID {
-						d.profiles[i].Favorite = !d.profiles[i].Favorite
-						break
-					}
-				}
-				if err := d.saveProfiles(); err != nil {
-					d.status = "收藏状态已修改，但本机保存失败：" + err.Error()
-				} else {
-					d.status = "收藏状态已更新"
-				}
-			}
-			row := ui.Button(c.Key("profile-"+string(p.ID)), label).BorderWidth(0).Justify(ui.Start).Grow(1)
-			if d.selectedProfile == string(p.ID) {
-				row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
-			}
-			if !d.profileRecent && d.profileSort == "" {
-				row = row.Drag(p.ID)
-			}
-			row.ContextMenu(func(menu *ui.Menu) {
-				if menu.Item("连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Chosen() {
-					d.openProfileConnection(p)
-				}
-				if menu.Item("载入").Chosen() {
-					d.loadProfile(p)
-				}
-				if menu.Item("移除…").Chosen() {
-					d.confirmProfileDelete = p.ID
-				}
+	ui.Row(c).FillWidth().Wrap().Gap(10).AlignItems(ui.Start).Children(func() {
+		if showLocal {
+			button := ui.Button(c.Key("profile-local-terminal"), "").Label("打开本机终端").Tooltip("打开本机终端").Width(cardWidth).Height(105).Padding(14).Gap(12).Justify(ui.Start).Background(c.Theme().Surface).BorderWidth(0).Radius(10).Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions)
+			button.Children(func() {
+				ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() { ui.Icon(c, terminalIcon).Width(19).Height(19).TextColor(c.Theme().AccentText) })
+				ui.Column(c).Grow(1).Gap(3).Children(func() {
+					ui.Text(c, "本机终端").FontSize(14).Bold()
+					ui.Text(c, "PowerShell · 此电脑").FontSize(12).TextColor(c.Theme().TextMuted)
+				})
 			})
-			if row.DoubleClicked() {
-				d.openProfileConnection(p)
-			} else if row.Clicked() {
-				d.selectedProfile = string(p.ID)
-				d.selectedCloudProfile = ""
-				d.confirmProfileDelete = ""
+			if button.Clicked() {
+				d.openLocalTerminal()
 			}
-			if !d.profileRecent && d.profileSort == "" {
-				if dragged, ok := ui.Drop[profileID](row); ok {
-					moveFrom, moveTo = dragged, p.ID
-				}
-			}
-			if !compact {
-				ui.Text(c, p.Settings.Host+":"+p.Settings.Port).Width(220).TextColor(c.Theme().TextMuted)
-				actions()
-			}
-		})
-		if compact {
-			ui.Row(c).FillWidth().Gap(8).Children(actions)
 		}
-		if d.confirmProfileDelete == p.ID {
-			if d.confirmProfileDelete != "" {
-				var pending *profile
-				for i := range d.profiles {
-					if d.profiles[i].ID == d.confirmProfileDelete {
-						pending = &d.profiles[i]
-						break
+		if d.profileSource != "cloud" && len(d.profiles) == 0 {
+			ui.Column(c).Width(cardWidth).Padding(16).Gap(6).Background(c.Theme().Surface).Radius(10).Children(func() {
+				ui.Text(c, "还没有本机 SSH 连接").FontSize(14).Bold()
+				ui.Text(c, "新建连接后即可在这里访问。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+			})
+		}
+		items := d.profiles
+		if d.profileRecent {
+			items = append([]profile(nil), d.profiles...)
+			sort.SliceStable(items, func(i, j int) bool { return items[i].LastConnected > items[j].LastConnected })
+		} else if d.profileSort != "" {
+			items = append([]profile(nil), d.profiles...)
+			sort.SliceStable(items, func(i, j int) bool {
+				a, b := items[i].Label, items[j].Label
+				if d.profileSort == "host" {
+					a, b = items[i].Settings.Host, items[j].Settings.Host
+				}
+				a, b = strings.ToLower(a), strings.ToLower(b)
+				if d.profileSortDescending {
+					return a > b
+				}
+				return a < b
+			})
+		}
+		for _, item := range items {
+			if d.profileSource == "cloud" {
+				break
+			}
+			p := item
+			if !d.profileVisible(p) {
+				continue
+			}
+			shown++
+			label := p.Label
+			if p.Group != "" {
+				label = p.Group + " / " + label
+			}
+			if compact {
+				label += " · " + p.Settings.Host + ":" + p.Settings.Port
+			}
+			ui.Column(c).Width(cardWidth).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(10).Children(func() {
+				row := ui.Button(c.Key("profile-"+string(p.ID)), "").Label(label).BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).FillWidth()
+				row.Children(func() {
+					ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+						ui.Icon(c, serverIcon).Width(19).Height(19).TextColor(c.Theme().AccentText)
+					})
+					ui.Column(c).Grow(1).Gap(3).Children(func() {
+						ui.Text(c, p.Label).FontSize(14).Bold().Wrap()
+						ui.Text(c, p.Settings.User+"@"+p.Settings.Host+":"+p.Settings.Port).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+					})
+				})
+				if d.selectedProfile == string(p.ID) {
+					row = row.Background(c.Theme().SurfacePressed)
+				}
+				if !d.profileRecent && d.profileSort == "" {
+					row = row.Drag(p.ID)
+				}
+				row.ContextMenu(func(menu *ui.Menu) {
+					if menu.Item("连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Chosen() {
+						d.openProfileConnection(p)
+					}
+					if menu.Item("载入").Chosen() {
+						d.loadProfile(p)
+					}
+					if menu.Item("移除…").Chosen() {
+						d.confirmProfileDelete = p.ID
+					}
+				})
+				if row.DoubleClicked() {
+					d.openProfileConnection(p)
+				} else if row.Clicked() {
+					d.selectedProfile = string(p.ID)
+					d.selectedCloudProfile = ""
+					d.confirmProfileDelete = ""
+				}
+				if !d.profileRecent && d.profileSort == "" {
+					if dragged, ok := ui.Drop[profileID](row); ok {
+						moveFrom, moveTo = dragged, p.ID
 					}
 				}
-				if pending == nil {
-					d.confirmProfileDelete = ""
-				} else {
-					ui.Text(c, "确定移除连接："+pending.Label+"？").Wrap()
-					ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-						if ui.Button(c.Key("profile-delete-confirm"), "确认移除连接").Disabled(d.busy).Clicked() {
-							id := d.confirmProfileDelete
-							d.confirmProfileDelete = ""
-							delete(d.checkedProfiles, id)
-							d.confirmProfileBatchDelete = false
-							for i := range d.profiles {
-								if d.profiles[i].ID == id {
-									d.profiles = append(d.profiles[:i], d.profiles[i+1:]...)
-									break
+				ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+					checked := d.checkedProfiles[p.ID]
+					if ui.Checkbox(c.Key("profile-check-"+string(p.ID)), &checked, "").Label("勾选本机连接：" + p.Label).Disabled(d.busy).Changed() {
+						if d.checkedProfiles == nil {
+							d.checkedProfiles = make(map[profileID]bool)
+						}
+						if checked {
+							d.checkedProfiles[p.ID] = true
+						} else {
+							delete(d.checkedProfiles, p.ID)
+						}
+						d.confirmProfileBatchDelete = false
+					}
+					favoriteLabel, favoriteAction := "☆", "加入收藏"
+					if p.Favorite {
+						favoriteLabel, favoriteAction = "★", "取消收藏"
+					}
+					if ui.Button(c.Key("profile-favorite-"+string(p.ID)), favoriteLabel).Label(favoriteAction + "：" + p.Label).Tooltip(favoriteAction).Width(36).Clicked() {
+						for i := range d.profiles {
+							if d.profiles[i].ID == p.ID {
+								d.profiles[i].Favorite = !d.profiles[i].Favorite
+								break
+							}
+						}
+						if err := d.saveProfiles(); err != nil {
+							d.status = "收藏状态已修改，但本机保存失败：" + err.Error()
+						} else {
+							d.status = "收藏状态已更新"
+						}
+					}
+					ui.Box(c).Grow(1)
+					if ui.Button(c.Key("profile-connect-"+string(p.ID)), "↗").Label("连接：" + p.Label).Tooltip("连接").Width(36).Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+						d.openProfileConnection(p)
+					}
+					if ui.Button(c.Key("profile-edit-"+string(p.ID)), "✎").Label("编辑").Tooltip("编辑连接").Width(36).Clicked() {
+						d.loadProfile(p)
+					}
+					if ui.Button(c.Key("profile-copy-"+string(p.ID)), "⧉").Label("复制地址：" + p.Label).Tooltip("复制地址").Width(36).Clicked() {
+						mygo.Clipboard.WriteText(net.JoinHostPort(p.Settings.Host, p.Settings.Port))
+						d.status = "已复制地址：" + p.Label
+					}
+				})
+			})
+			if d.confirmProfileDelete == p.ID {
+				if d.confirmProfileDelete != "" {
+					var pending *profile
+					for i := range d.profiles {
+						if d.profiles[i].ID == d.confirmProfileDelete {
+							pending = &d.profiles[i]
+							break
+						}
+					}
+					if pending == nil {
+						d.confirmProfileDelete = ""
+					} else {
+						ui.Text(c, "确定移除连接："+pending.Label+"？").Wrap()
+						ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+							if ui.Button(c.Key("profile-delete-confirm"), "确认移除连接").Disabled(d.busy).Clicked() {
+								id := d.confirmProfileDelete
+								d.confirmProfileDelete = ""
+								delete(d.checkedProfiles, id)
+								d.confirmProfileBatchDelete = false
+								for i := range d.profiles {
+									if d.profiles[i].ID == id {
+										d.profiles = append(d.profiles[:i], d.profiles[i+1:]...)
+										break
+									}
+								}
+								if d.selectedProfile == string(id) {
+									d.selectedProfile = ""
+								}
+								if err := d.saveProfiles(); err != nil {
+									d.status = "连接已移除，但本机保存失败：" + err.Error()
+								} else {
+									d.status = "连接已移除"
 								}
 							}
-							if d.selectedProfile == string(id) {
-								d.selectedProfile = ""
+							if ui.Button(c.Key("profile-delete-cancel"), "取消移除").Clicked() {
+								d.confirmProfileDelete = ""
 							}
-							if err := d.saveProfiles(); err != nil {
-								d.status = "连接已移除，但本机保存失败：" + err.Error()
-							} else {
-								d.status = "连接已移除"
-							}
-						}
-						if ui.Button(c.Key("profile-delete-cancel"), "取消移除").Clicked() {
-							d.confirmProfileDelete = ""
-						}
-					})
+						})
+					}
 				}
 			}
 		}
-	}
+	})
 	if d.cloud != nil && d.profileSource != "local" && (d.profileFilter == "" || d.profileSource == "cloud") && !d.profileFavorites && !d.profileRecent {
 		ui.Text(c, "云端连接 · "+d.cloudScopeName()).FontSize(16).Bold()
 		if d.cloud.cloudGroups && d.cloudGroupsStale {
@@ -562,45 +561,59 @@ func (d *desktop) profileView(c *ui.Context) {
 				return a < b
 			})
 		}
-		for _, entry := range accounts {
-			account := entry
-			if !d.cloudAccountVisible(account) {
-				continue
-			}
-			shown++
-			label := account.Label + " · " + account.Username + "@" + account.Host
-			ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
-				_, checked := d.checkedCloud[account.ID]
-				if ui.Checkbox(c.Key("cloud-profile-check-"+account.ID), &checked, "").Label("勾选云端连接：" + account.Label).Disabled(d.busy || d.cloudListStale).Changed() {
-					d.checkCloudAccount(account, checked)
+		ui.Row(c).FillWidth().Wrap().Gap(10).AlignItems(ui.Start).Children(func() {
+			for _, entry := range accounts {
+				account := entry
+				if !d.cloudAccountVisible(account) {
+					continue
 				}
-				row := ui.Button(c.Key("profile-cloud-"+account.ID), label).Grow(1).Disabled(d.busy).Drag(cloudGroupDragID(account.ID))
-				if d.selectedCloudProfile == account.ID {
-					row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
-				}
-				row.ContextMenu(func(menu *ui.Menu) {
-					if menu.Item("连接").Disabled(d.busy).Chosen() {
-						d.loadCloudAccount(account)
+				shown++
+				label := account.Label + " · " + account.Username + "@" + account.Host
+				ui.Column(c).Width(cardWidth).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(10).Children(func() {
+					row := ui.Button(c.Key("profile-cloud-"+account.ID), "").Label(label).FillWidth().BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).Disabled(d.busy).Drag(cloudGroupDragID(account.ID))
+					row.Children(func() {
+						ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+							ui.Icon(c, cloudIcon).Width(19).Height(19).TextColor(c.Theme().AccentText)
+						})
+						ui.Column(c).Grow(1).Gap(3).Children(func() {
+							ui.Text(c, account.Label).FontSize(14).Bold().Wrap()
+							ui.Text(c, account.Username+"@"+account.Host).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+						})
+					})
+					if d.selectedCloudProfile == account.ID {
+						row = row.Background(c.Theme().SurfacePressed)
 					}
+					row.ContextMenu(func(menu *ui.Menu) {
+						if menu.Item("连接").Disabled(d.busy).Chosen() {
+							d.loadCloudAccount(account)
+						}
+					})
+					if row.DoubleClicked() {
+						d.loadCloudAccount(account)
+					} else if row.Clicked() {
+						d.selectedCloudProfile = account.ID
+						d.selectedProfile = ""
+					}
+					ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
+						_, checked := d.checkedCloud[account.ID]
+						if ui.Checkbox(c.Key("cloud-profile-check-"+account.ID), &checked, "").Label("勾选云端连接：" + account.Label).Disabled(d.busy || d.cloudListStale).Changed() {
+							d.checkCloudAccount(account, checked)
+						}
+						ui.Box(c).Grow(1)
+						if ui.Button(c.Key("profile-cloud-connect-"+account.ID), "↗").Label("连接云端：" + account.Label).Tooltip("连接").Width(36).Disabled(d.busy).Clicked() {
+							d.loadCloudAccount(account)
+						}
+						if ui.Button(c.Key("profile-cloud-copy-"+account.ID), "⧉").Label("复制云端地址：" + account.Label).Tooltip("复制地址").Width(36).Clicked() {
+							mygo.Clipboard.WriteText(net.JoinHostPort(account.Host, fmt.Sprint(account.Port)))
+							d.status = "已复制地址：" + account.Label
+						}
+						if d.cloudGroupSnapshot.Assignments[account.ID] != "" && ui.Button(c.Key("profile-cloud-ungroup-"+account.ID), "−").Label("移出云端分组："+account.Label).Width(36).Disabled(d.busy || d.cloudGroupsStale || d.cloudListStale || !d.canWriteCloudScope()).Clicked() {
+							d.cloudGroupOperation("move", account.ID, "")
+						}
+					})
 				})
-				if row.DoubleClicked() {
-					d.loadCloudAccount(account)
-				} else if row.Clicked() {
-					d.selectedCloudProfile = account.ID
-					d.selectedProfile = ""
-				}
-				if ui.Button(c.Key("profile-cloud-connect-"+account.ID), "连接").Label("连接云端：" + account.Label).Disabled(d.busy).Clicked() {
-					d.loadCloudAccount(account)
-				}
-				if ui.Button(c.Key("profile-cloud-copy-"+account.ID), "复制地址").Label("复制云端地址：" + account.Label).Clicked() {
-					mygo.Clipboard.WriteText(net.JoinHostPort(account.Host, fmt.Sprint(account.Port)))
-					d.status = "已复制地址：" + account.Label
-				}
-				if d.cloudGroupSnapshot.Assignments[account.ID] != "" && ui.Button(c.Key("profile-cloud-ungroup-"+account.ID), "移出分组").Label("移出云端分组："+account.Label).Disabled(d.busy || d.cloudGroupsStale || d.cloudListStale || !d.canWriteCloudScope()).Clicked() {
-					d.cloudGroupOperation("move", account.ID, "")
-				}
-			})
-		}
+			}
+		})
 	}
 	if (len(d.profiles) > 0 || d.cloud != nil || query != "") && shown == 0 && !showLocal {
 		ui.Text(c, "没有匹配的连接").TextColor(c.Theme().TextMuted)
