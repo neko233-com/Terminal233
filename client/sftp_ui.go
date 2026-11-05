@@ -19,6 +19,10 @@ func (d *desktop) refreshFiles() {
 			if shell != d.shell {
 				return
 			}
+			if dir != d.fileDir {
+				d.fileStatus = "目录已改变，请重新打开目录"
+				return
+			}
 			if err != nil {
 				d.fileStatus = fmt.Sprintf("读取文件失败：%v", err)
 				return
@@ -48,6 +52,10 @@ func (d *desktop) transfer(upload bool) {
 		d.win.Update(func() {
 			d.busy = false
 			if shell != d.shell {
+				return
+			}
+			if dir != d.fileDir {
+				d.fileStatus = "传输已结束；当前目录已改变，请刷新"
 				return
 			}
 			if err != nil {
@@ -80,6 +88,10 @@ func (d *desktop) removeSelected() {
 			if shell != d.shell {
 				return
 			}
+			if dir != d.fileDir {
+				d.fileStatus = "删除操作已结束；当前目录已改变，请刷新"
+				return
+			}
 			if err != nil {
 				d.fileStatus = fmt.Sprintf("删除失败：%v", err)
 				return
@@ -90,12 +102,24 @@ func (d *desktop) removeSelected() {
 	}()
 }
 func (d *desktop) fileView(c *ui.Context) {
-	ui.Text(c, "远程文件（测试中）").Bold()
+	ui.Text(c, "远程文件").FontSize(16).Bold()
+	ui.Text(c, "选择目录浏览，拖入单个文件上传；删除前需要再次确认。").TextColor(c.Theme().TextMuted).Wrap()
 	ui.TextInput(c.Key("remote-dir"), &d.fileDir).Label("远程目录").Placeholder("远程目录").OnChange(func() { d.selectedFile = ""; d.confirmDelete = ""; d.files = nil })
-	if ui.Button(c.Key("file-refresh"), "打开远程目录").Disabled(d.busy || d.shell == nil).Clicked() {
-		d.selectedFile = ""
-		d.confirmDelete = ""
-		d.refreshFiles()
+	ui.Row(c).Gap(8).Children(func() {
+		if ui.Button(c.Key("file-parent"), "上一级").Disabled(d.busy || d.shell == nil).Clicked() {
+			d.fileDir = path.Join(d.fileDir, "..")
+			d.selectedFile, d.confirmDelete, d.fileStatus = "", "", ""
+			d.files = nil
+			d.refreshFiles()
+		}
+		if ui.Button(c.Key("file-refresh"), "打开远程目录").Disabled(d.busy || d.shell == nil).Clicked() {
+			d.selectedFile = ""
+			d.confirmDelete = ""
+			d.refreshFiles()
+		}
+	})
+	if d.shell == nil {
+		ui.Text(c, "连接 SSH 后可浏览远程文件。").TextColor(c.Theme().TextMuted).Wrap()
 	}
 	for _, entry := range d.files {
 		f := entry
