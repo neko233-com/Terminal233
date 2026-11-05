@@ -28,6 +28,7 @@ func (d *desktop) loadProfiles(path string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		d.confirmProfileDelete = ""
+		d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
 		d.profiles, d.nextProfileID = nil, 0
 		d.profilePath = path
 		d.profileExists = false
@@ -58,6 +59,7 @@ func (d *desktop) loadProfiles(path string) error {
 	}
 	d.profiles, d.nextProfileID, d.profilePath = profiles, len(profiles), path
 	d.confirmProfileDelete = ""
+	d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
 	d.profileExists, d.profileRevision = true, sha256.Sum256(data)
 	d.profileStoreConflict = false
 	return nil

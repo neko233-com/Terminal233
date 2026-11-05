@@ -238,7 +238,35 @@ func (d *desktop) profileView(c *ui.Context) {
 		if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.profileSource == "cloud" || d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
 			d.moveSelectedProfile(1)
 		}
+		if d.profileSource != "cloud" && ui.Button(c.Key("profile-batch-select-visible"), "勾选当前显示的本机连接").Disabled(d.busy || len(d.profiles) == 0).Clicked() {
+			d.selectVisibleProfiles()
+		}
 	})
+	if d.profileSource != "cloud" && len(d.checkedProfiles) > 0 {
+		ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, fmt.Sprintf("已勾选 %d 个本机连接（包括筛选隐藏项）", len(d.checkedProfiles))).Wrap()
+			if ui.Button(c.Key("profile-batch-copy"), "复制选中连接").Disabled(d.busy).Clicked() {
+				d.copyCheckedProfiles()
+			}
+			if ui.Button(c.Key("profile-batch-delete"), "移除选中连接…").Disabled(d.busy).Clicked() {
+				d.confirmProfileBatchDelete = true
+			}
+			if ui.Button(c.Key("profile-batch-clear"), "清除勾选").Clicked() {
+				d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
+			}
+		})
+		if d.confirmProfileBatchDelete {
+			ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+				ui.Text(c, fmt.Sprintf("确认移除全部 %d 个已勾选的本机连接？", len(d.checkedProfiles))).Wrap()
+				if ui.Button(c.Key("profile-batch-delete-confirm"), "确认批量移除").Disabled(d.busy).Clicked() {
+					d.deleteCheckedProfiles()
+				}
+				if ui.Button(c.Key("profile-batch-delete-cancel"), "取消批量移除").Clicked() {
+					d.confirmProfileBatchDelete = false
+				}
+			})
+		}
+	}
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
 	showLocal := d.profileSource != "cloud" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
 		(query == "" || strings.Contains("本机终端 local terminal powershell", query))
@@ -290,16 +318,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			break
 		}
 		p := item
-		if d.profileRecent && p.LastConnected <= 0 {
-			continue
-		}
-		if d.profileFavorites && !p.Favorite {
-			continue
-		}
-		if d.profileFilter != "" && d.profileFilter != p.Group {
-			continue
-		}
-		if query != "" && !strings.Contains(strings.ToLower(p.Label+" "+p.Group+" "+p.Settings.Host+" "+p.Settings.User), query) {
+		if !d.profileVisible(p) {
 			continue
 		}
 		shown++
@@ -323,6 +342,18 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		}
 		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+			checked := d.checkedProfiles[p.ID]
+			if ui.Checkbox(c.Key("profile-check-"+string(p.ID)), &checked, "").Label("勾选本机连接：" + p.Label).Disabled(d.busy).Changed() {
+				if d.checkedProfiles == nil {
+					d.checkedProfiles = make(map[profileID]bool)
+				}
+				if checked {
+					d.checkedProfiles[p.ID] = true
+				} else {
+					delete(d.checkedProfiles, p.ID)
+				}
+				d.confirmProfileBatchDelete = false
+			}
 			favoriteLabel := "☆"
 			favoriteAction := "加入收藏"
 			if p.Favorite {
@@ -397,6 +428,8 @@ func (d *desktop) profileView(c *ui.Context) {
 						if ui.Button(c.Key("profile-delete-confirm"), "确认移除连接").Disabled(d.busy).Clicked() {
 							id := d.confirmProfileDelete
 							d.confirmProfileDelete = ""
+							delete(d.checkedProfiles, id)
+							d.confirmProfileBatchDelete = false
 							for i := range d.profiles {
 								if d.profiles[i].ID == id {
 									d.profiles = append(d.profiles[:i], d.profiles[i+1:]...)
@@ -482,6 +515,96 @@ func (d *desktop) profileView(c *ui.Context) {
 		}
 		c.Invalidate()
 	}
+}
+
+func (d *desktop) profileVisible(p profile) bool {
+	if d.profileSource == "cloud" || (d.profileRecent && p.LastConnected <= 0) || (d.profileFavorites && !p.Favorite) || (d.profileFilter != "" && d.profileFilter != p.Group) {
+		return false
+	}
+	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
+	return query == "" || strings.Contains(strings.ToLower(p.Label+" "+p.Group+" "+p.Settings.Host+" "+p.Settings.User), query)
+}
+
+func (d *desktop) selectVisibleProfiles() {
+	if d.busy {
+		return
+	}
+	if d.checkedProfiles == nil {
+		d.checkedProfiles = make(map[profileID]bool)
+	}
+	for _, p := range d.profiles {
+		if d.profileVisible(p) {
+			d.checkedProfiles[p.ID] = true
+		}
+	}
+	d.confirmProfileBatchDelete = false
+}
+
+func (d *desktop) copyCheckedProfiles() {
+	if d.busy || len(d.checkedProfiles) == 0 {
+		return
+	}
+	d.confirmProfileBatchDelete = false
+	original, next := d.profiles, d.nextProfileID
+	count := 0
+	for _, p := range original {
+		if d.checkedProfiles[p.ID] {
+			count++
+		}
+	}
+	if count == 0 || len(original)+count > 10000 {
+		d.status = "无法复制：连接不存在或复制后超过 10000 条上限。"
+		return
+	}
+	items := append([]profile(nil), original...)
+	for _, p := range original {
+		if !d.checkedProfiles[p.ID] {
+			continue
+		}
+		d.nextProfileID++
+		p.ID = profileID(fmt.Sprint(d.nextProfileID))
+		p.Label += "（副本）"
+		p.Favorite, p.LastConnected = false, 0
+		p.Settings.Password, p.Settings.Passphrase = "", ""
+		items = append(items, p)
+	}
+	d.profiles = items
+	if err := d.saveProfiles(); err != nil {
+		d.profiles, d.nextProfileID = original, next
+		d.status = "复制未保存，连接未更改：" + err.Error()
+		return
+	}
+	d.status = fmt.Sprintf("已复制 %d 个本机连接", count)
+	d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
+}
+
+func (d *desktop) deleteCheckedProfiles() {
+	if d.busy || !d.confirmProfileBatchDelete || len(d.checkedProfiles) == 0 {
+		return
+	}
+	original := d.profiles
+	items := make([]profile, 0, len(original))
+	removed := 0
+	for _, p := range original {
+		if d.checkedProfiles[p.ID] {
+			removed++
+		} else {
+			items = append(items, p)
+		}
+	}
+	d.profiles = items
+	if err := d.saveProfiles(); err != nil {
+		d.profiles = original
+		d.confirmProfileBatchDelete = false
+		d.status = "移除未保存，连接未更改：" + err.Error()
+		return
+	}
+	if d.checkedProfiles[profileID(d.selectedProfile)] {
+		d.selectedProfile = ""
+	}
+	d.confirmProfileDelete = ""
+	d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
+	d.status = fmt.Sprintf("已移除 %d 个本机连接", removed)
 }
 
 func (d *desktop) moveSelectedProfile(offset int) {
