@@ -60,6 +60,7 @@ func (d *desktop) teamOperation(action string) {
 }
 func (d *desktop) finishTeamOperation(action, inviteURL string, teams []cloudTeam, mutationErr, refreshErr error) {
 	if mutationErr != nil {
+		d.teamListStale = true
 		d.teamStatus = "团队操作未确认，可能已生效；请先刷新团队或邀请列表：" + mutationErr.Error()
 		return
 	}
@@ -74,10 +75,12 @@ func (d *desktop) finishTeamOperation(action, inviteURL string, teams []cloudTea
 		d.teamStatus = "团队操作已完成"
 	}
 	if refreshErr != nil {
+		d.teamListStale = true
 		d.teamStatus += " 团队列表刷新失败，请手动刷新：" + refreshErr.Error()
 		return
 	}
 	d.teams = teams
+	d.teamListStale = false
 }
 
 func (d *desktop) selectTeam(id string) {
@@ -97,6 +100,9 @@ func (d *desktop) selectTeam(id string) {
 
 func (d *desktop) finishCloudScopeSelection(id string, state cloudScopeState) {
 	if state.accountErr != nil {
+		if d.cloud != nil && d.cloud.teamID == id && id != "" {
+			d.teamListStale, d.cloudListStale = true, true
+		}
 		d.teamStatus = "无法切换同步空间，连接列表加载失败：" + state.accountErr.Error()
 		return
 	}
@@ -132,7 +138,7 @@ func (d *desktop) cloudScopeName() string {
 }
 
 func (d *desktop) currentTeamRole() string {
-	if d.cloud == nil || d.cloud.teamID == "" {
+	if d.cloud == nil || d.cloud.teamID == "" || d.teamListStale {
 		return ""
 	}
 	for _, team := range d.teams {
@@ -181,14 +187,19 @@ func (d *desktop) refreshTeams() {
 		teams, err := c.teams()
 		d.win.Update(func() {
 			d.busy = false
-			if err != nil {
-				d.teamStatus = err.Error()
-				return
-			}
-			d.teams = teams
-			d.teamStatus = "团队列表已刷新"
+			d.finishTeamRefresh(teams, err)
 		})
 	}()
+}
+
+func (d *desktop) finishTeamRefresh(teams []cloudTeam, err error) {
+	if err != nil {
+		d.teamListStale = true
+		d.teamStatus = "团队列表刷新失败，请重试：" + err.Error()
+		return
+	}
+	d.teams, d.teamListStale = teams, false
+	d.teamStatus = "团队列表已刷新"
 }
 func (d *desktop) removeMember() {
 	if d.busy || !d.canManageSelectedMember() || d.confirmMember == "" || d.confirmMember != d.selectedMember {
@@ -457,6 +468,7 @@ func (d *desktop) registerWithInvite() {
 				return
 			}
 			d.cloud, d.teams, d.accounts, d.members = c, loaded.teams, loaded.accounts, loaded.members
+			d.teamListStale = loaded.teamErr != nil
 			d.cloudListStale = loaded.accountErr != nil
 			d.teamStatus = "已注册并加入团队"
 			if loaded.teamErr != nil {

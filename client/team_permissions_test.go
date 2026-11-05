@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -61,5 +62,48 @@ func TestTeamMemberSelectionAndRolePermissions(t *testing.T) {
 	d.cloud.teamID = ""
 	if !d.canWriteCloudScope() {
 		t.Fatal("personal scope became read-only")
+	}
+}
+
+func TestTeamRoleBecomesReadOnlyWhenRefreshFails(t *testing.T) {
+	d := &desktop{workspace: "cloud", showTeams: true, cloud: &cloudClient{teamID: "team"}, teams: []cloudTeam{{ID: "team", Name: "开发", Role: "owner"}}, members: []cloudTeamMember{{Username: "bob", Role: "member"}}, selectedMember: "bob"}
+	if !d.canWriteCloudScope() || !d.canManageSelectedMember() {
+		t.Fatal("initial owner permissions missing")
+	}
+	d.finishTeamRefresh(nil, errors.New("network unavailable"))
+	if !d.teamListStale || d.canWriteCloudScope() || d.canManageInvites() || d.canManageSelectedMember() {
+		t.Fatal("stale team role remained trusted")
+	}
+	view := ui.NewTester(d.view, 1200, 2200)
+	if !view.HasText("团队列表可能过期，请刷新团队后再执行管理操作。") {
+		t.Fatal("stale permissions warning missing")
+	}
+	d.finishTeamRefresh([]cloudTeam{{ID: "team", Name: "开发", Role: "member"}}, nil)
+	if d.teamListStale || d.currentTeamRole() != "member" || d.canWriteCloudScope() {
+		t.Fatal("refreshed permissions were not enforced")
+	}
+	d.finishTeamOperation("join", "", nil, errors.New("uncertain response"), nil)
+	if !d.teamListStale {
+		t.Fatal("uncertain mutation left team list trusted")
+	}
+	d.cloud.teamID = ""
+	if !d.canWriteCloudScope() {
+		t.Fatal("stale team list disabled personal space")
+	}
+	d.clearCloudState()
+	if d.teamListStale {
+		t.Fatal("logout retained stale team flag")
+	}
+}
+
+func TestFailedCurrentScopeRefreshDisablesWrites(t *testing.T) {
+	d := &desktop{cloud: &cloudClient{teamID: "team"}, teams: []cloudTeam{{ID: "team", Role: "admin"}}}
+	d.finishCloudScopeSelection("other", cloudScopeState{accountErr: errors.New("failed")})
+	if d.teamListStale || d.cloudListStale {
+		t.Fatal("failure in another scope invalidated current scope")
+	}
+	d.finishCloudScopeSelection("team", cloudScopeState{accountErr: errors.New("failed")})
+	if !d.teamListStale || !d.cloudListStale || d.canWriteCloudScope() {
+		t.Fatal("failed current scope refresh left writes enabled")
 	}
 }

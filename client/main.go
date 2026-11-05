@@ -44,6 +44,7 @@ type desktop struct {
 	teams                                                                                   []cloudTeam
 	members                                                                                 []cloudTeamMember
 	teamName, teamInvitePassword, teamInviteInput, teamInviteURL, teamStatus, confirmMember string
+	teamListStale                                                                           bool
 	selectedMember                                                                          string
 	teamInviteHours, teamInviteUses                                                         string
 	confirmCloudDelete                                                                      string
@@ -687,7 +688,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.49"
+const version = "0.3.50"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

@@ -55,6 +55,7 @@ func (d *desktop) cloudLogin(register bool) {
 				return
 			}
 			d.cloud, d.accounts, d.teams = client, loaded.accounts, loaded.teams
+			d.teamListStale = loaded.teamErr != nil
 			d.cloudListStale = loaded.accountErr != nil
 			d.cloudStatus = "同步服务已登录"
 			if loaded.accountErr != nil {
@@ -352,6 +353,9 @@ func (d *desktop) cloudView(c *ui.Context) {
 		return
 	}
 	ui.Text(c, "云端连接").FontSize(16).Bold()
+	if d.teamListStale {
+		ui.Text(c, "团队列表可能过期，请刷新团队后再执行管理操作。").FontSize(12).Wrap()
+	}
 	if d.cloud != nil {
 		ui.Text(c, "当前同步空间："+d.cloudScopeName()).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		if !d.canWriteCloudScope() {
@@ -503,7 +507,7 @@ func (d *desktop) clearCloudState() {
 	}
 	d.cloudPassword, d.cloudRegistration = "", ""
 	d.archivePassword, d.archiveStatus, d.archiveConfirm = "", "", false
-	d.cloudRegistrationLocal, d.cloudListStale = false, false
+	d.cloudRegistrationLocal, d.cloudListStale, d.teamListStale = false, false, false
 	d.cloudFormSources = nil
 	for _, session := range d.sessions {
 		session.cloudSources = nil
