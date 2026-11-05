@@ -268,6 +268,42 @@ func TestConnectionListSearchAndContextMenu(t *testing.T) {
 	}
 }
 
+func TestConnectionRowSelectionAndDoubleClick(t *testing.T) {
+	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice"}}
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	d.settings.Host, d.selectedProfile = "two.test", ""
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	d.selectedProfile = ""
+	view := ui.NewTester(d.view, 1200, 1400)
+	if err := view.Click("alice@one.test"); err != nil {
+		t.Fatal(err)
+	}
+	if d.selectedProfile != "1" || d.editConnection {
+		t.Fatal("single click did not select without leaving list")
+	}
+	if err := view.Click("alice@one.test"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.editConnection || d.settings.Host != "one.test" || d.fingerprint != "" {
+		t.Fatal("double click did not open safe connection form")
+	}
+	d.editConnection = false
+	view.Frame()
+	if err := view.RightClick("alice@two.test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.ChooseMenuItem("连接"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.editConnection || d.settings.Host != "two.test" || d.fingerprint != "" {
+		t.Fatal("context connection did not open safe form")
+	}
+}
+
 func TestConnectionActionRequestsMissingPassword(t *testing.T) {
 	d := &desktop{settings: connectionSettings{Host: "example.test", Port: "22", User: "alice"}, active: connectionSettings{Host: "example.test", Port: "22", User: "alice", Fingerprint: "SHA256:trusted"}}
 	if err := d.addProfile(); err != nil {

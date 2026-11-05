@@ -154,7 +154,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.editConnection = true
 		}
 	})
-	help := "搜索、分组和管理 SSH 连接。右键可移除，拖动可调整顺序。"
+	help := "单击选择，双击连接；右键管理，拖动可调整顺序。"
 	if d.profileRecent {
 		help = "最近连接按成功连接时间排序。"
 	} else if d.profileSort != "" {
@@ -230,10 +230,10 @@ func (d *desktop) profileView(c *ui.Context) {
 		}
 	})
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-		if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
+		if ui.Button(c.Key("profile-up"), "上移所选连接").Disabled(d.profileSource == "cloud" || d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
 			d.moveSelectedProfile(-1)
 		}
-		if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
+		if ui.Button(c.Key("profile-down"), "下移所选连接").Disabled(d.profileSource == "cloud" || d.selectedProfile == "" || d.profileRecent || d.profileSort != "").Clicked() {
 			d.moveSelectedProfile(1)
 		}
 	})
@@ -340,11 +340,14 @@ func (d *desktop) profileView(c *ui.Context) {
 					d.status = "收藏状态已更新"
 				}
 			}
-			row := ui.Button(c.Key("profile-"+string(p.ID)), label).Grow(1)
+			row := workspaceButton(c, "profile-"+string(p.ID), label, d.selectedProfile == string(p.ID)).Grow(1)
 			if !d.profileRecent && d.profileSort == "" {
 				row = row.Drag(p.ID)
 			}
 			row.ContextMenu(func(menu *ui.Menu) {
+				if menu.Item("连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Chosen() {
+					d.openProfileConnection(p)
+				}
 				if menu.Item("载入").Chosen() {
 					d.loadProfile(p)
 				}
@@ -352,8 +355,11 @@ func (d *desktop) profileView(c *ui.Context) {
 					d.confirmProfileDelete = p.ID
 				}
 			})
-			if row.Clicked() {
-				d.loadProfile(p)
+			if row.DoubleClicked() {
+				d.openProfileConnection(p)
+			} else if row.Clicked() {
+				d.selectedProfile = string(p.ID)
+				d.confirmProfileDelete = ""
 			}
 			if !d.profileRecent && d.profileSort == "" {
 				if dragged, ok := ui.Drop[profileID](row); ok {

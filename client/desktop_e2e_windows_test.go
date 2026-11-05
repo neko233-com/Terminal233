@@ -1187,7 +1187,19 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "profile-1") {
 		t.Fatalf("saved connection missing from search: %s", tree)
 	}
-	call("act", map[string]any{"key": "profile-edit-1", "action": "press"})
+	result = call("tree")["result"].(map[string]any)
+	var profileBounds map[string]any
+	for _, value := range result["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["key"] == "profile-1" {
+			profileBounds, _ = node["bounds"].(map[string]any)
+			break
+		}
+	}
+	if profileBounds == nil {
+		t.Fatal("saved connection bounds missing")
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": profileBounds["x"].(float64) + profileBounds["width"].(float64)/2, "y": profileBounds["y"].(float64) + profileBounds["height"].(float64)/2}}})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
