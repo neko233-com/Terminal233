@@ -699,6 +699,15 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 					}
 					row := ui.Button(c.Key("file-"+f.Name), label).Grow(1).Disabled(d.busy || d.fileSessionUnavailable())
 					row.ContextMenu(func(menu *ui.Menu) {
+						if eligibleBatchFile(f) {
+							label := "下载到…"
+							if local {
+								label = "复制到…"
+							}
+							if menu.Item(label).Chosen() {
+								d.pickDownloadAndTransfer(f.Name)
+							}
+						}
 						if menu.Item("选择").Chosen() {
 							d.selectedFile, d.fileRename = f.Name, f.Name
 							d.confirmDelete = ""

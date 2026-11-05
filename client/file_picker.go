@@ -13,6 +13,57 @@ type batchPickerOrigin struct {
 	directory string
 }
 
+type downloadPickerOrigin struct {
+	batchPickerOrigin
+	name string
+}
+
+// The context action promises a transfer after the user chooses a new path.
+func (d *desktop) pickDownloadAndTransfer(name string) {
+	if d.busy || d.win == nil || d.fileSessionUnavailable() {
+		return
+	}
+	origin := downloadPickerOrigin{batchPickerOrigin{d.currentSession, d.shell, d.fileDir}, name}
+	d.busy = true
+	win := d.win
+	go func() {
+		selected, err := mygo.Dialog.Save(mygo.SaveDialogOptions{Parent: win, Title: "下载或复制到新文件（不覆盖已有文件）", DefaultPath: filepath.Base(name)})
+		win.Update(func() {
+			d.busy = false
+			if d.applyDownloadPicker(origin, selected, err) {
+				d.transfer(false)
+			}
+		})
+	}()
+}
+
+func (d *desktop) applyDownloadPicker(origin downloadPickerOrigin, selected string, err error) bool {
+	if err != nil {
+		d.fileStatus = "选择目标失败：" + err.Error()
+		return false
+	}
+	if selected == "" {
+		return false
+	}
+	if d.busy || d.fileSessionUnavailable() || d.currentSession != origin.sessionID || d.shell != origin.shell || d.fileDir != origin.directory {
+		d.fileStatus = "文件会话或目录已改变，请重新选择文件。"
+		return false
+	}
+	found := false
+	for _, f := range d.files {
+		if f.Name == origin.name && eligibleBatchFile(f) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		d.fileStatus = "文件列表已改变，请重新选择文件。"
+		return false
+	}
+	d.selectedFile, d.fileRename, d.confirmDelete, d.fileLocal = origin.name, origin.name, "", selected
+	return true
+}
+
 // The label makes clear that confirming the picker immediately starts upload.
 func (d *desktop) pickBatchUpload() {
 	if d.busy || d.win == nil || d.fileSessionUnavailable() {

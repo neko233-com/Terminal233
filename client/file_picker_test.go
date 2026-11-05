@@ -61,6 +61,55 @@ func TestBatchPickerRejectsStaleDestinationAndOversizedSelection(t *testing.T) {
 	}
 }
 
+func TestDownloadPickerBindsFileAndSession(t *testing.T) {
+	d := &desktop{workspace: "files", term: &terminal.Terminal{}, currentSession: 1, fileDir: "old", files: []remoteFile{{Name: "one"}, {Name: "folder", IsDir: true}}, selectedFile: "other", fileLocal: "previous"}
+	origin := downloadPickerOrigin{batchPickerOrigin: batchPickerOrigin{sessionID: 1, directory: "old"}, name: "one"}
+	if d.applyDownloadPicker(origin, "", nil) || d.fileLocal != "previous" || d.selectedFile != "other" {
+		t.Fatal("cancel changed selection")
+	}
+	d.fileDir = "new"
+	if d.applyDownloadPicker(origin, "target", nil) || d.fileLocal != "previous" {
+		t.Fatal("stale directory accepted")
+	}
+	d.fileDir = "old"
+	d.currentSession = 2
+	if d.applyDownloadPicker(origin, "target", nil) {
+		t.Fatal("stale session accepted")
+	}
+	d.currentSession = 1
+	d.files = []remoteFile{{Name: "one", IsLink: true}}
+	if d.applyDownloadPicker(origin, "target", nil) {
+		t.Fatal("changed file type accepted")
+	}
+	d.files = []remoteFile{{Name: "one"}, {Name: "folder", IsDir: true}}
+	if !d.applyDownloadPicker(origin, "target", nil) || d.selectedFile != "one" || d.fileLocal != "target" {
+		t.Fatal("valid target not bound to file")
+	}
+	view := ui.NewTester(d.view, 1200, 1400)
+	if err := view.RightClick("one"); err != nil {
+		t.Fatal(err)
+	}
+	if !containsMenuItem(view.Menu(), "复制到…") {
+		t.Fatal("file context download action missing")
+	}
+	view.CloseMenu()
+	if err := view.RightClick("📁 folder"); err != nil {
+		t.Fatal(err)
+	}
+	if containsMenuItem(view.Menu(), "复制到…") {
+		t.Fatal("directory exposed as a regular-file copy")
+	}
+}
+
+func containsMenuItem(items []string, wanted string) bool {
+	for _, item := range items {
+		if item == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func TestFileWorkspaceExposesBatchPicker(t *testing.T) {
 	d := &desktop{workspace: "files", term: &terminal.Terminal{}}
 	view := ui.NewTester(d.view, 1200, 1400)
