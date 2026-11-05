@@ -87,17 +87,31 @@ func (d *desktop) sendQuickCommand(item quickCommand, execute bool) {
 		d.quickStatus = "请先选择有效的终端会话和命令"
 		return
 	}
+	target := d.quickCommandTarget()
 	if execute {
 		d.term.Send([]byte(item.Command + "\r"))
-		d.quickStatus = "已向当前会话发送命令并回车：" + item.Name
+		d.quickStatus = "已向「" + target + "」提交命令并回车：" + item.Name
 	} else {
 		d.term.Paste(item.Command)
-		d.quickStatus = "已插入当前会话，请检查后执行：" + item.Name
+		d.quickStatus = "已插入「" + target + "」，请检查后执行：" + item.Name
 	}
+}
+
+func (d *desktop) quickCommandTarget() string {
+	for _, session := range d.sessions {
+		if session.id == d.currentSession && session.term == d.term && d.term != nil {
+			return fmt.Sprintf("%s（会话 %d）", session.label, session.id)
+		}
+	}
+	if d.term != nil {
+		return "当前终端"
+	}
+	return "未选择终端"
 }
 
 func (d *desktop) quickCommandsView(c *ui.Context) {
 	ui.Column(c).FillWidth().Padding(10, 12).Gap(6).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Children(func() {
+		ui.Text(c, "命令目标："+d.quickCommandTarget()).Bold().FontSize(12).Wrap()
 		ui.Text(c, "快速命令保存在本机明文文件中；请勿保存密码或令牌。发送目标为当前选中的会话，发送并回车会与当前输入行一起执行。 ").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 			ui.TextInput(c.Key("quick-name"), &d.quickName).Label("命令名称").Placeholder("例如查看磁盘").Grow(1)

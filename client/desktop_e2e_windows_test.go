@@ -467,10 +467,14 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(5 * time.Second)
 	localTerminalID = ""
 	for time.Now().Before(deadline) {
-		if strings.Contains(fmt.Sprint(call("tree")), "quick-name") {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "quick-name") && strings.Contains(tree, "命令目标：本机终端 2（会话 2）") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "命令目标：本机终端 2（会话 2）") {
+		t.Fatal("quick command target not visible")
 	}
 	commandResult := filepath.Join(t.TempDir(), "quick-command-result.txt")
 	quickText := "Set-Content -LiteralPath '" + strings.ReplaceAll(commandResult, "'", "''") + "' -Value 'quick-command-ok'"

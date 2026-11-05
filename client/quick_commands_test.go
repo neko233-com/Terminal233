@@ -63,9 +63,12 @@ func TestQuickCommandSendsOnlyToSelectedTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
-	d := &desktop{workspace: "terminal", currentSession: 2, term: second, sessions: []*workspaceSession{{id: 1, term: first}, {id: 2, term: second}}}
+	d := &desktop{workspace: "terminal", currentSession: 2, term: second, sessions: []*workspaceSession{{id: 1, label: "相同名称", term: first}, {id: 2, label: "相同名称", term: second}}}
 	item := quickCommand{Name: "查看", Command: "pwd"}
 	d.sendQuickCommand(item, true)
+	if !strings.Contains(d.quickStatus, "相同名称（会话 2）") {
+		t.Fatal("result did not identify the target")
+	}
 	_ = bPeer.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 4)
 	if _, err := io.ReadFull(bPeer, buf); err != nil || string(buf) != "pwd\r" {
@@ -85,6 +88,14 @@ func TestQuickCommandSendsOnlyToSelectedTerminal(t *testing.T) {
 	}
 	if !view.HasText("单行命令") || !view.HasText("快速命令保存在本机明文文件中；请勿保存密码或令牌。发送目标为当前选中的会话，发送并回车会与当前输入行一起执行。 ") {
 		t.Fatal("quick command editor or plaintext warning missing")
+	}
+	if !view.HasText("命令目标：相同名称（会话 2）") {
+		t.Fatal("selected target is not displayed")
+	}
+	d.activateSession(1)
+	view.Frame()
+	if !view.HasText("命令目标：相同名称（会话 1）") {
+		t.Fatal("target did not follow the active session")
 	}
 }
 
