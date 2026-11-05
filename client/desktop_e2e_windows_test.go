@@ -34,7 +34,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	t.Cleanup(func() { _ = os.Remove(socket) })
 	app := exec.Command(exe)
 	configDir := t.TempDir()
-	app.Env = append(os.Environ(), "MYGO_AUTOMATION="+socket, "APPDATA="+configDir)
+	app.Env = append(os.Environ(), "MYGO_AUTOMATION="+socket, "APPDATA="+configDir, "XDG_CONFIG_HOME="+configDir)
 	if err := app.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -1283,6 +1283,40 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if prefs, readErr := readPreferences(filepath.Join(configDir, "NekoSSH", "preferences.json")); readErr != nil || prefs.TerminalFontSize != 14 {
 		t.Fatalf("terminal font change was not persisted: %+v, %v", prefs, readErr)
+	}
+	call("act", map[string]any{"key": "terminal-theme", "action": "press"})
+	var nordX, nordY float64
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["label"] == "Nord" {
+				bounds := node["bounds"].(map[string]any)
+				nordX = bounds["x"].(float64) + bounds["width"].(float64)/2
+				nordY = bounds["y"].(float64) + bounds["height"].(float64)/2
+				break
+			}
+		}
+		if nordX != 0 && nordY != 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if nordX == 0 || nordY == 0 {
+		t.Fatal("terminal theme options did not open")
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "x": nordX, "y": nordY}}})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		prefs, readErr := readPreferences(filepath.Join(configDir, "NekoSSH", "preferences.json"))
+		if readErr == nil && prefs.TerminalTheme == "nord" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if prefs, readErr := readPreferences(filepath.Join(configDir, "NekoSSH", "preferences.json")); readErr != nil || prefs.TerminalTheme != "nord" {
+		t.Fatalf("terminal theme was not persisted: %+v, %v", prefs, readErr)
 	}
 	call("act", map[string]any{"key": "theme-toggle", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)

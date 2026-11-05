@@ -12,11 +12,12 @@ import (
 
 // Preferences contain only presentation choices, never connection credentials.
 type workspacePreferences struct {
-	Version          int  `json:"version"`
-	Light            bool `json:"light"`
-	SidebarCollapsed bool `json:"sidebar_collapsed"`
-	ShowFiles        bool `json:"show_files"`
-	TerminalFontSize int  `json:"terminal_font_size"`
+	Version          int    `json:"version"`
+	Light            bool   `json:"light"`
+	SidebarCollapsed bool   `json:"sidebar_collapsed"`
+	ShowFiles        bool   `json:"show_files"`
+	TerminalFontSize int    `json:"terminal_font_size"`
+	TerminalTheme    string `json:"terminal_theme,omitempty"`
 }
 
 func readPreferences(path string) (workspacePreferences, error) {
@@ -40,6 +41,9 @@ func readPreferences(path string) (workspacePreferences, error) {
 	if p.TerminalFontSize < minTerminalFontSize || p.TerminalFontSize > maxTerminalFontSize {
 		return p, errors.New("终端字号无效")
 	}
+	if !validTerminalTheme(p.TerminalTheme) {
+		return p, errors.New("终端配色无效")
+	}
 	return p, nil
 }
 
@@ -51,6 +55,11 @@ func (d *desktop) loadPreferences(path string) error {
 	}
 	d.lightTheme, d.sidebarCollapsed, d.showFilePanel = p.Light, p.SidebarCollapsed, p.ShowFiles
 	d.terminalFontSize = p.TerminalFontSize
+	light, dark, err := terminalThemePair(p.TerminalTheme)
+	if err != nil {
+		return err
+	}
+	d.terminalTheme, d.terminalLightTheme, d.terminalDarkTheme = p.TerminalTheme, light, dark
 	return nil
 }
 
@@ -88,6 +97,13 @@ func writeFontPreference(path string, size int) error {
 		return errors.New("终端字号无效")
 	}
 	return updatePreferences(path, func(p *workspacePreferences) error { p.TerminalFontSize = size; return nil })
+}
+
+func writeTerminalThemePreference(path, theme string) error {
+	if !validTerminalTheme(theme) {
+		return errors.New("终端配色无效")
+	}
+	return updatePreferences(path, func(p *workspacePreferences) error { p.TerminalTheme = theme; return nil })
 }
 
 func updatePreferences(path string, change func(*workspacePreferences) error) error {

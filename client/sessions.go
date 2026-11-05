@@ -126,6 +126,7 @@ func (d *desktop) addSession(term *terminal.Terminal, shell *remoteShell, active
 	d.saveSessionState()
 	if term != nil {
 		term.SetFont(terminal.Font{Size: float32(d.currentTerminalFontSize())})
+		term.SetTheme(d.terminalLightTheme, d.terminalDarkTheme)
 	}
 	d.nextSession++
 	s := &workspaceSession{id: d.nextSession, label: label, term: term, shell: shell, active: active}

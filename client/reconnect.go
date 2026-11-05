@@ -45,6 +45,7 @@ func (d *desktop) reconnectCurrentSession() {
 				s.forwards = nil
 				_ = oldTerm.Close()
 				term.SetFont(terminal.Font{Size: float32(d.currentTerminalFontSize())})
+				term.SetTheme(d.terminalLightTheme, d.terminalDarkTheme)
 				// A new terminal has no old scrollback; discard its old search.
 				s.terminalSearchOpen, s.terminalSearchText = false, ""
 				s.term, s.shell, s.files, s.refreshPending = term, shell, nil, false

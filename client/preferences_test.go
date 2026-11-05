@@ -1,11 +1,13 @@
 package main
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/egoist/mygo/plugins/terminal"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestPreferencesPersistAndMergeAcrossWindows(t *testing.T) {
@@ -35,6 +37,92 @@ func TestPreferencesPersistAndMergeAcrossWindows(t *testing.T) {
 	}
 }
 
+func TestTerminalThemesPersistAndApplyToExistingAndNewSessions(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	d := &desktop{workspace: "terminal"}
+	if err := d.loadPreferences(path); err != nil {
+		t.Fatal(err)
+	}
+	left, right := net.Pipe()
+	defer right.Close()
+	options := d.terminalOptions()
+	options.Conn = left
+	term, err := terminal.New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d.term, d.currentSession, d.nextSession = term, 1, 1
+	d.sessions = []*workspaceSession{{id: 1, label: "test", term: term}}
+	view := ui.NewTester(d.view, 1200, 900)
+	d.changeTerminalTheme("catppuccin")
+	view.Frame()
+	if d.preferencesStatus != "" || d.terminalTheme != "catppuccin" || d.terminalLightTheme == nil || d.terminalDarkTheme == nil || d.terminalLightTheme.Background == d.terminalDarkTheme.Background {
+		t.Fatalf("theme did not apply: %s", d.preferencesStatus)
+	}
+	r, ok := view.Find("Terminal")
+	if !ok || r.W < 20 || r.H < 20 {
+		t.Fatal("terminal view unavailable")
+	}
+	color := view.Image().RGBAAt(int(r.X+10), int(r.Y+r.H-10))
+	want := d.terminalDarkTheme.Background
+	if color.R != want.R || color.G != want.G || color.B != want.B {
+		t.Fatalf("existing terminal background did not change: got=%v want=%v", color, want)
+	}
+	d.lightTheme = true
+	view.Frame()
+	color = view.Image().RGBAAt(int(r.X+10), int(r.Y+r.H-10))
+	light := d.terminalLightTheme.Background
+	if color.R != light.R || color.G != light.G || color.B != light.B {
+		t.Fatal("paired light theme did not follow interface appearance")
+	}
+	d.lightTheme = false
+	view.Frame()
+	newLeft, newRight := net.Pipe()
+	defer newRight.Close()
+	newTerm, err := terminal.New(terminal.Options{Conn: newLeft, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer newTerm.Close()
+	d.addSession(newTerm, nil, connectionSettings{}, "new")
+	view.Frame()
+	r, ok = view.Find("Terminal")
+	if !ok {
+		t.Fatal("new terminal view unavailable")
+	}
+	color = view.Image().RGBAAt(int(r.X+10), int(r.Y+r.H-10))
+	if color.R != want.R || color.G != want.G || color.B != want.B {
+		t.Fatal("new session did not inherit the current theme")
+	}
+	restored := &desktop{}
+	if err := restored.loadPreferences(path); err != nil || restored.terminalTheme != "catppuccin" || restored.terminalOptions().DarkTheme == nil {
+		t.Fatalf("theme did not survive restart: %v", err)
+	}
+	if err := writePreference(path, "sidebar", true); err != nil {
+		t.Fatal(err)
+	}
+	p, err := readPreferences(path)
+	if err != nil || p.TerminalTheme != "catppuccin" || !p.SidebarCollapsed {
+		t.Fatal("theme was lost when another setting was saved")
+	}
+	d.changeTerminalTheme("")
+	if d.terminalOptions().Theme != nil || d.terminalOptions().DarkTheme != nil {
+		t.Fatal("follow-interface theme did not restore defaults")
+	}
+	view.Frame()
+	if err := view.Click("选择终端配色"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.Click("Nord"); err != nil {
+		t.Fatalf("theme picker did not expose presets: %v", err)
+	}
+	if d.terminalTheme != "nord" {
+		t.Fatal("theme picker did not apply selected preset")
+	}
+}
+
 func TestInvalidPreferencesAreNeverOverwritten(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "preferences.json")
 	original := []byte(`{"version":99,"future":"preserve"}`)
@@ -49,6 +137,24 @@ func TestInvalidPreferencesAreNeverOverwritten(t *testing.T) {
 	after, err := os.ReadFile(path)
 	if err != nil || string(after) != string(original) || d.preferencesStatus == "" {
 		t.Fatal("unknown preferences overwritten or error hidden")
+	}
+}
+
+func TestUnknownTerminalThemeIsNotOverwritten(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	original := []byte(`{"version":1,"terminal_theme":"future-theme"}`)
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	d := &desktop{}
+	if err := d.loadPreferences(path); err == nil {
+		t.Fatal("unknown theme accepted")
+	}
+	d.changeTerminalTheme("nord")
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != string(original) || d.preferencesStatus == "" {
+		t.Fatal("unknown preferences were overwritten or error hidden")
 	}
 }
 
