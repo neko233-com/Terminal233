@@ -96,6 +96,42 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "连接列表") {
 		t.Fatalf("missing native fields: %s", tree)
 	}
+	call("act", map[string]any{"key": "nav-cloud", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "cloud-invite-entry") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "cloud-invite-entry") {
+		t.Fatal("invitation entry missing at sign-in")
+	}
+	call("act", map[string]any{"key": "cloud-invite-entry", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "team-register") && strings.Contains(tree, "team-invite-input") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "team-register") || !strings.Contains(tree, "team-invite-input") {
+		t.Fatal("invitation registration form did not open")
+	}
+	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "connection-new") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "connection-new") {
+		t.Fatal("connection workspace did not reopen")
+	}
 	call("act", map[string]any{"key": "connection-new", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

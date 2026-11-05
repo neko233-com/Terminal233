@@ -65,3 +65,23 @@ func TestInviteMismatchKeepsCredentialsAndCanSelectService(t *testing.T) {
 		t.Fatal("explicit service selection failed")
 	}
 }
+
+func TestInviteRegistrationAccessibleFromSignIn(t *testing.T) {
+	d := &desktop{workspace: "cloud", cloudURL: defaultCloudURL}
+	view := ui.NewTester(d.view, 1200, 1400)
+	if view.HasText("邀请链接或令牌") {
+		t.Fatal("invitation entry should initially be collapsed")
+	}
+	if err := view.Click("使用团队邀请注册…"); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasText("邀请链接或令牌") || !view.HasText("通过邀请注册并加入") || d.showTeams {
+		t.Fatal("sign-in invitation entry did not open")
+	}
+	if err := view.Click("收起团队邀请注册"); err != nil {
+		t.Fatal(err)
+	}
+	if view.HasText("邀请链接或令牌") {
+		t.Fatal("invitation entry did not close")
+	}
+}

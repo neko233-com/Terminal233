@@ -315,6 +315,25 @@ func (d *desktop) cloudView(c *ui.Context) {
 				d.cloudLogout()
 			}
 		})
+		if d.cloud == nil {
+			label := "使用团队邀请注册…"
+			if d.showInviteEntry || d.showTeams {
+				label = "收起团队邀请注册"
+			}
+			if ui.Button(c.Key("cloud-invite-entry"), label).Disabled(d.busy).Clicked() {
+				if d.showInviteEntry || d.showTeams {
+					d.showInviteEntry, d.showTeams = false, false
+				} else {
+					d.showInviteEntry = true
+				}
+			}
+			if d.showInviteEntry || d.showTeams {
+				d.inviteJoinView(c)
+				if d.teamStatus != "" {
+					ui.Text(c, d.teamStatus).FontSize(12).Wrap()
+				}
+			}
+		}
 	})
 	ui.Text(c, "云端连接").FontSize(16).Bold()
 	if d.cloud != nil {

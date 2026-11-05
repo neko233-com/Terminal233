@@ -28,7 +28,7 @@ type desktop struct {
 	sessions                                                                                []*workspaceSession
 	currentSession, nextSession, splitSession, splitFirstSession, splitFocusedSession       int
 	pendingTerminalFocus                                                                    int
-	showTeams, showAdmin                                                                    bool
+	showTeams, showAdmin, showInviteEntry                                                   bool
 	teamInvites                                                                             []cloudInvite
 	confirmInvite                                                                           string
 	adminTeams                                                                              []cloudTeam
@@ -646,7 +646,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.38"
+const version = "0.3.39"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

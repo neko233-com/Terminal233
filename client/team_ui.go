@@ -229,7 +229,9 @@ func (d *desktop) teamView(c *ui.Context) {
 			ui.Text(c, "当前团队角色："+role).FontSize(12).Wrap()
 		}
 	}
-	ui.Text(c, "邀请注册：填写上方云账号和密码，再将邀请链接粘贴到 NekoSSH 并输入邀请密码。").FontSize(12).Wrap()
+	if d.cloud == nil {
+		ui.Text(c, "请在上方同步账号区域使用团队邀请注册。").FontSize(12).Wrap()
+	}
 	ui.TextInput(c.Key("team-name"), &d.teamName).Label("团队名称").Placeholder("新团队名称")
 	if ui.Button(c.Key("team-create"), "创建团队").Disabled(d.busy || d.cloud == nil).Clicked() {
 		d.teamOperation("create")
@@ -253,21 +255,8 @@ func (d *desktop) teamView(c *ui.Context) {
 			d.selectTeam(team.ID)
 		}
 	}
-	ui.TextInput(c.Key("team-invite-input"), &d.teamInviteInput).Label("邀请链接或令牌").Placeholder("邀请链接或令牌")
-	if _, service, err := parseInvite(d.teamInviteInput); err == nil && service != "" {
-		ui.Text(c, "邀请所属服务："+service).FontSize(12).Wrap()
-		if d.cloud == nil && ui.Button(c.Key("team-use-invite-service"), "使用邀请链接中的服务地址").Disabled(d.busy).Clicked() {
-			d.cloudURL = service
-			d.cloudURLChanged()
-			d.teamStatus = "已使用邀请中的服务地址，请确认后注册或登录。"
-		}
-	}
-	ui.TextInput(c.Key("team-invite-password"), &d.teamInvitePassword).Label("邀请密码").Placeholder("邀请密码（至少 12 字符）").Password()
-	if ui.Button(c.Key("team-register"), "通过邀请注册并加入").Disabled(d.busy || d.cloud != nil).Clicked() {
-		d.registerWithInvite()
-	}
-	if ui.Button(c.Key("team-join"), "加入团队").Disabled(d.busy || d.cloud == nil).Clicked() {
-		d.teamOperation("join")
+	if d.cloud != nil {
+		d.inviteJoinView(c)
 	}
 	ui.TextInput(c.Key("team-invite-hours"), &d.teamInviteHours).Label("邀请有效小时数").Placeholder("有效小时数")
 	ui.TextInput(c.Key("team-invite-uses"), &d.teamInviteUses).Label("邀请使用次数").Placeholder("使用次数")
@@ -349,6 +338,29 @@ func (d *desktop) teamView(c *ui.Context) {
 func extractInviteToken(invite string) string {
 	token, _, _ := parseInvite(invite)
 	return token
+}
+
+func (d *desktop) inviteJoinView(c *ui.Context) {
+	if d.cloud == nil {
+		ui.Text(c, "填写上方账号和密码，并输入团队邀请链接和邀请密码。").FontSize(12).Wrap()
+	}
+	ui.TextInput(c.Key("team-invite-input"), &d.teamInviteInput).Label("邀请链接或令牌").Placeholder("邀请链接或令牌").Disabled(d.busy)
+	if _, service, err := parseInvite(d.teamInviteInput); err == nil && service != "" {
+		ui.Text(c, "邀请所属服务："+service).FontSize(12).Wrap()
+		if d.cloud == nil && ui.Button(c.Key("team-use-invite-service"), "使用邀请链接中的服务地址").Disabled(d.busy).Clicked() {
+			d.cloudURL = service
+			d.cloudURLChanged()
+			d.teamStatus = "已使用邀请中的服务地址，请确认后注册或登录。"
+		}
+	}
+	ui.TextInput(c.Key("team-invite-password"), &d.teamInvitePassword).Label("邀请密码").Placeholder("邀请密码（至少 12 字符）").Password().Disabled(d.busy)
+	if d.cloud == nil {
+		if ui.Button(c.Key("team-register"), "通过邀请注册并加入").Disabled(d.busy).Clicked() {
+			d.registerWithInvite()
+		}
+	} else if ui.Button(c.Key("team-join"), "加入团队").Disabled(d.busy).Clicked() {
+		d.teamOperation("join")
+	}
 }
 
 // A pasted invitation never changes the destination silently. The recipient
