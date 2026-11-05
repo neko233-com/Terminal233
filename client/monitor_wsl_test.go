@@ -32,7 +32,7 @@ func TestMonitorCommandOnWSL(t *testing.T) {
 			t.Fatal("Linux probe output exceeded the limit")
 		}
 		sample, err := parseMonitorSample(string(output))
-		if err != nil || !sample.cpuOK || len(sample.network) == 0 {
+		if err != nil || !sample.cpuOK || len(sample.network) == 0 || !strings.Contains(sample.summary, "根磁盘") {
 			for _, line := range strings.Split(string(output), "\n") {
 				if strings.HasPrefix(line, "CPU") {
 					t.Logf("CPU line: %q", line)

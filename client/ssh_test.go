@@ -152,7 +152,7 @@ func testSSHServerWithPause(t *testing.T, slow, pauseEnabled *atomic.Bool, resum
 								}
 								_ = req.Reply(true, nil)
 								step := monitorReads.Add(1)
-								_, _ = fmt.Fprintf(channel, "UP 7200.0 0\nLOAD 1.25 0.50 0.25 1/2 3\nMEM\nMemTotal: 8388608 kB\nMemAvailable: 3145728 kB\nCPU cpu %d 0 %d %d 0 0 0 0\nNET\neth0: %d 0 0 0 0 0 0 0 %d 0 0 0 0 0 0 0\n", 100+25*step, 100+25*step, 800+50*step, 1024+5120*step, 2048+10240*step)
+								_, _ = fmt.Fprintf(channel, "UP 7200.0 0\nLOAD 1.25 0.50 0.25 1/2 3\nMEM\nMemTotal: 8388608 kB\nMemAvailable: 3145728 kB\nCPU cpu %d 0 %d %d 0 0 0 0\nNET\neth0: %d 0 0 0 0 0 0 0 %d 0 0 0 0 0 0 0\nDISK\nFilesystem 1024-blocks Used Available Capacity Mounted on\n/dev/test 10485760 3145728 7340032 30%% /\n", 100+25*step, 100+25*step, 800+50*step, 1024+5120*step, 2048+10240*step)
 								_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
 								return
 							case "subsystem":

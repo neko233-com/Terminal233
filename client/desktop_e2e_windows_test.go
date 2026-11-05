@@ -219,12 +219,12 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "5.0 / 8.0 GiB") {
+		if strings.Contains(tree, "5.0 / 8.0 GiB") && strings.Contains(tree, "根磁盘 3.0 / 10.0 GiB") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "5.0 / 8.0 GiB") || !strings.Contains(tree, "1.25") {
+	if !strings.Contains(tree, "5.0 / 8.0 GiB") || !strings.Contains(tree, "1.25") || !strings.Contains(tree, "根磁盘 3.0 / 10.0 GiB") {
 		t.Fatalf("SSH monitor did not display test data: %s", tree)
 	}
 	deadline = time.Now().Add(10 * time.Second)

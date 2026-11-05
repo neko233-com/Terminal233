@@ -120,6 +120,21 @@ func TestMonitorRatesHandleNewAndResetInterfaces(t *testing.T) {
 	}
 }
 
+func TestMonitorRootDiskParsingAndMissingDisk(t *testing.T) {
+	base := "UP 7200 0\nLOAD 1.25 0 0\nMEM\nMemTotal: 8388608 kB\nMemAvailable: 3145728 kB\nNET\n"
+	valid := base + "DISK\nFilesystem 1024-blocks Used Available Capacity Mounted on\n/dev/test 10485760 3145728 7340032 30% /\n"
+	sample, err := parseMonitorSample(valid)
+	if err != nil || !strings.Contains(sample.summary, "根磁盘 3.0 / 10.0 GiB") {
+		t.Fatalf("disk not parsed: %s %v", sample.summary, err)
+	}
+	for _, input := range []string{base, base + "DISK\nno df available\n", strings.Replace(valid, "3145728 7340032", "99999999 0", 1), strings.Replace(valid, "30% /", "30% /other", 1)} {
+		sample, err = parseMonitorSample(input)
+		if err != nil || strings.Contains(sample.summary, "根磁盘") {
+			t.Fatalf("invalid or missing disk should be omitted: %s %v", sample.summary, err)
+		}
+	}
+}
+
 func TestMonitorStopsOnSessionSwitchAndClose(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &desktop{currentSession: 1, monitorSession: 1, monitorCancel: cancel, monitorGeneration: 3, monitorStatus: "old", sessions: []*workspaceSession{{id: 1}, {id: 2}}}

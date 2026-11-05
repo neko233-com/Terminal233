@@ -16,7 +16,7 @@ import (
 )
 
 // Fixed, read-only Linux procfs query. No user input is interpolated.
-const monitorCommand = "printf 'UP '; cat /proc/uptime; printf 'LOAD '; cat /proc/loadavg; printf 'MEM\\n'; cat /proc/meminfo; printf 'CPU '; IFS= read -r cpu_line </proc/stat && printf '%s\\n' \"$cpu_line\"; printf 'NET\\n'; cat /proc/net/dev 2>/dev/null || :"
+const monitorCommand = "printf 'UP '; cat /proc/uptime; printf 'LOAD '; cat /proc/loadavg; printf 'MEM\\n'; cat /proc/meminfo; printf 'CPU '; IFS= read -r cpu_line </proc/stat && printf '%s\\n' \"$cpu_line\"; printf 'NET\\n'; cat /proc/net/dev 2>/dev/null || :; printf 'DISK\\n'; LC_ALL=C df -Pk / 2>/dev/null || :"
 const monitorOutputLimit = 64 << 10
 
 var errMonitorPending = errors.New("previous monitor request is still running")
@@ -35,8 +35,24 @@ func parseMonitorSample(raw string) (monitorSample, error) {
 		return monitorSample{}, err
 	}
 	sample := monitorSample{summary: summary, network: make(map[string][2]uint64)}
-	inNetwork := false
+	inNetwork, inDisk, diskFound := false, false, false
 	for _, line := range strings.Split(raw, "\n") {
+		if strings.TrimSpace(line) == "DISK" {
+			inNetwork, inDisk = false, true
+			continue
+		}
+		if inDisk {
+			fields := strings.Fields(line)
+			if !diskFound && len(fields) >= 6 && fields[len(fields)-1] == "/" {
+				total, totalErr := strconv.ParseUint(fields[len(fields)-5], 10, 64)
+				used, usedErr := strconv.ParseUint(fields[len(fields)-4], 10, 64)
+				if totalErr == nil && usedErr == nil && total > 0 && used <= total {
+					sample.summary += fmt.Sprintf(" · 根磁盘 %.1f / %.1f GiB", float64(used)/(1024*1024), float64(total)/(1024*1024))
+					diskFound = true
+				}
+			}
+			continue
+		}
 		if strings.TrimSpace(line) == "NET" {
 			inNetwork = true
 			continue
