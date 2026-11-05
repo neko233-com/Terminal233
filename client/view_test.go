@@ -172,6 +172,27 @@ func TestWorkspaceKeyboardNavigation(t *testing.T) {
 	}
 }
 
+func TestCollapsedSidebarKeepsKeyboardNavigation(t *testing.T) {
+	d := &desktop{}
+	test := ui.NewTester(d.view, 760, 700)
+	if err := test.Click("收起侧栏"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.sidebarCollapsed || test.HasText("工作区") || !test.HasText("展开侧栏") {
+		t.Fatal("sidebar did not collapse")
+	}
+	test.Key(ui.Cmd|ui.Shift, ui.Key4)
+	if d.workspace != "cloud" || !test.HasText("云端工作区") {
+		t.Fatal("keyboard navigation failed with collapsed sidebar")
+	}
+	if err := test.Click("展开侧栏"); err != nil {
+		t.Fatal(err)
+	}
+	if d.sidebarCollapsed || !test.HasText("工作区") {
+		t.Fatal("sidebar did not reopen")
+	}
+}
+
 func TestReloadAfterProfileConflictRequiresConfirmation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	first := &desktop{settings: connectionSettings{Host: "first.test", Port: "22", User: "alice"}}

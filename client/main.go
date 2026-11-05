@@ -18,6 +18,7 @@ type desktop struct {
 	editConnection                                                                          bool
 	lightTheme                                                                              bool
 	showFilePanel                                                                           bool
+	sidebarCollapsed                                                                        bool
 	sessions                                                                                []*workspaceSession
 	currentSession, nextSession                                                             int
 	showTeams, showAdmin                                                                    bool
@@ -187,6 +188,7 @@ func (d *desktop) connect() {
 
 func (d *desktop) view(c *ui.Context) {
 	d.workspaceShortcuts(c)
+	width, _ := c.Size()
 	if d.lightTheme {
 		c.SetTheme(workspaceLightTheme)
 	} else {
@@ -196,6 +198,13 @@ func (d *desktop) view(c *ui.Context) {
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Padding(10, 16).Gap(12).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 			ui.Text(c, "NekoSSH").FontSize(21).Bold()
+			sidebarLabel := "收起侧栏"
+			if d.sidebarCollapsed {
+				sidebarLabel = "展开侧栏"
+			}
+			if ui.Button(c.Key("toggle-sidebar"), sidebarLabel).Clicked() {
+				d.sidebarCollapsed = !d.sidebarCollapsed
+			}
 			ui.Text(c, "安全连接 · 本地与云端").FontSize(12).TextColor(t.TextMuted).Grow(1)
 			themeLabel := "浅色"
 			if d.lightTheme {
@@ -210,79 +219,81 @@ func (d *desktop) view(c *ui.Context) {
 			}
 		})
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
-			ui.Scroll(c).Width(235).FillHeight().Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
-				ui.Column(c).Padding(16).Gap(8).Children(func() {
-					ui.Text(c, "工作区").FontSize(12).TextColor(t.TextMuted)
-					if workspaceButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
-						d.workspace = "connections"
-						d.editConnection = false
-					}
-					if workspaceButton(c, "nav-terminal", "终端", d.workspace == "terminal").Clicked() {
-						d.workspace = "terminal"
-					}
-					if workspaceButton(c, "nav-files", "远程文件", d.workspace == "files").Clicked() {
-						d.workspace = "files"
-						if d.term != nil && d.shell == nil && d.files == nil && !d.busy {
-							d.refreshFiles()
-						}
-					}
-					if workspaceButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
-						d.workspace = "cloud"
-					}
-					ui.Text(c, "连接").FontSize(12).TextColor(t.TextMuted)
-					if ui.Button(c.Key("group-all"), fmt.Sprintf("全部连接  %d", len(d.profiles))).Clicked() {
-						d.workspace = "connections"
-						d.editConnection = false
-						d.profileFilter = ""
-						d.profileFavorites = false
-						d.profileRecent = false
-					}
-					counts := make(map[string]int)
-					var groups []string
-					favorites := 0
-					recent := 0
-					for _, p := range d.profiles {
-						if p.Favorite {
-							favorites++
-						}
-						if p.LastConnected > 0 {
-							recent++
-						}
-						if p.Group != "" {
-							if counts[p.Group] == 0 {
-								groups = append(groups, p.Group)
-							}
-							counts[p.Group]++
-						}
-					}
-					if ui.Button(c.Key("group-favorites"), fmt.Sprintf("收藏的连接  %d", favorites)).Clicked() {
-						d.workspace = "connections"
-						d.editConnection = false
-						d.profileFilter = ""
-						d.profileFavorites = true
-						d.profileRecent = false
-					}
-					if ui.Button(c.Key("group-recent"), fmt.Sprintf("最近连接  %d", recent)).Clicked() {
-						d.workspace = "connections"
-						d.editConnection = false
-						d.profileFilter = ""
-						d.profileFavorites = false
-						d.profileRecent = true
-					}
-					for _, group := range groups {
-						name := group
-						if ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", name, counts[name])).Clicked() {
+			if !d.sidebarCollapsed {
+				ui.Scroll(c).Width(235).FillHeight().Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
+					ui.Column(c).Padding(16).Gap(8).Children(func() {
+						ui.Text(c, "工作区").FontSize(12).TextColor(t.TextMuted)
+						if workspaceButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
 							d.workspace = "connections"
 							d.editConnection = false
-							d.profileFilter = name
+						}
+						if workspaceButton(c, "nav-terminal", "终端", d.workspace == "terminal").Clicked() {
+							d.workspace = "terminal"
+						}
+						if workspaceButton(c, "nav-files", "远程文件", d.workspace == "files").Clicked() {
+							d.workspace = "files"
+							if d.term != nil && d.shell == nil && d.files == nil && !d.busy {
+								d.refreshFiles()
+							}
+						}
+						if workspaceButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
+							d.workspace = "cloud"
+						}
+						ui.Text(c, "连接").FontSize(12).TextColor(t.TextMuted)
+						if ui.Button(c.Key("group-all"), fmt.Sprintf("全部连接  %d", len(d.profiles))).Clicked() {
+							d.workspace = "connections"
+							d.editConnection = false
+							d.profileFilter = ""
 							d.profileFavorites = false
 							d.profileRecent = false
 						}
-					}
-					ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
-					ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端").FontSize(11).TextColor(t.TextMuted).Wrap()
+						counts := make(map[string]int)
+						var groups []string
+						favorites := 0
+						recent := 0
+						for _, p := range d.profiles {
+							if p.Favorite {
+								favorites++
+							}
+							if p.LastConnected > 0 {
+								recent++
+							}
+							if p.Group != "" {
+								if counts[p.Group] == 0 {
+									groups = append(groups, p.Group)
+								}
+								counts[p.Group]++
+							}
+						}
+						if ui.Button(c.Key("group-favorites"), fmt.Sprintf("收藏的连接  %d", favorites)).Clicked() {
+							d.workspace = "connections"
+							d.editConnection = false
+							d.profileFilter = ""
+							d.profileFavorites = true
+							d.profileRecent = false
+						}
+						if ui.Button(c.Key("group-recent"), fmt.Sprintf("最近连接  %d", recent)).Clicked() {
+							d.workspace = "connections"
+							d.editConnection = false
+							d.profileFilter = ""
+							d.profileFavorites = false
+							d.profileRecent = true
+						}
+						for _, group := range groups {
+							name := group
+							if ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", name, counts[name])).Clicked() {
+								d.workspace = "connections"
+								d.editConnection = false
+								d.profileFilter = name
+								d.profileFavorites = false
+								d.profileRecent = false
+							}
+						}
+						ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
+						ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端").FontSize(11).TextColor(t.TextMuted).Wrap()
+					})
 				})
-			})
+			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
 				if d.workspace == "terminal" {
 					ui.ScrollHorizontal(c).FillWidth().Padding(8, 12).Gap(6).Children(func() {
@@ -310,14 +321,23 @@ func (d *desktop) view(c *ui.Context) {
 					if d.term == nil {
 						ui.Text(c, "选择连接，或打开本机终端").FontSize(18).TextColor(t.TextMuted)
 					} else {
-						ui.Row(c).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
-							ui.Column(c).Grow(1).FillHeight().Children(func() { terminal.View(c, d.term).Fill() })
-							if d.showFilePanel {
-								ui.Scroll(c).Width(380).Shrink(0).FillHeight().BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
+						if d.showFilePanel && width < 940 {
+							ui.Column(c).Grow(1).FillWidth().Children(func() {
+								ui.Column(c).Grow(1).FillWidth().Children(func() { terminal.View(c, d.term).Fill() })
+								ui.Scroll(c).Height(260).Shrink(0).FillWidth().BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
 									ui.Column(c).Padding(14).Gap(8).Children(func() { d.fileView(c, true) })
 								})
-							}
-						})
+							})
+						} else {
+							ui.Row(c).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
+								ui.Column(c).Grow(1).FillHeight().Children(func() { terminal.View(c, d.term).Fill() })
+								if d.showFilePanel {
+									ui.Scroll(c).Width(380).Shrink(0).FillHeight().BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
+										ui.Column(c).Padding(14).Gap(8).Children(func() { d.fileView(c, true) })
+									})
+								}
+							})
+						}
 					}
 					return
 				}
@@ -396,7 +416,7 @@ func main() {
 	}
 	mygo.Theme.SetSource(mygo.ThemeDark)
 	mygo.App.WhenReady(func() {
-		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH", Width: 1200, Height: 760, Content: ui.View(d.view)})
+		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH", Width: 1200, Height: 760, MinWidth: 640, MinHeight: 480, Content: ui.View(d.view)})
 		d.win.OnClosed(d.closeAllSessions)
 	})
 	if err := mygo.App.Run(); err != nil {
