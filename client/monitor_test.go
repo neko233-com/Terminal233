@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -34,13 +36,13 @@ func TestMonitorUsesIndependentSSHChannel(t *testing.T) {
 	defer shell.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sample, err := collectMonitor(ctx, shell.client)
+	sample, err := collectMonitor(ctx, shell)
 	if err != nil || !strings.Contains(sample.summary, "5.0 / 8.0 GiB") {
 		t.Fatalf("monitor query failed: %s %v", sample.summary, err)
 	}
 	canceled, stop := context.WithCancel(context.Background())
 	stop()
-	if _, err := collectMonitor(canceled, shell.client); err == nil {
+	if _, err := collectMonitor(canceled, shell); err == nil {
 		t.Fatal("canceled monitor query succeeded")
 	}
 	if _, err := shell.Write([]byte("hello")); err != nil {
@@ -49,6 +51,46 @@ func TestMonitorUsesIndependentSSHChannel(t *testing.T) {
 	buffer := make([]byte, 256)
 	if _, err := shell.Read(buffer); err != nil {
 		t.Fatal("interactive shell unavailable after monitoring")
+	}
+}
+
+func TestMonitorLimitsPendingRequestsPerSession(t *testing.T) {
+	var pause atomic.Bool
+	resume := make(chan struct{})
+	defer func() {
+		if pause.Load() {
+			close(resume)
+		}
+	}()
+	settings, fingerprint, _ := testSSHServerWithPause(t, nil, &pause, resume)
+	settings.Fingerprint = fingerprint
+	shell, err := connectShell(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shell.Close()
+	pause.Store(true)
+	short, shortCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer shortCancel()
+	if _, err := collectMonitor(short, shell); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stalled request did not time out: %v", err)
+	}
+	if _, err := collectMonitor(context.Background(), shell); !errors.Is(err, errMonitorPending) {
+		t.Fatalf("concurrent monitor was not rejected: %v", err)
+	}
+	pause.Store(false)
+	close(resume)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		_, err = collectMonitor(ctx, shell)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, errMonitorPending) || ctx.Err() != nil {
+			t.Fatalf("monitor slot did not recover: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

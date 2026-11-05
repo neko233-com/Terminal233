@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -55,11 +56,23 @@ func inspectHost(s connectionSettings) (string, error) {
 }
 
 type remoteShell struct {
-	client  *ssh.Client
-	done    <-chan struct{}
-	session *ssh.Session
-	in      io.WriteCloser
-	out     io.Reader
+	client      *ssh.Client
+	done        <-chan struct{}
+	session     *ssh.Session
+	in          io.WriteCloser
+	out         io.Reader
+	monitorOnce sync.Once
+	monitorGate chan struct{}
+}
+
+func (s *remoteShell) takeMonitorSlot() bool {
+	s.monitorOnce.Do(func() { s.monitorGate = make(chan struct{}, 1) })
+	select {
+	case s.monitorGate <- struct{}{}:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *remoteShell) Read(p []byte) (int, error)  { return s.out.Read(p) }

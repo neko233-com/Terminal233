@@ -45,6 +45,10 @@ func (s *slowSFTPStream) Write(p []byte) (int, error) {
 }
 
 func testSSHServerWithSlowSFTP(t *testing.T, slow *atomic.Bool, authorized ...ssh.PublicKey) (connectionSettings, string, *atomic.Int32) {
+	return testSSHServerWithPause(t, slow, nil, nil, authorized...)
+}
+
+func testSSHServerWithPause(t *testing.T, slow, pauseEnabled *atomic.Bool, resume <-chan struct{}, authorized ...ssh.PublicKey) (connectionSettings, string, *atomic.Int32) {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -126,6 +130,9 @@ func testSSHServerWithSlowSFTP(t *testing.T, slow *atomic.Bool, authorized ...ss
 					if ch.ChannelType() != "session" {
 						_ = ch.Reject(ssh.UnknownChannelType, "unsupported")
 						continue
+					}
+					if pauseEnabled != nil && pauseEnabled.Load() {
+						<-resume
 					}
 					channel, requests, err := ch.Accept()
 					if err != nil {

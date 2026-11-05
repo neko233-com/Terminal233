@@ -19,6 +19,8 @@ import (
 const monitorCommand = "printf 'UP '; cat /proc/uptime; printf 'LOAD '; cat /proc/loadavg; printf 'MEM\\n'; cat /proc/meminfo; printf 'CPU '; IFS= read -r cpu_line </proc/stat && printf '%s\\n' \"$cpu_line\"; printf 'NET\\n'; cat /proc/net/dev 2>/dev/null || :"
 const monitorOutputLimit = 64 << 10
 
+var errMonitorPending = errors.New("previous monitor request is still running")
+
 type monitorSample struct {
 	summary           string
 	cpuTotal, cpuIdle uint64
@@ -174,12 +176,15 @@ func parseMonitorOutput(raw string) (string, error) {
 
 // Cancellation closes only this short-lived SSH channel, never the user's shell.
 // A stuck channel open is abandoned once and is not retried by the poller.
-func collectMonitor(ctx context.Context, client *ssh.Client) (monitorSample, error) {
+func collectMonitor(ctx context.Context, shell *remoteShell) (monitorSample, error) {
 	if err := ctx.Err(); err != nil {
 		return monitorSample{}, err
 	}
-	if client == nil {
+	if shell == nil || shell.client == nil {
 		return monitorSample{}, errors.New("SSH disconnected")
+	}
+	if !shell.takeMonitorSlot() {
+		return monitorSample{}, errMonitorPending
 	}
 	type result struct {
 		sample monitorSample
@@ -189,30 +194,32 @@ func collectMonitor(ctx context.Context, client *ssh.Client) (monitorSample, err
 	var mu sync.Mutex
 	var session *ssh.Session
 	go func() {
-		s, err := client.NewSession()
-		if err != nil {
-			ch <- result{monitorSample{}, err}
-			return
-		}
-		mu.Lock()
-		if ctx.Err() != nil {
+		run := func() result {
+			s, err := shell.client.NewSession()
+			if err != nil {
+				return result{monitorSample{}, err}
+			}
+			mu.Lock()
+			if ctx.Err() != nil {
+				mu.Unlock()
+				_ = s.Close()
+				return result{monitorSample{}, ctx.Err()}
+			}
+			session = s
 			mu.Unlock()
-			_ = s.Close()
-			ch <- result{monitorSample{}, ctx.Err()}
-			return
+			defer s.Close()
+			var output boundedMonitorOutput
+			s.Stdout = &output
+			if err := s.Run(monitorCommand); err != nil {
+				return result{monitorSample{}, err}
+			}
+			sample, err := parseMonitorSample(output.String())
+			sample.at = time.Now()
+			return result{sample, err}
 		}
-		session = s
-		mu.Unlock()
-		defer s.Close()
-		var output boundedMonitorOutput
-		s.Stdout = &output
-		if err := s.Run(monitorCommand); err != nil {
-			ch <- result{monitorSample{}, err}
-			return
-		}
-		sample, err := parseMonitorSample(output.String())
-		sample.at = time.Now()
-		ch <- result{sample, err}
+		r := run()
+		<-shell.monitorGate
+		ch <- r
 	}()
 	select {
 	case r := <-ch:
@@ -254,7 +261,7 @@ func (d *desktop) toggleMonitor() {
 		var previous monitorSample
 		for {
 			attempt, stop := context.WithTimeout(ctx, 8*time.Second)
-			sample, err := collectMonitor(attempt, shell.client)
+			sample, err := collectMonitor(attempt, shell)
 			stop()
 			if ctx.Err() != nil {
 				return
@@ -265,7 +272,9 @@ func (d *desktop) toggleMonitor() {
 				if d.monitorGeneration != generation || d.currentSession != sessionID || d.shell != shell {
 					return
 				}
-				if err != nil {
+				if errors.Is(err, errMonitorPending) {
+					d.monitorStatus = "上次服务器状态请求尚未结束，请稍后关闭并重试。"
+				} else if err != nil {
 					d.monitorStatus = "无法读取服务器状态；仅支持提供 /proc 的 Linux 主机。"
 				} else {
 					d.monitorStatus = text
