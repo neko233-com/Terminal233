@@ -340,6 +340,55 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("local terminal missing: %s", tree)
 	}
 	call("act", map[string]any{"id": localTerminalID, "action": "focus"})
+	call("input", map[string]any{"events": []any{map[string]any{"type": "text", "text": "Write-Output 'NekoFindMarker98765'"}, map[string]any{"type": "key", "key": "Enter"}}})
+	call("act", map[string]any{"key": "terminal-search-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "terminal-search-input") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "terminal-search-input", "action": "setValue", "text": "NekoFindMarker98765"})
+	searchCount := regexp.MustCompile(`^[1-9][0-9]*/[1-9][0-9]*$`)
+	searchFound := false
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if searchCount.MatchString(fmt.Sprint(node["label"])) {
+				searchFound = true
+				break
+			}
+		}
+		if searchFound {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !searchFound {
+		t.Fatalf("native terminal search did not find output: %v", call("tree"))
+	}
+	call("act", map[string]any{"key": "terminal-search-next", "action": "press"})
+	call("act", map[string]any{"key": "terminal-search-previous", "action": "press"})
+	call("act", map[string]any{"key": "terminal-search-close", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		if strings.Contains(fmt.Sprint(result), "terminal-search-input") {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["label"] == "Terminal" {
+				localTerminalID, _ = node["id"].(string)
+			}
+		}
+		break
+	}
+	call("act", map[string]any{"id": localTerminalID, "action": "focus"})
 	command := "Set-Location -LiteralPath '" + strings.ReplaceAll(followDir, "'", "''") + "'"
 	call("input", map[string]any{"events": []any{map[string]any{"type": "text", "text": command}, map[string]any{"type": "key", "key": "Enter"}}})
 	call("act", map[string]any{"key": "nav-files", "action": "press"})

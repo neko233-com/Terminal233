@@ -62,6 +62,8 @@ type desktop struct {
 	fileHistory                                                                             fileHistory
 	fileBatchErrors                                                                         []string
 	fileBatchDetails                                                                        bool
+	terminalSearchOpen                                                                      bool
+	terminalSearchText                                                                      string
 	expectedFingerprint, changedFingerprint                                                 string
 	win                                                                                     *mygo.Window
 	settings                                                                                connectionSettings
@@ -130,6 +132,10 @@ func (d *desktop) workspaceShortcuts(c *ui.Context) {
 		d.workspace = "cloud"
 	case c.Shortcut(mods, ui.KeyT):
 		d.openLocalTerminal()
+	case c.Shortcut(mods, ui.KeyF):
+		if d.term != nil {
+			d.workspace, d.terminalSearchOpen = "terminal", true
+		}
 	}
 }
 
@@ -367,7 +373,7 @@ func (d *desktop) view(c *ui.Context) {
 							}
 						}
 						ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
-						ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端").FontSize(11).TextColor(t.TextMuted).Wrap()
+						ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端\nCtrl+Shift+F 查找终端输出").FontSize(11).TextColor(t.TextMuted).Wrap()
 						d.updateView(c)
 					})
 				})
@@ -391,7 +397,7 @@ func (d *desktop) view(c *ui.Context) {
 					if closeSessionID != 0 {
 						d.closeSession(closeSessionID)
 					}
-					ui.Row(c).FillWidth().Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+					ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 						ui.Text(c, "终端").FontSize(17).Bold().Grow(1)
 						status := d.status
 						if terminalEnded(d.term) && !d.busy {
@@ -402,6 +408,13 @@ func (d *desktop) view(c *ui.Context) {
 							}
 						}
 						ui.Text(c, status).FontSize(12).TextColor(t.TextMuted)
+						if ui.Button(c.Key("terminal-search-toggle"), "查找").Disabled(d.term == nil).Clicked() {
+							if d.terminalSearchOpen {
+								d.closeTerminalSearch()
+							} else {
+								d.terminalSearchOpen = true
+							}
+						}
 						splitLabel := "分屏查看"
 						if d.splitSession != 0 {
 							splitLabel = "关闭分屏"
@@ -424,6 +437,9 @@ func (d *desktop) view(c *ui.Context) {
 					if d.term == nil {
 						ui.Text(c, "选择连接，或打开本机终端").FontSize(18).TextColor(t.TextMuted)
 					} else {
+						if d.terminalSearchOpen {
+							d.terminalSearchView(c)
+						}
 						if terminalEnded(d.term) {
 							ui.Row(c).FillWidth().Padding(8, 12).Gap(10).Wrap().Children(func() {
 								message := "本机终端已退出；输出仍可查看。"
@@ -541,7 +557,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.21"
+const version = "0.3.22"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

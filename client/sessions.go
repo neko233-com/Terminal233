@@ -50,6 +50,8 @@ type workspaceSession struct {
 	fileHistory                                              fileHistory
 	fileBatchErrors                                          []string
 	fileBatchDetails                                         bool
+	terminalSearchOpen                                       bool
+	terminalSearchText                                       string
 	refreshPending                                           bool
 	cloudSources                                             map[string]string
 	forwards                                                 []*localForward
@@ -71,6 +73,7 @@ func (d *desktop) saveSessionState() {
 		s.files = d.files
 		s.fileHistory = d.fileHistory
 		s.fileBatchErrors, s.fileBatchDetails = d.fileBatchErrors, d.fileBatchDetails
+		s.terminalSearchOpen, s.terminalSearchText = d.terminalSearchOpen, d.terminalSearchText
 		return
 	}
 }
@@ -100,6 +103,7 @@ func (d *desktop) activateSession(id int) {
 		d.files, d.confirmDelete = s.files, ""
 		d.fileHistory = s.fileHistory
 		d.fileBatchErrors, d.fileBatchDetails = s.fileBatchErrors, s.fileBatchDetails
+		d.terminalSearchOpen, d.terminalSearchText = s.terminalSearchOpen, s.terminalSearchText
 		d.workspace = "terminal"
 		d.status = "当前会话：" + s.label
 		if s.refreshPending && !d.fileSessionUnavailable() && !d.busy && d.win != nil {
@@ -166,6 +170,7 @@ func (d *desktop) closeSession(id int) {
 		d.files, d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile, d.confirmDelete = nil, "", "", "", "", ""
 		d.fileHistory = fileHistory{}
 		d.fileBatchErrors, d.fileBatchDetails = nil, false
+		d.terminalSearchOpen, d.terminalSearchText = false, ""
 		d.fileFilter, d.fileSort = "", ""
 		d.fileSortDescending, d.fileHideDotfiles, d.fileFollowTerminal = false, false, false
 		d.lastTerminalDir = ""

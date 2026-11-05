@@ -45,10 +45,13 @@ func (d *desktop) reconnectCurrentSession() {
 				s.forwards = nil
 				_ = oldTerm.Close()
 				term.SetFont(terminal.Font{Size: float32(d.currentTerminalFontSize())})
+				// A new terminal has no old scrollback; discard its old search.
+				s.terminalSearchOpen, s.terminalSearchText = false, ""
 				s.term, s.shell, s.files, s.refreshPending = term, shell, nil, false
 				s.selectedFile, s.fileStatus = "", ""
 				s.lastTerminalDir = ""
 				if d.currentSession == id {
+					d.terminalSearchOpen, d.terminalSearchText = false, ""
 					d.term, d.shell = term, shell
 					d.files, d.selectedFile, d.confirmDelete, d.lastTerminalDir = nil, "", "", ""
 					d.fileRename, d.fileNewDirectory = "", ""
