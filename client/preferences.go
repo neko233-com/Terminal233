@@ -12,13 +12,16 @@ import (
 
 // Preferences contain only presentation choices, never connection credentials.
 type workspacePreferences struct {
-	Version          int    `json:"version"`
-	Light            bool   `json:"light"`
-	SidebarCollapsed bool   `json:"sidebar_collapsed"`
-	ShowFiles        bool   `json:"show_files"`
-	TerminalFontSize int    `json:"terminal_font_size"`
-	TerminalTheme    string `json:"terminal_theme,omitempty"`
-	SplitLayout      string `json:"split_layout,omitempty"`
+	Version                int     `json:"version"`
+	Light                  bool    `json:"light"`
+	SidebarCollapsed       bool    `json:"sidebar_collapsed"`
+	ShowFiles              bool    `json:"show_files"`
+	TerminalFontSize       int     `json:"terminal_font_size"`
+	TerminalTheme          string  `json:"terminal_theme,omitempty"`
+	SplitLayout            string  `json:"split_layout,omitempty"`
+	TerminalFilePercent    float32 `json:"terminal_file_percent,omitempty"`
+	SplitHorizontalPercent float32 `json:"split_horizontal_percent,omitempty"`
+	SplitVerticalPercent   float32 `json:"split_vertical_percent,omitempty"`
 }
 
 func readPreferences(path string) (workspacePreferences, error) {
@@ -48,6 +51,11 @@ func readPreferences(path string) (workspacePreferences, error) {
 	if p.SplitLayout != "" && p.SplitLayout != "side" && p.SplitLayout != "stacked" {
 		return p, errors.New("分屏布局无效")
 	}
+	for _, value := range []float32{p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent} {
+		if value < 0 || value > 100 {
+			return p, errors.New("面板尺寸无效")
+		}
+	}
 	return p, nil
 }
 
@@ -60,12 +68,36 @@ func (d *desktop) loadPreferences(path string) error {
 	d.lightTheme, d.sidebarCollapsed, d.showFilePanel = p.Light, p.SidebarCollapsed, p.ShowFiles
 	d.terminalFontSize = p.TerminalFontSize
 	d.splitLayout = p.SplitLayout
+	d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent
 	light, dark, err := terminalThemePair(p.TerminalTheme)
 	if err != nil {
 		return err
 	}
 	d.terminalTheme, d.terminalLightTheme, d.terminalDarkTheme = p.TerminalTheme, light, dark
 	return nil
+}
+
+// Layout dimensions are saved explicitly, rather than synchronously writing
+// preferences for every pointer movement while a divider is dragged.
+func (d *desktop) savePanelSizes() {
+	if d.preferencesPath == "" {
+		d.preferencesStatus = "界面设置位置不可用，无法保存面板尺寸。"
+		return
+	}
+	err := updatePreferences(d.preferencesPath, func(p *workspacePreferences) error {
+		for _, value := range []float32{d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent} {
+			if value < 0 || value > 100 {
+				return errors.New("面板尺寸无效")
+			}
+		}
+		p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent = d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent
+		return nil
+	})
+	if err != nil {
+		d.preferencesStatus = "面板尺寸未保存：" + err.Error()
+	} else {
+		d.preferencesStatus = "面板尺寸已保存"
+	}
 }
 
 // Merge just the changed field while holding a process lock, so two windows

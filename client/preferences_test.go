@@ -37,6 +37,39 @@ func TestPreferencesPersistAndMergeAcrossWindows(t *testing.T) {
 	}
 }
 
+func TestPanelSizesSaveResetAndMerge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	d := &desktop{}
+	if err := d.loadPreferences(path); err != nil {
+		t.Fatal(err)
+	}
+	d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = 68, 43, 57
+	view := ui.NewTester(d.view, 1200, 900)
+	if err := view.Click("保存面板尺寸"); err != nil {
+		t.Fatal(err)
+	}
+	if d.preferencesStatus != "面板尺寸已保存" {
+		t.Fatal(d.preferencesStatus)
+	}
+	if err := writePreference(path, "light", true); err != nil {
+		t.Fatal(err)
+	}
+	restored := &desktop{}
+	if err := restored.loadPreferences(path); err != nil {
+		t.Fatal(err)
+	}
+	if !restored.lightTheme || restored.terminalFilePercent != 68 || restored.splitHorizontalPercent != 43 || restored.splitVerticalPercent != 57 {
+		t.Fatal("panel sizes or unrelated settings were not restored")
+	}
+	if err := view.Click("恢复默认面板尺寸"); err != nil {
+		t.Fatal(err)
+	}
+	reset := &desktop{}
+	if err := reset.loadPreferences(path); err != nil || reset.terminalFilePercent != 0 || reset.splitHorizontalPercent != 0 || reset.splitVerticalPercent != 0 || !reset.lightTheme {
+		t.Fatal("reset was not persisted or discarded another setting")
+	}
+}
+
 func TestTerminalThemesPersistAndApplyToExistingAndNewSessions(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	path := filepath.Join(t.TempDir(), "preferences.json")

@@ -350,6 +350,13 @@ func (d *desktop) view(c *ui.Context) {
 						if ui.Select(c.Key("split-layout"), &layout, []string{"自动布局", "左右分屏", "上下分屏"}).Label("选择分屏布局").FillWidth().Changed() {
 							d.changeSplitLayout(splitLayoutID(layout))
 						}
+						if ui.Button(c.Key("save-panel-sizes"), "保存面板尺寸").Clicked() {
+							d.savePanelSizes()
+						}
+						if ui.Button(c.Key("reset-panel-sizes"), "恢复默认面板尺寸").Clicked() {
+							d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = 0, 0, 0
+							d.savePanelSizes()
+						}
 						ui.Text(c, "连接").FontSize(12).TextColor(t.TextMuted)
 						connectionCount := len(d.profiles) + 1
 						if d.cloud != nil {
@@ -697,7 +704,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.55"
+const version = "0.3.56"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
