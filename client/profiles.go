@@ -82,6 +82,11 @@ func (d *desktop) loadProfile(p profile) {
 	d.status = "已载入连接，请输入密码并核对指纹。"
 }
 func (d *desktop) profileView(c *ui.Context) {
+	width, _ := c.Size()
+	if !d.sidebarCollapsed {
+		width -= 235
+	}
+	compact := width < 600
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 		title := "连接列表"
 		if d.profileRecent {
@@ -150,7 +155,9 @@ func (d *desktop) profileView(c *ui.Context) {
 	} else {
 		ui.Row(c).FillWidth().Padding(8, 12).Gap(12).Background(c.Theme().Surface).Children(func() {
 			ui.Text(c, "名称 / 分组").Grow(1).TextColor(c.Theme().TextMuted)
-			ui.Text(c, "地址").Width(220).TextColor(c.Theme().TextMuted)
+			if !compact {
+				ui.Text(c, "地址").Width(220).TextColor(c.Theme().TextMuted)
+			}
 			ui.Text(c, "操作").Width(60).TextColor(c.Theme().TextMuted)
 		})
 	}
@@ -179,6 +186,9 @@ func (d *desktop) profileView(c *ui.Context) {
 		label := p.Label
 		if p.Group != "" {
 			label = p.Group + " / " + label
+		}
+		if compact {
+			label += " · " + p.Settings.Host + ":" + p.Settings.Port
 		}
 		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 			favoriteLabel := "☆"
@@ -230,7 +240,9 @@ func (d *desktop) profileView(c *ui.Context) {
 					moveFrom, moveTo = dragged, p.ID
 				}
 			}
-			ui.Text(c, p.Settings.Host+":"+p.Settings.Port).Width(220).TextColor(c.Theme().TextMuted)
+			if !compact {
+				ui.Text(c, p.Settings.Host+":"+p.Settings.Port).Width(220).TextColor(c.Theme().TextMuted)
+			}
 			if ui.Button(c.Key("profile-edit-"+string(p.ID)), "编辑").Width(60).Clicked() {
 				d.loadProfile(p)
 			}

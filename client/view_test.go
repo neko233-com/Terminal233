@@ -193,6 +193,41 @@ func TestCollapsedSidebarKeepsKeyboardNavigation(t *testing.T) {
 	}
 }
 
+func TestNarrowWorkspaceActionsRemainVisible(t *testing.T) {
+	for _, tc := range []struct {
+		workspace string
+		labels    []string
+	}{
+		{"cloud", []string{"登录同步服务", "注册并登录", "退出同步服务", "同步当前密码连接", "刷新云端连接", "删除选中云端连接（需确认）"}},
+		{"files", []string{"上传本地文件", "下载选中文件", "删除选中文件（需确认）"}},
+	} {
+		t.Run(tc.workspace, func(t *testing.T) {
+			d := &desktop{workspace: tc.workspace}
+			view := ui.NewTester(d.view, 640, 1800)
+			for _, label := range tc.labels {
+				r, ok := view.Find(label)
+				if !ok || r.X < 0 || r.X+r.W > 640 {
+					t.Errorf("action %q is outside the window: found=%t bounds=%+v", label, ok, r)
+				}
+			}
+		})
+	}
+}
+
+func TestNarrowConnectionListKeepsNameAndAddress(t *testing.T) {
+	d := &desktop{profileLabel: "测试服务器", settings: connectionSettings{Host: "example.test", Port: "22", User: "alice"}}
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	view := ui.NewTester(d.view, 640, 700)
+	for _, label := range []string{"测试服务器 · example.test:22", "编辑"} {
+		r, ok := view.Find(label)
+		if !ok || r.X < 0 || r.X+r.W > 640 {
+			t.Errorf("connection control %q is outside the window: found=%t bounds=%+v", label, ok, r)
+		}
+	}
+}
+
 func TestReloadAfterProfileConflictRequiresConfirmation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	first := &desktop{settings: connectionSettings{Host: "first.test", Port: "22", User: "alice"}}

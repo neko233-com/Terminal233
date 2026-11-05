@@ -294,7 +294,7 @@ func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {
 		}
 		deleteShort = "删除"
 	}
-	ui.Row(c).Gap(6).Children(func() {
+	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 		if ui.Button(c.Key("upload"), uploadShort).Label(uploadLabel).Disabled(d.busy || d.term == nil).Clicked() {
 			d.transfer(true)
 		}

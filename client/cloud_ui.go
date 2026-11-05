@@ -108,7 +108,7 @@ func (d *desktop) cloudView(c *ui.Context) {
 		ui.TextInput(c.Key("clouduser"), &d.cloudUser).Label("同步账号").Placeholder("同步账号").Disabled(d.busy || d.cloud != nil)
 		ui.TextInput(c.Key("cloudpassword"), &d.cloudPassword).Label("同步密码").Placeholder("同步密码").Password().Disabled(d.busy || d.cloud != nil)
 		ui.TextInput(c.Key("cloudregistration"), &d.cloudRegistration).Label("注册令牌").Placeholder("注册令牌（仅注册时需要）").Password().Disabled(d.busy || d.cloud != nil)
-		ui.Row(c).Gap(8).Children(func() {
+		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 			if ui.PrimaryButton(c.Key("cloudlogin"), "登录同步服务").Disabled(d.busy || d.cloud != nil).Clicked() {
 				d.cloudLogin(false)
 			}
@@ -121,7 +121,7 @@ func (d *desktop) cloudView(c *ui.Context) {
 		})
 	})
 	ui.Text(c, "云端连接").FontSize(16).Bold()
-	ui.Row(c).Gap(8).Children(func() {
+	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 		if ui.Button(c.Key("cloudsave"), "同步当前密码连接").Disabled(d.busy || d.cloud == nil || d.active.Password == "").Clicked() {
 			d.cloudSave()
 		}
