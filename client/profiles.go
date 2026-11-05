@@ -85,8 +85,16 @@ func (d *desktop) profileView(c *ui.Context) {
 	})
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
 	if len(d.profiles) == 0 {
-		ui.Text(c, "还没有 SSH 连接").FontSize(18).Bold()
-		ui.Text(c, "创建连接后，可在这里快速查找和管理。也可以打开本机终端。").TextColor(c.Theme().TextMuted).Wrap()
+		ui.Column(c).FillWidth().Padding(28).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
+			ui.Text(c, "还没有 SSH 连接").FontSize(18).Bold()
+			ui.Text(c, "创建连接后，可在这里快速查找和管理。也可以打开本机终端。").TextColor(c.Theme().TextMuted).Wrap()
+		})
+	} else {
+		ui.Row(c).FillWidth().Padding(8, 12).Gap(12).Background(c.Theme().Surface).Children(func() {
+			ui.Text(c, "名称 / 分组").Grow(1).TextColor(c.Theme().TextMuted)
+			ui.Text(c, "地址").Width(220).TextColor(c.Theme().TextMuted)
+			ui.Text(c, "操作").Width(60).TextColor(c.Theme().TextMuted)
+		})
 	}
 	var moveFrom, moveTo profileID
 	shown := 0
@@ -103,31 +111,37 @@ func (d *desktop) profileView(c *ui.Context) {
 		if p.Group != "" {
 			label = p.Group + " / " + label
 		}
-		row := ui.Button(c.Key("profile-"+string(p.ID)), label).Drag(p.ID)
-		row.ContextMenu(func(menu *ui.Menu) {
-			if menu.Item("载入").Chosen() {
-				d.loadProfile(p)
-			}
-			if menu.Item("移除").Chosen() {
-				for i, current := range d.profiles {
-					if current.ID == p.ID {
-						d.profiles = append(d.profiles[:i], d.profiles[i+1:]...)
-						break
+		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+			row := ui.Button(c.Key("profile-"+string(p.ID)), label).Grow(1).Drag(p.ID)
+			row.ContextMenu(func(menu *ui.Menu) {
+				if menu.Item("载入").Chosen() {
+					d.loadProfile(p)
+				}
+				if menu.Item("移除").Chosen() {
+					for i, current := range d.profiles {
+						if current.ID == p.ID {
+							d.profiles = append(d.profiles[:i], d.profiles[i+1:]...)
+							break
+						}
+					}
+					if err := d.saveProfiles(); err != nil {
+						d.status = "连接已移除，但本机保存失败：" + err.Error()
+					} else {
+						d.status = "连接已移除"
 					}
 				}
-				if err := d.saveProfiles(); err != nil {
-					d.status = "连接已移除，但本机保存失败：" + err.Error()
-				} else {
-					d.status = "连接已移除"
-				}
+			})
+			if row.Clicked() {
+				d.loadProfile(p)
+			}
+			if dragged, ok := ui.Drop[profileID](row); ok {
+				moveFrom, moveTo = dragged, p.ID
+			}
+			ui.Text(c, p.Settings.Host+":"+p.Settings.Port).Width(220).TextColor(c.Theme().TextMuted)
+			if ui.Button(c.Key("profile-edit-"+string(p.ID)), "编辑").Width(60).Clicked() {
+				d.loadProfile(p)
 			}
 		})
-		if row.Clicked() {
-			d.loadProfile(p)
-		}
-		if dragged, ok := ui.Drop[profileID](row); ok {
-			moveFrom, moveTo = dragged, p.ID
-		}
 	}
 	if len(d.profiles) > 0 && shown == 0 {
 		ui.Text(c, "没有匹配的连接").TextColor(c.Theme().TextMuted)
