@@ -37,6 +37,41 @@ func TestTerminalRemainsVisibleWithPanelsAtMinimumWindow(t *testing.T) {
 	}
 }
 
+func TestTerminalFilePanelResizesByPointerAndKeyboard(t *testing.T) {
+	left, peer := net.Pipe()
+	defer peer.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{workspace: "terminal", term: term, currentSession: 1, showFilePanel: true, sessions: []*workspaceSession{{id: 1, label: "local", term: term}}}
+	view := ui.NewTester(d.view, 1500, 900)
+	panel, ok := view.Find("终端文件面板")
+	if !ok || panel.W < 200 {
+		t.Fatalf("file panel missing or too narrow: %+v", panel)
+	}
+	x, y := panel.X, panel.Y+panel.H/2
+	view.Press(x, y)
+	view.Move(x+80, y)
+	view.Release(x+80, y)
+	if d.terminalFilePercent <= 60 {
+		t.Fatalf("file divider did not move: %v", d.terminalFilePercent)
+	}
+	before := d.terminalFilePercent
+	view.Key(0, ui.KeyRight)
+	if d.terminalFilePercent <= before {
+		t.Fatal("file divider did not respond to keyboard")
+	}
+	d.showFilePanel = false
+	view.Frame()
+	d.showFilePanel = true
+	view.Frame()
+	if d.terminalFilePercent <= before {
+		t.Fatal("file panel size was lost when hidden")
+	}
+}
+
 func TestSplitLayoutChoiceAndPersistence(t *testing.T) {
 	firstConn, firstPeer := net.Pipe()
 	defer firstPeer.Close()

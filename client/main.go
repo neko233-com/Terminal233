@@ -22,6 +22,7 @@ type desktop struct {
 	terminalTheme                                                                           string
 	splitLayout                                                                             string
 	splitHorizontalPercent, splitVerticalPercent                                            float32
+	terminalFilePercent                                                                     float32
 	terminalLightTheme, terminalDarkTheme                                                   *terminal.Theme
 	showFilePanel                                                                           bool
 	sidebarCollapsed                                                                        bool
@@ -549,15 +550,20 @@ func (d *desktop) view(c *ui.Context) {
 									ui.Column(c).Padding(14).Gap(8).Children(func() { d.fileView(c, true) })
 								})
 							})
-						} else {
-							ui.Row(c).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
-								ui.Column(c).Grow(1).FillHeight().Children(func() { d.terminalWorkspace(c, width) })
-								if d.showFilePanel {
-									ui.Scroll(c).Width(380).Shrink(0).FillHeight().BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
+						} else if d.showFilePanel {
+							if d.terminalFilePercent == 0 {
+								d.terminalFilePercent = 60
+							}
+							ui.SplitPercent(c.Key("terminal-file-split"), &d.terminalFilePercent,
+								func() { ui.Column(c).Fill().Children(func() { d.terminalWorkspace(c, width) }) },
+								func() {
+									ui.Scroll(c.Key("terminal-file-panel")).Label("终端文件面板").Fill().Children(func() {
 										ui.Column(c).Padding(14).Gap(8).Children(func() { d.fileView(c, true) })
 									})
-								}
-							})
+								},
+							).Grow(1).FillWidth()
+						} else {
+							ui.Column(c).Grow(1).FillWidth().Children(func() { d.terminalWorkspace(c, width) })
 						}
 					}
 					return
@@ -647,7 +653,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.41"
+const version = "0.3.42"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
