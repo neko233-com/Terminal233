@@ -724,3 +724,20 @@ func TestFileWorkspaceIdentifiesCurrentSession(t *testing.T) {
 		t.Fatal("file workspace identifies wrong session")
 	}
 }
+
+func TestFileListPrecedesControlsAndRemainsBounded(t *testing.T) {
+	files := make([]remoteFile, 30)
+	for i := range files {
+		files[i] = remoteFile{Name: fmt.Sprintf("file-%02d", i), Size: int64(i)}
+	}
+	d := &desktop{workspace: "files", files: files}
+	view := ui.NewTester(d.view, 1200, 1500)
+	first, ok := view.Find("file-00")
+	controls, hasControls := view.Find("本地文件路径")
+	if !ok || !hasControls || first.Y >= controls.Y {
+		t.Fatal("file list must precede transfer controls")
+	}
+	if controls.Y-first.Y > 440 {
+		t.Fatalf("large directory pushed controls too far away: %v", controls.Y-first.Y)
+	}
+}

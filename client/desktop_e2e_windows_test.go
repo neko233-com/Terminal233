@@ -376,6 +376,18 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "收起文件面板") || !strings.Contains(tree, "本机文件") {
 		t.Fatalf("terminal file panel missing: %s", tree)
 	}
+	panelTree := call("tree")["result"].(map[string]any)
+	listVisible := false
+	for _, value := range panelTree["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["key"] == "file-list" {
+			bounds := node["bounds"].(map[string]any)
+			listVisible = bounds["y"].(float64) < 700 && bounds["height"].(float64) <= 220
+		}
+	}
+	if !listVisible {
+		t.Fatalf("compact file list was not visible and bounded: %s", tree)
+	}
 	call("act", map[string]any{"key": "toggle-file-panel", "action": "press"})
 	call("act", map[string]any{"key": "local-terminal", "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
