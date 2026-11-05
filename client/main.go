@@ -21,7 +21,7 @@ type desktop struct {
 	showFilePanel                                                                           bool
 	sidebarCollapsed                                                                        bool
 	sessions                                                                                []*workspaceSession
-	currentSession, nextSession                                                             int
+	currentSession, nextSession, splitSession                                               int
 	showTeams, showAdmin                                                                    bool
 	teamInvites                                                                             []cloudInvite
 	confirmInvite                                                                           string
@@ -357,6 +357,13 @@ func (d *desktop) view(c *ui.Context) {
 					ui.Row(c).FillWidth().Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 						ui.Text(c, "终端").FontSize(17).Bold().Grow(1)
 						ui.Text(c, d.status).FontSize(12).TextColor(t.TextMuted)
+						splitLabel := "分屏查看"
+						if d.splitSession != 0 {
+							splitLabel = "关闭分屏"
+						}
+						if ui.Button(c.Key("toggle-split"), splitLabel).Disabled(!d.canSwitchSession() || (d.splitSession == 0 && len(d.sessions) < 2)).Clicked() {
+							d.toggleSplit()
+						}
 						label := "打开文件面板"
 						if d.showFilePanel {
 							label = "收起文件面板"
@@ -373,14 +380,14 @@ func (d *desktop) view(c *ui.Context) {
 					} else {
 						if d.showFilePanel && width < 940 {
 							ui.Column(c).Grow(1).FillWidth().Children(func() {
-								ui.Column(c).Grow(1).FillWidth().Children(func() { terminal.View(c, d.term).Fill() })
+								ui.Column(c).Grow(1).FillWidth().Children(func() { d.terminalWorkspace(c, width) })
 								ui.Scroll(c).Height(260).Shrink(0).FillWidth().BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
 									ui.Column(c).Padding(14).Gap(8).Children(func() { d.fileView(c, true) })
 								})
 							})
 						} else {
 							ui.Row(c).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
-								ui.Column(c).Grow(1).FillHeight().Children(func() { terminal.View(c, d.term).Fill() })
+								ui.Column(c).Grow(1).FillHeight().Children(func() { d.terminalWorkspace(c, width) })
 								if d.showFilePanel {
 									ui.Scroll(c).Width(380).Shrink(0).FillHeight().BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
 										ui.Column(c).Padding(14).Gap(8).Children(func() { d.fileView(c, true) })
@@ -466,7 +473,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.2"
+const version = "0.3.3"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

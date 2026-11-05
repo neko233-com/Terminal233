@@ -486,6 +486,33 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("failed to switch terminal tabs: %s", tree)
 	}
 	// Closing an inactive tab must not switch or close the active shell.
+	// Both independently running terminals must remain visible and switchable.
+	call("act", map[string]any{"key": "toggle-split", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "split-focus-2") && strings.Contains(tree, "split-focus-1") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "split-focus-2") || !strings.Contains(tree, "split-focus-1") {
+		t.Fatalf("split terminal panes missing: %s", tree)
+	}
+	call("act", map[string]any{"key": "split-focus-1", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "切换到：本机终端 2") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "切换到：本机终端 2") {
+		t.Fatalf("split pane switch failed: %s", tree)
+	}
+	call("act", map[string]any{"key": "toggle-split", "action": "press"})
+	call("act", map[string]any{"key": "session-2", "action": "press"})
 	call("act", map[string]any{"key": "session-close-1", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/egoist/mygo/plugins/terminal"
+	"github.com/egoist/mygo/ui"
 )
 
 const maxWorkspaceSessions = 12
@@ -48,6 +49,9 @@ func (d *desktop) activateSession(id int) {
 			continue
 		}
 		d.saveSessionState()
+		if id == d.splitSession {
+			d.splitSession = d.currentSession
+		}
 		d.currentSession = id
 		d.term, d.shell, d.active = s.term, s.shell, s.active
 		d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile = s.fileDir, s.fileLocal, s.fileStatus, s.selectedFile
@@ -97,13 +101,21 @@ func (d *desktop) closeSession(id int) {
 		if s.id != id {
 			continue
 		}
-		_ = s.term.Close()
+		if s.term != nil {
+			_ = s.term.Close()
+		}
+		if d.splitSession == id {
+			d.splitSession = 0
+		}
 		d.sessions = append(d.sessions[:i], d.sessions[i+1:]...)
 		if id != d.currentSession {
 			d.status = "已关闭会话：" + s.label
 			return
 		}
 		d.currentSession = 0
+		if d.splitSession != 0 {
+			d.splitSession = 0
+		}
 		d.term, d.shell, d.active = nil, nil, connectionSettings{}
 		d.files, d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile, d.confirmDelete = nil, "", "", "", "", ""
 		d.fileFilter = ""
@@ -132,5 +144,71 @@ func (d *desktop) closeAllSessions() {
 	}
 	d.sessions = nil
 	d.term, d.shell, d.active = nil, nil, connectionSettings{}
-	d.currentSession = 0
+	d.currentSession, d.splitSession = 0, 0
+}
+
+// toggleSplit displays a second, already open session without duplicating its terminal.
+func (d *desktop) toggleSplit() {
+	if !d.canSwitchSession() {
+		return
+	}
+	if d.splitSession != 0 {
+		d.splitSession = 0
+		return
+	}
+	for _, s := range d.sessions {
+		if s.id != d.currentSession && s.term != nil {
+			d.splitSession = s.id
+			return
+		}
+	}
+}
+
+func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
+	var second *workspaceSession
+	for _, s := range d.sessions {
+		if s.id == d.splitSession && s.id != d.currentSession && s.term != nil {
+			second = s
+			break
+		}
+	}
+	if second == nil {
+		terminal.View(c, d.term).Fill()
+		return
+	}
+	stacked := width < 1100 || (d.showFilePanel && width < 1450)
+	pane := func(s *workspaceSession, current bool) {
+		container := ui.Column(c).Grow(1)
+		if stacked {
+			container.FillWidth().HeightPercent(50)
+		} else {
+			container.FillHeight().WidthPercent(50)
+		}
+		container.Children(func() {
+			label := "切换到：" + s.label
+			if current {
+				label = "当前会话：" + s.label
+			}
+			if ui.Button(c.Key(fmt.Sprintf("split-focus-%d", s.id)), label).Disabled(current || !d.canSwitchSession()).Clicked() {
+				d.activateSession(s.id)
+			}
+			terminal.View(c, s.term).Grow(1).FillWidth()
+		})
+	}
+	var current *workspaceSession
+	for _, s := range d.sessions {
+		if s.id == d.currentSession {
+			current = s
+			break
+		}
+	}
+	if current == nil || current.term == nil {
+		terminal.View(c, d.term).Fill()
+		return
+	}
+	if stacked {
+		ui.Column(c).Fill().Children(func() { pane(current, true); pane(second, false) })
+	} else {
+		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() { pane(current, true); pane(second, false) })
+	}
 }
