@@ -10,6 +10,30 @@ import (
 
 const maxWorkspaceSessions = 12
 
+func terminalEnded(term *terminal.Terminal) bool {
+	if term == nil {
+		return false
+	}
+	select {
+	case <-term.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+func (d *desktop) fileSessionUnavailable() bool { return d.term == nil || terminalEnded(d.term) }
+
+func sessionDisplayLabel(s *workspaceSession) string {
+	if terminalEnded(s.term) {
+		if s.shell != nil {
+			return s.label + " · 已断开"
+		}
+		return s.label + " · 已退出"
+	}
+	return s.label
+}
+
 // Each tab owns its terminal and remote file selection. Credentials stay in
 // memory and are never part of the persisted connection list.
 type workspaceSession struct {
@@ -70,12 +94,12 @@ func (d *desktop) activateSession(id int) {
 		d.files, d.confirmDelete = s.files, ""
 		d.workspace = "terminal"
 		d.status = "当前会话：" + s.label
-		if s.refreshPending && d.term != nil && !d.busy && d.win != nil {
+		if s.refreshPending && !d.fileSessionUnavailable() && !d.busy && d.win != nil {
 			s.refreshPending = false
 			d.refreshFiles()
 			return
 		}
-		if d.showFilePanel && d.term != nil && d.shell == nil && d.files == nil && d.fileStatus == "" && d.win != nil {
+		if d.showFilePanel && !d.fileSessionUnavailable() && d.shell == nil && d.files == nil && d.fileStatus == "" && d.win != nil {
 			d.refreshFiles()
 		}
 		return

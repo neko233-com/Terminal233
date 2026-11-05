@@ -252,6 +252,52 @@ func TestDesktopNativeWindow(t *testing.T) {
 		conn.Close()
 		t.Fatal("stopped forward still listening")
 	}
+	// Simulate a dropped SSH shell and reconnect the same tab.
+	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	var sshTerminalID string
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["label"] == "Terminal" {
+				sshTerminalID, _ = node["id"].(string)
+				break
+			}
+		}
+		if sshTerminalID != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if sshTerminalID == "" {
+		t.Fatal("SSH terminal not found")
+	}
+	call("act", map[string]any{"id": sshTerminalID, "action": "focus"})
+	call("input", map[string]any{"events": []any{map[string]any{"type": "text", "text": "__NEKOSSH_TEST_DISCONNECT__"}}})
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "session-reconnect") && strings.Contains(tree, "SSH 会话已断开") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "session-reconnect") || !strings.Contains(tree, "SSH 会话已断开") {
+		t.Fatalf("disconnect was not visible: %s", tree)
+	}
+	call("act", map[string]any{"key": "session-reconnect", "action": "press"})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "已重新连接") && attempts.Load() == 2 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "已重新连接") || attempts.Load() != 2 {
+		t.Fatalf("reconnect failed: %s", tree)
+	}
 	call("act", map[string]any{"key": "nav-connections", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -830,12 +876,12 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "session-4") && attempts.Load() == 2 {
+		if strings.Contains(tree, "session-4") && attempts.Load() == 3 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "session-4") || attempts.Load() != 2 {
+	if !strings.Contains(tree, "session-4") || attempts.Load() != 3 {
 		t.Fatalf("trusted reconnect did not establish the SSH session: %s", tree)
 	}
 	deadline = time.Now().Add(5 * time.Second)
@@ -922,12 +968,12 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "session-5") && attempts.Load() == 3 {
+		if strings.Contains(tree, "session-5") && attempts.Load() == 4 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "session-5") || attempts.Load() != 3 {
+	if !strings.Contains(tree, "session-5") || attempts.Load() != 4 {
 		t.Fatalf("key profile did not connect from the list: %s", tree)
 	}
 	deadline = time.Now().Add(5 * time.Second)

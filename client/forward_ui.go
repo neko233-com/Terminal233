@@ -21,10 +21,13 @@ func (d *desktop) forwardView(c *ui.Context) {
 		return
 	}
 	ui.Text(c, "所属会话："+session.label).Bold().Wrap()
+	if terminalEnded(session.term) {
+		ui.Text(c, "SSH 会话已断开，请先重新连接。").Wrap()
+	}
 	ui.TextInput(c.Key("forward-local-port"), &d.forwardLocalPort).Label("本机端口").Placeholder("0 表示自动分配")
 	ui.TextInput(c.Key("forward-host"), &d.forwardHost).Label("远程目标主机").Placeholder("例如 127.0.0.1")
 	ui.TextInput(c.Key("forward-port"), &d.forwardPort).Label("远程目标端口").Placeholder("例如 5432")
-	if ui.Button(c.Key("forward-start"), "启动转发").Disabled(d.busy || len(session.forwards) >= maxForwardsPerSession).Clicked() {
+	if ui.Button(c.Key("forward-start"), "启动转发").Disabled(d.busy || terminalEnded(session.term) || len(session.forwards) >= maxForwardsPerSession).Clicked() {
 		f, err := startLocalForward(session.shell.client, session.shell.done, d.forwardLocalPort, d.forwardHost, d.forwardPort, c.Invalidate)
 		if err != nil {
 			d.forwardStatus = "启动失败：" + err.Error()

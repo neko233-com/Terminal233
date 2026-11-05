@@ -156,8 +156,24 @@ func testSSHServerWithSlowSFTP(t *testing.T, slow *atomic.Bool, authorized ...ss
 							case "shell":
 								_ = req.Reply(true, nil)
 								_, _ = channel.Write([]byte("ready\r\n"))
-								_, _ = io.Copy(channel, channel)
-								return
+								buffer := make([]byte, 1024)
+								var seen string
+								for {
+									n, readErr := channel.Read(buffer)
+									if n > 0 {
+										seen += string(buffer[:n])
+										if strings.Contains(seen, "__NEKOSSH_TEST_DISCONNECT__") {
+											return
+										}
+										if len(seen) > 128 {
+											seen = seen[len(seen)-128:]
+										}
+										_, _ = channel.Write(buffer[:n])
+									}
+									if readErr != nil {
+										return
+									}
+								}
 							default:
 								_ = req.Reply(false, nil)
 							}

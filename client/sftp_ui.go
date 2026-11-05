@@ -63,7 +63,7 @@ func terminalDirectory(reported string, local bool) (string, error) {
 // Follow only changes reported by the shell, so a manual browse stays put
 // until the shell itself reports a different working directory.
 func (d *desktop) applyTerminalDirectory(reported string, force bool) bool {
-	if d.busy || d.term == nil {
+	if d.busy || d.fileSessionUnavailable() {
 		return false
 	}
 	dir, err := terminalDirectory(reported, d.shell == nil)
@@ -96,7 +96,7 @@ func (d *desktop) followReportedDirectory(force bool) {
 }
 
 func (d *desktop) refreshFiles() {
-	if d.busy || d.term == nil {
+	if d.busy || d.fileSessionUnavailable() {
 		return
 	}
 	d.busy = true
@@ -217,7 +217,7 @@ func (d *desktop) finishTransfer(sessionID int, shell *remoteShell, dir string, 
 }
 
 func (d *desktop) transfer(upload bool) {
-	if d.busy || d.term == nil || d.fileLocal == "" {
+	if d.busy || d.fileSessionUnavailable() || d.fileLocal == "" {
 		return
 	}
 	if strings.TrimSpace(d.fileDir) == "" {
@@ -267,7 +267,7 @@ func (d *desktop) transfer(upload bool) {
 	}()
 }
 func (d *desktop) removeSelected() {
-	if d.busy || d.term == nil || d.selectedFile == "" {
+	if d.busy || d.fileSessionUnavailable() || d.selectedFile == "" {
 		return
 	}
 	if d.confirmDelete != d.selectedFile {
@@ -309,7 +309,7 @@ func (d *desktop) removeSelected() {
 }
 
 func (d *desktop) renameSelected() {
-	if d.busy || d.term == nil || d.selectedFile == "" {
+	if d.busy || d.fileSessionUnavailable() || d.selectedFile == "" {
 		return
 	}
 	oldName, newName, shell, dir, sessionID := d.selectedFile, d.fileRename, d.shell, d.fileDir, d.currentSession
@@ -341,7 +341,7 @@ func (d *desktop) renameSelected() {
 }
 
 func (d *desktop) createDirectory() {
-	if d.busy || d.term == nil {
+	if d.busy || d.fileSessionUnavailable() {
 		return
 	}
 	name, shell, dir, sessionID := d.fileNewDirectory, d.shell, d.fileDir, d.currentSession
@@ -460,7 +460,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		d.files = nil
 	})
 	ui.Row(c).Gap(8).Children(func() {
-		if ui.Button(c.Key("file-parent"), "上一级").Disabled(d.busy || d.term == nil).Clicked() {
+		if ui.Button(c.Key("file-parent"), "上一级").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			if local {
 				d.fileDir = filepath.Dir(d.fileDir)
 			} else {
@@ -470,10 +470,10 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			d.files = nil
 			d.refreshFiles()
 		}
-		if ui.Button(c.Key("file-terminal-dir"), "定位终端目录").Disabled(d.busy || d.term == nil).Clicked() {
+		if ui.Button(c.Key("file-terminal-dir"), "定位终端目录").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			d.followReportedDirectory(true)
 		}
-		if ui.Button(c.Key("file-refresh"), "打开目录").Disabled(d.busy || d.term == nil).Clicked() {
+		if ui.Button(c.Key("file-refresh"), "打开目录").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			d.selectedFile, d.confirmDelete, d.fileRename = "", "", ""
 			d.refreshFiles()
 		}
@@ -482,7 +482,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if d.fileFollowTerminal {
 		label = "跟随终端目录：开"
 	}
-	if ui.Button(c.Key("file-follow-terminal"), label).Disabled(d.busy || d.term == nil).Clicked() {
+	if ui.Button(c.Key("file-follow-terminal"), label).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 		d.fileFollowTerminal = !d.fileFollowTerminal
 		d.lastTerminalDir = ""
 		if d.fileFollowTerminal {
@@ -491,6 +491,8 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	}
 	if d.term == nil {
 		ui.Text(c, "连接 SSH 或打开本机终端后可浏览文件。").TextColor(c.Theme().TextMuted).Wrap()
+	} else if terminalEnded(d.term) {
+		ui.Text(c, "当前会话已结束，文件操作不可用；请重新连接或打开终端。").TextColor(c.Theme().TextMuted).Wrap()
 	}
 	d.fileDropView(c, local)
 	if d.fileStatus != "" {
@@ -554,7 +556,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 					label = "📁 " + label
 				}
 				ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-					row := ui.Button(c.Key("file-"+f.Name), label).Grow(1).Disabled(d.busy)
+					row := ui.Button(c.Key("file-"+f.Name), label).Grow(1).Disabled(d.busy || d.fileSessionUnavailable())
 					row.ContextMenu(func(menu *ui.Menu) {
 						if menu.Item("选择").Chosen() {
 							d.selectedFile, d.fileRename = f.Name, f.Name
@@ -612,13 +614,13 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	d.fileActionsView(c, local, compact)
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
 		ui.TextInput(c.Key("new-directory-name"), &d.fileNewDirectory).Label("新目录名称").Placeholder("输入目录名称").Grow(1)
-		if ui.Button(c.Key("new-directory-create"), "创建目录").Disabled(d.busy || d.term == nil || d.fileNewDirectory == "").Clicked() {
+		if ui.Button(c.Key("new-directory-create"), "创建目录").Disabled(d.busy || d.fileSessionUnavailable() || d.fileNewDirectory == "").Clicked() {
 			d.createDirectory()
 		}
 	})
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
 		ui.TextInput(c.Key("rename-name"), &d.fileRename).Label("新名称").Placeholder("输入选中文件的新名称").Grow(1)
-		if ui.Button(c.Key("rename-selected"), "重命名").Disabled(d.busy || d.term == nil || d.selectedFile == "" || d.fileRename == "").Clicked() {
+		if ui.Button(c.Key("rename-selected"), "重命名").Disabled(d.busy || d.fileSessionUnavailable() || d.selectedFile == "" || d.fileRename == "").Clicked() {
 			d.renameSelected()
 		}
 	})
@@ -635,7 +637,7 @@ func (d *desktop) fileDropView(c *ui.Context, local bool) {
 	drop := ui.Box(c.Key("file-drop")).Height(48).Border(1, c.Theme().Border).Padding(8).Label(dropLabel)
 	drop.Children(func() { ui.Text(c, dropLabel).FontSize(12) })
 	if files := drop.DroppedFiles(); len(files) > 0 {
-		if d.busy || d.term == nil {
+		if d.busy || d.fileSessionUnavailable() {
 			d.fileStatus = "请先连接后再上传"
 		} else if len(files) != 1 {
 			d.fileStatus = "每次只能拖入一个文件"
@@ -649,10 +651,10 @@ func (d *desktop) fileDropView(c *ui.Context, local bool) {
 func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {
 	ui.TextInput(c.Key("local-file"), &d.fileLocal).Label("本地文件路径").Placeholder("本地文件完整路径")
 	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
-		if ui.Button(c.Key("pick-upload"), "选择源文件…").Disabled(d.busy || d.term == nil).Clicked() {
+		if ui.Button(c.Key("pick-upload"), "选择源文件…").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			d.pickLocalPath("upload")
 		}
-		if ui.Button(c.Key("pick-download"), "选择目标路径…").Disabled(d.busy || d.term == nil || d.selectedFile == "").Clicked() {
+		if ui.Button(c.Key("pick-download"), "选择目标路径…").Disabled(d.busy || d.fileSessionUnavailable() || d.selectedFile == "").Clicked() {
 			d.pickLocalPath("download")
 		}
 	})
@@ -670,13 +672,13 @@ func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {
 		deleteShort = "删除"
 	}
 	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
-		if ui.Button(c.Key("upload"), uploadShort).Label(uploadLabel).Disabled(d.busy || d.term == nil).Clicked() {
+		if ui.Button(c.Key("upload"), uploadShort).Label(uploadLabel).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			d.transfer(true)
 		}
-		if ui.Button(c.Key("download"), downloadShort).Label(downloadLabel).Disabled(d.busy || d.term == nil || d.selectedFile == "").Clicked() {
+		if ui.Button(c.Key("download"), downloadShort).Label(downloadLabel).Disabled(d.busy || d.fileSessionUnavailable() || d.selectedFile == "").Clicked() {
 			d.transfer(false)
 		}
-		if ui.Button(c.Key("delete"), deleteShort).Label("删除选中文件（需确认）").Disabled(d.busy || d.term == nil || d.selectedFile == "").Clicked() {
+		if ui.Button(c.Key("delete"), deleteShort).Label("删除选中文件（需确认）").Disabled(d.busy || d.fileSessionUnavailable() || d.selectedFile == "").Clicked() {
 			d.removeSelected()
 		}
 		if d.cancelTransfer != nil {

@@ -186,15 +186,7 @@ func (d *desktop) connect() {
 	d.settings.Password = ""
 	d.settings.Passphrase = ""
 	go func() {
-		shell, err := connectShell(settings)
-		var term *terminal.Terminal
-		if err == nil {
-			options.Conn = shell
-			term, err = terminal.New(options)
-			if err != nil {
-				_ = shell.Close()
-			}
-		}
+		shell, term, err := openSSHSession(settings, options)
 		d.win.Update(func() {
 			d.busy = false
 			if err != nil {
@@ -373,7 +365,7 @@ func (d *desktop) view(c *ui.Context) {
 						for _, session := range d.sessions {
 							s := session
 							ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
-								if workspaceButton(c, fmt.Sprintf("session-%d", s.id), s.label, s.id == d.currentSession).Disabled(!d.canSwitchSession()).Clicked() {
+								if workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), s.id == d.currentSession).Disabled(!d.canSwitchSession()).Clicked() {
 									d.activateSession(s.id)
 								}
 								if ui.Button(c.Key(fmt.Sprintf("session-close-%d", s.id)), "×").Label("关闭会话：" + s.label).Disabled(d.busy).Clicked() {
@@ -387,7 +379,15 @@ func (d *desktop) view(c *ui.Context) {
 					}
 					ui.Row(c).FillWidth().Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 						ui.Text(c, "终端").FontSize(17).Bold().Grow(1)
-						ui.Text(c, d.status).FontSize(12).TextColor(t.TextMuted)
+						status := d.status
+						if terminalEnded(d.term) && !d.busy {
+							if d.shell != nil {
+								status = "SSH 已断开"
+							} else {
+								status = "本机终端已退出"
+							}
+						}
+						ui.Text(c, status).FontSize(12).TextColor(t.TextMuted)
 						splitLabel := "分屏查看"
 						if d.splitSession != 0 {
 							splitLabel = "关闭分屏"
@@ -410,6 +410,18 @@ func (d *desktop) view(c *ui.Context) {
 					if d.term == nil {
 						ui.Text(c, "选择连接，或打开本机终端").FontSize(18).TextColor(t.TextMuted)
 					} else {
+						if terminalEnded(d.term) {
+							ui.Row(c).FillWidth().Padding(8, 12).Gap(10).Wrap().Children(func() {
+								message := "本机终端已退出；输出仍可查看。"
+								if d.shell != nil {
+									message = "SSH 会话已断开；文件操作已暂停。"
+								}
+								ui.Text(c, message).Grow(1).Wrap()
+								if d.shell != nil && ui.Button(c.Key("session-reconnect"), "重新连接").Disabled(d.busy).Clicked() {
+									d.reconnectCurrentSession()
+								}
+							})
+						}
 						if d.showFilePanel && width < 940 {
 							ui.Column(c).Grow(1).FillWidth().Children(func() {
 								ui.Column(c).Grow(1).FillWidth().Children(func() { d.terminalWorkspace(c, width) })
@@ -510,7 +522,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.13"
+const version = "0.3.14"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
