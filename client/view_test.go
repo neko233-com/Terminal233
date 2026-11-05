@@ -242,3 +242,38 @@ func TestDroppedFilesWithoutConnectionGivesFeedback(t *testing.T) {
 		t.Fatalf("unexpected feedback: %q", d.fileStatus)
 	}
 }
+
+func TestFileListFiltersNamesAndDisplaysMetadata(t *testing.T) {
+	d := &desktop{workspace: "files", files: []remoteFile{{Name: "report.txt", Size: 2048, Modified: 1700000000}, {Name: "archive", IsDir: true}}}
+	test := ui.NewTester(d.view, 1200, 1400)
+	if !test.HasText("report.txt") || !test.HasText("2.0 KiB") || !test.HasText("📁 archive") {
+		t.Fatalf("file details missing: %v", test.Texts())
+	}
+	d.fileFilter = "REPORT"
+	test.Frame()
+	if !test.HasText("report.txt") || test.HasText("📁 archive") {
+		t.Fatalf("file filter failed: %v", test.Texts())
+	}
+	d.fileFilter = "missing"
+	test.Frame()
+	if !test.HasText("没有匹配的文件") {
+		t.Fatal("missing empty search state")
+	}
+}
+
+func TestFileFilterFollowsActiveSession(t *testing.T) {
+	d := &desktop{currentSession: 1, fileFilter: "alpha", sessions: []*workspaceSession{{id: 1}, {id: 2, fileFilter: "beta"}}}
+	d.activateSession(2)
+	if d.fileFilter != "beta" {
+		t.Fatal("second session filter was not restored")
+	}
+	d.fileFilter = "changed"
+	d.activateSession(1)
+	if d.fileFilter != "alpha" {
+		t.Fatal("first session filter was not restored")
+	}
+	d.activateSession(2)
+	if d.fileFilter != "changed" {
+		t.Fatal("second session filter was not retained")
+	}
+}

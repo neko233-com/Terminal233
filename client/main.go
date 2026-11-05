@@ -47,6 +47,7 @@ type desktop struct {
 	nextProfileID                                                                           int
 	shell                                                                                   *remoteShell
 	fileDir, fileLocal, fileStatus, selectedFile, confirmDelete                             string
+	fileFilter                                                                              string
 	files                                                                                   []remoteFile
 	expectedFingerprint                                                                     string
 	win                                                                                     *mygo.Window

@@ -171,7 +171,7 @@ func TestSFTPTransferAndExplicitDelete(t *testing.T) {
 		t.Fatal("upload overwrote existing file")
 	}
 	files, err := listRemote(shell, remoteDir)
-	if err != nil || len(files) != 1 || files[0].Name != "source.txt" {
+	if err != nil || len(files) != 1 || files[0].Name != "source.txt" || files[0].Size != 5 || files[0].Modified <= 0 {
 		t.Fatalf("files=%v err=%v", files, err)
 	}
 	target := filepath.Join(root, "download.txt")

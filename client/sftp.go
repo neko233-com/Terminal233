@@ -16,8 +16,11 @@ import (
 const maxTransferBytes = 16 << 20
 
 type remoteFile struct {
-	Name  string
-	IsDir bool
+	Name     string
+	IsDir    bool
+	IsLink   bool
+	Size     int64
+	Modified int64
 }
 
 func withSFTP(shell *remoteShell, f func(*sftp.Client) error) error {
@@ -43,7 +46,7 @@ func listRemote(shell *remoteShell, dir string) ([]remoteFile, error) {
 		}
 		for _, f := range files {
 			if f.Name() != "." && f.Name() != ".." && !strings.Contains(f.Name(), "/") {
-				result = append(result, remoteFile{Name: f.Name(), IsDir: f.IsDir()})
+				result = append(result, remoteFile{Name: f.Name(), IsDir: f.IsDir(), IsLink: f.Mode()&os.ModeSymlink != 0, Size: f.Size(), Modified: f.ModTime().Unix()})
 			}
 		}
 		sort.Slice(result, func(i, j int) bool {

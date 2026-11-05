@@ -4,7 +4,33 @@ import (
 	"fmt"
 	"github.com/egoist/mygo/ui"
 	"path"
+	"strings"
+	"time"
 )
+
+func fileSizeLabel(f remoteFile) string {
+	if f.IsDir || f.IsLink || f.Size < 0 {
+		return "—"
+	}
+	if f.Size < 1024 {
+		return fmt.Sprintf("%d B", f.Size)
+	}
+	size := float64(f.Size)
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"}
+	i := 0
+	for size >= 1024 && i < len(units)-1 {
+		size /= 1024
+		i++
+	}
+	return fmt.Sprintf("%.1f %s", size, units[i])
+}
+
+func fileModifiedLabel(f remoteFile) string {
+	if f.Modified <= 0 {
+		return "—"
+	}
+	return time.Unix(f.Modified, 0).Local().Format("2006-01-02 15:04")
+}
 
 func (d *desktop) refreshFiles() {
 	if d.busy || d.shell == nil {
@@ -129,36 +155,65 @@ func (d *desktop) fileView(c *ui.Context) {
 	if d.shell == nil {
 		ui.Text(c, "连接 SSH 后可浏览远程文件。").TextColor(c.Theme().TextMuted).Wrap()
 	}
+	ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录")
+	if len(d.files) > 0 {
+		ui.Row(c).FillWidth().Gap(12).Padding(8, 12).Background(c.Theme().Surface).Children(func() {
+			ui.Text(c, "名称").Grow(1).TextColor(c.Theme().TextMuted)
+			ui.Text(c, "类型").Width(60).TextColor(c.Theme().TextMuted)
+			ui.Text(c, "大小").Width(90).TextColor(c.Theme().TextMuted)
+			ui.Text(c, "修改时间").Width(150).TextColor(c.Theme().TextMuted)
+		})
+	}
+	query := strings.ToLower(strings.TrimSpace(d.fileFilter))
+	shown := 0
 	for _, entry := range d.files {
 		f := entry
+		if query != "" && !strings.Contains(strings.ToLower(f.Name), query) {
+			continue
+		}
+		shown++
 		label := f.Name
 		if f.IsDir {
 			label = "📁 " + label
 		}
-		row := ui.Button(c.Key("file-"+f.Name), label).Disabled(d.busy)
-		row.ContextMenu(func(menu *ui.Menu) {
-			if menu.Item("选择").Chosen() {
-				d.selectedFile = f.Name
+		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+			row := ui.Button(c.Key("file-"+f.Name), label).Grow(1).Disabled(d.busy)
+			row.ContextMenu(func(menu *ui.Menu) {
+				if menu.Item("选择").Chosen() {
+					d.selectedFile = f.Name
+					d.confirmDelete = ""
+					d.fileStatus = "已选择：" + f.Name
+				}
+				if menu.Item("删除…").Chosen() {
+					d.selectedFile = f.Name
+					d.confirmDelete = ""
+					d.removeSelected()
+				}
+			})
+			if row.Clicked() {
 				d.confirmDelete = ""
-				d.fileStatus = "已选择：" + f.Name
+				if f.IsDir {
+					d.fileDir = path.Join(d.fileDir, f.Name)
+					d.selectedFile = ""
+					d.refreshFiles()
+				} else {
+					d.selectedFile = f.Name
+					d.fileStatus = "已选择：" + f.Name
+				}
 			}
-			if menu.Item("删除…").Chosen() {
-				d.selectedFile = f.Name
-				d.confirmDelete = ""
-				d.removeSelected()
-			}
-		})
-		if row.Clicked() {
-			d.confirmDelete = ""
+			kind := "文件"
 			if f.IsDir {
-				d.fileDir = path.Join(d.fileDir, f.Name)
-				d.selectedFile = ""
-				d.refreshFiles()
-			} else {
-				d.selectedFile = f.Name
-				d.fileStatus = "已选择：" + f.Name
+				kind = "目录"
+			} else if f.IsLink {
+				kind = "链接"
 			}
-		}
+			ui.Text(c, kind).Width(60).TextColor(c.Theme().TextMuted)
+			ui.Text(c, fileSizeLabel(f)).Width(90).TextColor(c.Theme().TextMuted)
+			ui.Text(c, fileModifiedLabel(f)).Width(150).TextColor(c.Theme().TextMuted)
+		})
+	}
+	if len(d.files) > 0 && shown == 0 {
+		ui.Text(c, "没有匹配的文件").TextColor(c.Theme().TextMuted)
 	}
 	drop := ui.Box(c.Key("file-drop")).Height(48).Border(1, c.Theme().Border).Padding(8).Label("拖入一个文件上传")
 	drop.Children(func() { ui.Text(c, "拖入一个文件上传").FontSize(12) })

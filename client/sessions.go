@@ -17,6 +17,7 @@ type workspaceSession struct {
 	shell                                        *remoteShell
 	active                                       connectionSettings
 	fileDir, fileLocal, fileStatus, selectedFile string
+	fileFilter                                   string
 	files                                        []remoteFile
 }
 
@@ -26,6 +27,7 @@ func (d *desktop) saveSessionState() {
 			continue
 		}
 		s.fileDir, s.fileLocal, s.fileStatus, s.selectedFile = d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile
+		s.fileFilter = d.fileFilter
 		s.files = d.files
 		return
 	}
@@ -43,6 +45,7 @@ func (d *desktop) activateSession(id int) {
 		d.currentSession = id
 		d.term, d.shell, d.active = s.term, s.shell, s.active
 		d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile = s.fileDir, s.fileLocal, s.fileStatus, s.selectedFile
+		d.fileFilter = s.fileFilter
 		d.files, d.confirmDelete = s.files, ""
 		d.workspace = "terminal"
 		d.status = "当前会话：" + s.label
@@ -75,6 +78,7 @@ func (d *desktop) closeCurrentSession() {
 		d.currentSession = 0
 		d.term, d.shell, d.active = nil, nil, connectionSettings{}
 		d.files, d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile, d.confirmDelete = nil, "", "", "", "", ""
+		d.fileFilter = ""
 		if len(d.sessions) == 0 {
 			d.workspace, d.status = "connections", "已断开"
 			return
