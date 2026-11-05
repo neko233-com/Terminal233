@@ -16,12 +16,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestDesktopCloudArchive(t *testing.T) {
+func TestDesktopCloudWorkflows(t *testing.T) {
 	temp := t.TempDir()
 	serverBinary := filepath.Join(temp, "sync-server.exe")
 	buildServer := exec.Command("go", "-C", "../server", "build", "-p", "1", "-o", serverBinary, "./cmd/server")
@@ -133,6 +134,16 @@ func TestDesktopCloudArchive(t *testing.T) {
 		}
 		t.Fatalf("native window did not show %q", needle)
 	}
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("windows")), "kind:content") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("windows")), "kind:content") {
+		t.Fatal("native cloud test window did not open")
+	}
 	waitText("nav-cloud")
 	call("act", map[string]any{"key": "nav-cloud", "action": "press"})
 	waitText("cloudurl")
@@ -170,5 +181,102 @@ func TestDesktopCloudArchive(t *testing.T) {
 	waitText("已追加导入 1 条连接")
 	if accounts, err := client.list(); err != nil || len(accounts) != 2 || accounts[0].ID == accounts[1].ID {
 		t.Fatal("native import did not append a separate connection")
+	}
+	// Exercise the team controls against the same isolated Go service.
+	call("act", map[string]any{"key": "toggle-archive", "action": "press"})
+	call("act", map[string]any{"key": "toggle-teams", "action": "press"})
+	waitText("team-name")
+	call("act", map[string]any{"key": "team-name", "action": "setValue", "text": "桌面测试团队"})
+	call("act", map[string]any{"key": "team-create", "action": "press"})
+	waitText("团队操作已完成")
+	teams, err := client.teams()
+	if err != nil || len(teams) != 1 {
+		t.Fatal("native team creation did not reach the test service")
+	}
+	teamID := teams[0].ID
+	call("act", map[string]any{"key": "team-" + teamID, "action": "press"})
+	waitText("当前团队角色：所有者")
+	call("act", map[string]any{"key": "team-invite-password", "action": "setValue", "text": "test-invite-password"})
+	call("act", map[string]any{"key": "team-invite", "action": "press"})
+	waitText("邀请已创建")
+	invitePattern := regexp.MustCompile(regexp.QuoteMeta(proxy.URL) + `/#join=([a-f0-9]{48})`)
+	inviteMatch := invitePattern.FindStringSubmatch(fmt.Sprint(call("tree")))
+	if len(inviteMatch) != 2 {
+		t.Fatal("native invitation did not use the selected service address")
+	}
+	bob, err := newCloudClient(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob.http.Transport = proxy.Client().Transport
+	if err := bob.registerWithInvite("test-member", "test-member-password", inviteMatch[1], "test-invite-password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := bob.login("test-member", "test-member-password"); err != nil {
+		t.Fatal(err)
+	}
+	client.teamID, bob.teamID = teamID, teamID
+	teamAccount := account
+	teamAccount.Label = "团队独立连接"
+	if err := client.save(teamAccount); err != nil {
+		t.Fatal(err)
+	}
+	call("act", map[string]any{"key": "team-" + teamID, "action": "press"})
+	waitText("test-member（普通成员）")
+	call("act", map[string]any{"key": "member-test-member", "action": "press"})
+	waitText("test-member（普通成员） · 已选择")
+	call("act", map[string]any{"key": "member-admin", "action": "press"})
+	waitText("test-member（管理员） · 已选择")
+	if err := bob.save(cloudAccount{Label: "管理员连接", Host: "admin.example.test", Port: 22, Username: "admin", Password: "test-password", HostKeyFingerprint: "SHA256:test"}); err != nil {
+		t.Fatal("promoted team administrator could not add a connection")
+	}
+	call("act", map[string]any{"key": "member-demote", "action": "press"})
+	waitText("test-member（普通成员） · 已选择")
+	if err := bob.save(teamAccount); err == nil {
+		t.Fatal("demoted team member retained write access")
+	}
+	secondTeam, err := client.createTeam("另一个测试团队")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.teamID = secondTeam.ID
+	otherAccount := account
+	otherAccount.Label, otherAccount.Password = "另一团队连接", "other-team-password"
+	if err := client.save(otherAccount); err != nil {
+		t.Fatal(err)
+	}
+	secondInvite, err := client.createInvite("test-second-invite", 3600, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bob.joinTeam(extractInviteToken(secondInvite), "test-second-invite"); err != nil {
+		t.Fatal(err)
+	}
+	call("act", map[string]any{"key": "team-refresh", "action": "press"})
+	waitText("team-" + secondTeam.ID)
+	call("act", map[string]any{"key": "team-" + secondTeam.ID, "action": "press"})
+	waitText("当前同步空间：另一个测试团队")
+	waitText("另一团队连接")
+	call("act", map[string]any{"key": "team-" + teamID, "action": "press"})
+	waitText("当前同步空间：桌面测试团队")
+	waitText("团队独立连接")
+	call("act", map[string]any{"key": "member-test-member", "action": "press"})
+	waitText("test-member（普通成员） · 已选择")
+	call("act", map[string]any{"key": "member-remove", "action": "press"})
+	waitText("确认移除成员")
+	call("act", map[string]any{"key": "member-remove", "action": "press"})
+	waitText("成员已移除")
+	if _, err := bob.list(); err == nil {
+		t.Fatal("removed member retained team access")
+	}
+	bob.teamID = secondTeam.ID
+	if accounts, err := bob.list(); err != nil || len(accounts) != 1 || accounts[0].Password != "other-team-password" {
+		t.Fatal("removal from one team changed membership in the other")
+	}
+	call("act", map[string]any{"key": "team-personal", "action": "press"})
+	waitText("当前同步空间：个人空间")
+	client.teamID = ""
+	if personal, err := client.list(); err != nil || len(personal) != 2 {
+		t.Fatal("team operations modified personal-space connections")
 	}
 }
