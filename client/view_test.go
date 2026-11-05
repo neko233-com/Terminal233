@@ -88,11 +88,37 @@ func TestConnectionGroupNavigation(t *testing.T) {
 	if !test.HasText("工作 / alice@one.test") || test.HasText("个人 / alice@two.test") {
 		t.Fatalf("group filter failed: %v", test.Texts())
 	}
-	if err := test.Click("全部连接  2"); err != nil {
+	if err := test.Click("全部连接  3"); err != nil {
 		t.Fatal(err)
 	}
 	if !test.HasText("个人 / alice@two.test") {
 		t.Fatal("all-connections navigation failed")
+	}
+}
+
+func TestBuiltinLocalTerminalIsDiscoverableAndFiltered(t *testing.T) {
+	d := &desktop{}
+	view := ui.NewTester(d.view, 1200, 900)
+	if !view.HasText("内置本机连接") || !view.HasText("打开本机终端") {
+		t.Fatal("built-in local terminal missing from the connection list")
+	}
+	if !view.HasText("全部连接  1") {
+		t.Fatal("built-in terminal is not counted in all connections")
+	}
+	d.profileSearch = "powershell"
+	view.Frame()
+	if !view.HasText("内置本机连接") {
+		t.Fatal("local terminal was not found by search")
+	}
+	d.profileSearch = "remote-only"
+	view.Frame()
+	if view.HasText("内置本机连接") {
+		t.Fatal("local terminal did not follow search")
+	}
+	d.profileSearch, d.profileFavorites = "", true
+	view.Frame()
+	if view.HasText("内置本机连接") {
+		t.Fatal("built-in item appeared in the favorites filter")
 	}
 }
 
@@ -118,7 +144,7 @@ func TestFavoritesAndCustomNameSearch(t *testing.T) {
 	if !test.HasText("生产服务器") || test.HasText("另一台") {
 		t.Fatalf("favorite filter failed: %v", test.Texts())
 	}
-	if err := test.Click("全部连接  2"); err != nil {
+	if err := test.Click("全部连接  3"); err != nil {
 		t.Fatal(err)
 	}
 	d.profileSearch = "two.test"

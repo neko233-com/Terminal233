@@ -171,6 +171,15 @@ func (d *desktop) profileView(c *ui.Context) {
 		}
 	})
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
+	showLocal := d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
+		(query == "" || strings.Contains("本机终端 local terminal powershell", query))
+	if showLocal {
+		ui.Column(c).FillWidth().Padding(16).Gap(6).Background(c.Theme().Surface).Radius(8).Children(func() {
+			ui.Text(c, "本机终端").FontSize(16).Bold()
+			ui.Text(c, "内置本机连接，通过 PowerShell 直接使用这台电脑。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+			ui.Button(c.Key("profile-local-terminal"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
+		})
+	}
 	if len(d.profiles) == 0 {
 		ui.Column(c).FillWidth().Padding(28).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
 			ui.Text(c, "还没有 SSH 连接").FontSize(18).Bold()
@@ -314,7 +323,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		}
 	}
-	if len(d.profiles) > 0 && shown == 0 {
+	if len(d.profiles) > 0 && shown == 0 && !showLocal {
 		ui.Text(c, "没有匹配的连接").TextColor(c.Theme().TextMuted)
 	}
 	if moveFrom != "" {

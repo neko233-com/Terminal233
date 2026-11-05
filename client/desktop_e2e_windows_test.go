@@ -151,7 +151,8 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !deadline.IsZero() {
 		t.Fatal("initial file refresh did not finish")
 	}
-	call("act", map[string]any{"key": "local-terminal", "action": "press"})
+	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	call("act", map[string]any{"key": "profile-local-terminal", "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
