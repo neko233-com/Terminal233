@@ -77,6 +77,38 @@ func TestConnectionGroupNavigation(t *testing.T) {
 	}
 }
 
+func TestFavoritesAndCustomNameSearch(t *testing.T) {
+	d := &desktop{settings: connectionSettings{Host: "one.test", Port: "22", User: "alice"}, profileLabel: "生产服务器"}
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	d.selectedProfile, d.profileLabel, d.settings.Host = "", "另一台", "two.test"
+	if err := d.addProfile(); err != nil {
+		t.Fatal(err)
+	}
+	test := ui.NewTester(d.view, 1200, 1200)
+	if err := test.Click("加入收藏：生产服务器"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.profiles[0].Favorite {
+		t.Fatal("favorite was not set")
+	}
+	if err := test.Click("收藏的连接  1"); err != nil {
+		t.Fatal(err)
+	}
+	if !test.HasText("生产服务器") || test.HasText("另一台") {
+		t.Fatalf("favorite filter failed: %v", test.Texts())
+	}
+	if err := test.Click("全部连接  2"); err != nil {
+		t.Fatal(err)
+	}
+	d.profileSearch = "two.test"
+	test.Frame()
+	if !test.HasText("另一台") || test.HasText("生产服务器") {
+		t.Fatalf("host search failed: %v", test.Texts())
+	}
+}
+
 func TestThemeSwitchKeepsWorkspaceUsable(t *testing.T) {
 	d := &desktop{}
 	test := ui.NewTester(d.view, 1200, 900)

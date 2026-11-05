@@ -10,6 +10,7 @@ type profileID string
 type profile struct {
 	ID           profileID
 	Group, Label string
+	Favorite     bool
 	Settings     connectionSettings
 }
 
@@ -20,6 +21,10 @@ func (d *desktop) addProfile() error {
 	safe := d.settings
 	safe.Password = ""
 	safe.Passphrase = ""
+	label := strings.TrimSpace(d.profileLabel)
+	if label == "" {
+		label = safe.User + "@" + safe.Host
+	}
 	// Inspection alone does not mean the user trusted a host key. Retain
 	// a verified key only for the same endpoint or a completed session.
 	safe.Fingerprint = ""
@@ -33,12 +38,12 @@ func (d *desktop) addProfile() error {
 		if safe.Fingerprint == "" && old.Settings.Host == safe.Host && old.Settings.Port == safe.Port && old.Settings.User == safe.User {
 			safe.Fingerprint = old.Settings.Fingerprint
 		}
-		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: safe.User + "@" + safe.Host, Settings: safe}
+		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: label, Favorite: old.Favorite, Settings: safe}
 		return nil
 	}
 	d.nextProfileID++
 	id := profileID(fmt.Sprint(d.nextProfileID))
-	d.profiles = append(d.profiles, profile{ID: id, Group: strings.TrimSpace(d.profileGroup), Label: safe.User + "@" + safe.Host, Settings: safe})
+	d.profiles = append(d.profiles, profile{ID: id, Group: strings.TrimSpace(d.profileGroup), Label: label, Settings: safe})
 	d.selectedProfile = string(id)
 	return nil
 }
@@ -68,6 +73,7 @@ func (d *desktop) loadProfile(p profile) {
 	d.editConnection = true
 	d.settings = p.Settings
 	d.profileGroup = p.Group
+	d.profileLabel = p.Label
 	d.expectedFingerprint = p.Settings.Fingerprint
 	d.fingerprint = ""
 	d.selectedProfile = string(p.ID)
@@ -76,13 +82,16 @@ func (d *desktop) loadProfile(p profile) {
 func (d *desktop) profileView(c *ui.Context) {
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 		title := "连接列表"
-		if d.profileFilter != "" {
+		if d.profileFavorites {
+			title = "收藏的连接"
+		} else if d.profileFilter != "" {
 			title = "分组 / " + d.profileFilter
 		}
 		ui.Text(c, title).FontSize(22).Bold().Grow(1)
 		if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Clicked() {
 			d.settings = connectionSettings{Port: "22"}
 			d.profileGroup = ""
+			d.profileLabel = ""
 			d.fingerprint = ""
 			d.expectedFingerprint = ""
 			d.selectedProfile = ""
@@ -119,10 +128,13 @@ func (d *desktop) profileView(c *ui.Context) {
 	shown := 0
 	for _, item := range d.profiles {
 		p := item
+		if d.profileFavorites && !p.Favorite {
+			continue
+		}
 		if d.profileFilter != "" && d.profileFilter != p.Group {
 			continue
 		}
-		if query != "" && !strings.Contains(strings.ToLower(p.Label+" "+p.Group), query) {
+		if query != "" && !strings.Contains(strings.ToLower(p.Label+" "+p.Group+" "+p.Settings.Host+" "+p.Settings.User), query) {
 			continue
 		}
 		shown++
@@ -131,6 +143,25 @@ func (d *desktop) profileView(c *ui.Context) {
 			label = p.Group + " / " + label
 		}
 		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+			favoriteLabel := "☆"
+			favoriteAction := "加入收藏"
+			if p.Favorite {
+				favoriteLabel = "★"
+				favoriteAction = "取消收藏"
+			}
+			if ui.Button(c.Key("profile-favorite-"+string(p.ID)), favoriteLabel).Label(favoriteAction + "：" + p.Label).Width(36).Clicked() {
+				for i := range d.profiles {
+					if d.profiles[i].ID == p.ID {
+						d.profiles[i].Favorite = !d.profiles[i].Favorite
+						break
+					}
+				}
+				if err := d.saveProfiles(); err != nil {
+					d.status = "收藏状态已修改，但本机保存失败：" + err.Error()
+				} else {
+					d.status = "收藏状态已更新"
+				}
+			}
 			row := ui.Button(c.Key("profile-"+string(p.ID)), label).Grow(1).Drag(p.ID)
 			row.ContextMenu(func(menu *ui.Menu) {
 				if menu.Item("载入").Chosen() {

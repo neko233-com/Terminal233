@@ -33,7 +33,9 @@ type desktop struct {
 	confirmCloudDelete                                                                      string
 	profiles                                                                                []profile
 	profileSearch, profileGroup, selectedProfile                                            string
+	profileLabel                                                                            string
 	profileFilter                                                                           string
+	profileFavorites                                                                        bool
 	profilePath                                                                             string
 	profileStoreBlocked                                                                     bool
 	nextProfileID                                                                           int
@@ -199,10 +201,15 @@ func (d *desktop) view(c *ui.Context) {
 						d.workspace = "connections"
 						d.editConnection = false
 						d.profileFilter = ""
+						d.profileFavorites = false
 					}
 					counts := make(map[string]int)
 					var groups []string
+					favorites := 0
 					for _, p := range d.profiles {
+						if p.Favorite {
+							favorites++
+						}
 						if p.Group != "" {
 							if counts[p.Group] == 0 {
 								groups = append(groups, p.Group)
@@ -210,12 +217,19 @@ func (d *desktop) view(c *ui.Context) {
 							counts[p.Group]++
 						}
 					}
+					if ui.Button(c.Key("group-favorites"), fmt.Sprintf("收藏的连接  %d", favorites)).Clicked() {
+						d.workspace = "connections"
+						d.editConnection = false
+						d.profileFilter = ""
+						d.profileFavorites = true
+					}
 					for _, group := range groups {
 						name := group
 						if ui.Button(c.Key("group-entry-"+name), fmt.Sprintf("%s  %d", name, counts[name])).Clicked() {
 							d.workspace = "connections"
 							d.editConnection = false
 							d.profileFilter = name
+							d.profileFavorites = false
 						}
 					}
 					ui.Text(c, "本机连接不保存密码或私钥口令").FontSize(12).TextColor(t.TextMuted).Wrap()
@@ -271,6 +285,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	if ui.Button(c.Key("connection-back"), "返回连接列表").Clicked() {
 		d.editConnection = false
 	}
+	ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("连接名称（可选）")
 	ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
 	ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
 	ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(func() { d.fingerprint = ""; d.expectedFingerprint = "" })
