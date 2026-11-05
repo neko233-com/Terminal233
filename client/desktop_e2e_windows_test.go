@@ -347,14 +347,38 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
+	sshTabReady := false
 	for time.Now().Before(deadline) {
-		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "session-1") {
+		result := call("tree")["result"].(map[string]any)
+		ready := false
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "session-1" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				ready = true
+				break
+			}
+		}
+		if ready {
+			sshTabReady = true
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	if !sshTabReady {
+		t.Fatal("SSH tab stayed unavailable after cancelling the transfer")
+	}
 	call("act", map[string]any{"key": "session-1", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "当前会话：alice@") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "当前会话：alice@") {
+		t.Fatal("could not return to the SSH tab after cancelling the transfer")
+	}
 	call("act", map[string]any{"key": "nav-files", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

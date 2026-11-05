@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/egoist/mygo/ui"
+	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 func fileSizeLabel(f remoteFile) string {
@@ -84,7 +87,41 @@ func (d *desktop) transferProgress(sessionID int, shell *remoteShell, dir string
 	}
 }
 
-func (d *desktop) finishTransfer(sessionID int, shell *remoteShell, dir string, upload bool, err error) {
+func transferErrorText(err error) string {
+	// Only translate a direct filesystem error. Wrapped errors can describe a
+	// failed cleanup and must retain that important context.
+	if pathErr, ok := err.(*os.PathError); ok {
+		switch {
+		case errors.Is(pathErr, os.ErrExist):
+			return "目标文件已存在，不会覆盖"
+		case errors.Is(pathErr, os.ErrNotExist):
+			return "文件或目标目录不存在"
+		case errors.Is(pathErr, os.ErrPermission):
+			return "没有权限访问文件或目标目录"
+		}
+	}
+	return err.Error()
+}
+
+func transferUpdatesDirectory(shell *remoteShell, dir, local string, upload bool) bool {
+	if upload {
+		return true
+	}
+	if shell != nil || local == "" {
+		return false
+	}
+	directory, e1 := filepath.Abs(dir)
+	target, e2 := filepath.Abs(filepath.Dir(local))
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(directory, target)
+	}
+	return directory == target
+}
+
+func (d *desktop) finishTransfer(sessionID int, shell *remoteShell, dir string, refresh bool, err error) {
 	d.busy = false
 	d.cancelTransfer = nil
 	d.transferSessionID = 0
@@ -92,7 +129,7 @@ func (d *desktop) finishTransfer(sessionID int, shell *remoteShell, dir string, 
 	if errors.Is(err, context.Canceled) {
 		status = "传输已取消；未完成的目标文件已清理"
 	} else if err != nil {
-		status = "传输失败：" + err.Error()
+		status = "传输失败：" + transferErrorText(err)
 	}
 	if sessionID == d.currentSession && shell == d.shell {
 		if dir != d.fileDir {
@@ -100,7 +137,7 @@ func (d *desktop) finishTransfer(sessionID int, shell *remoteShell, dir string, 
 			return
 		}
 		d.fileStatus = status
-		if upload && err == nil && d.win != nil {
+		if refresh && err == nil && d.win != nil {
 			d.refreshFiles()
 		}
 		return
@@ -113,7 +150,7 @@ func (d *desktop) finishTransfer(sessionID int, shell *remoteShell, dir string, 
 			session.fileStatus = "先前目录的" + status + "；当前目录未更改"
 		} else {
 			session.fileStatus = status
-			if upload && err == nil {
+			if refresh && err == nil {
 				session.files = nil
 				session.refreshPending = true
 			}
@@ -127,6 +164,7 @@ func (d *desktop) transfer(upload bool) {
 		return
 	}
 	shell, dir, local, selected, sessionID := d.shell, d.fileDir, d.fileLocal, d.selectedFile, d.currentSession
+	refresh := transferUpdatesDirectory(shell, dir, local, upload)
 	if !upload && selected == "" {
 		return
 	}
@@ -163,7 +201,7 @@ func (d *desktop) transfer(upload bool) {
 			err = downloadFileContext(ctx, shell, path.Join(dir, selected), local, progress)
 		}
 		d.win.Update(func() {
-			d.finishTransfer(sessionID, shell, dir, upload, err)
+			d.finishTransfer(sessionID, shell, dir, refresh, err)
 		})
 	}()
 }

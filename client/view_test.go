@@ -2,10 +2,33 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/egoist/mygo/ui"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestTransferErrorsAndLocalRefresh(t *testing.T) {
+	exists := &os.PathError{Op: "open", Path: "existing", Err: os.ErrExist}
+	if got := transferErrorText(exists); got != "目标文件已存在，不会覆盖" {
+		t.Fatalf("unexpected existing-file message: %s", got)
+	}
+	cleanup := fmt.Errorf("清理目标文件失败：%w", &os.PathError{Op: "remove", Path: "target", Err: os.ErrPermission})
+	if got := transferErrorText(cleanup); !strings.Contains(got, "清理目标文件失败") {
+		t.Fatal("cleanup failure context was lost")
+	}
+	dir := t.TempDir()
+	if !transferUpdatesDirectory(nil, dir, filepath.Join(dir, "copy"), false) || transferUpdatesDirectory(nil, dir, filepath.Join(dir, "other", "copy"), false) || transferUpdatesDirectory(&remoteShell{}, dir, filepath.Join(dir, "copy"), false) || !transferUpdatesDirectory(&remoteShell{}, dir, "source", true) {
+		t.Fatal("file view refresh did not match the changed directory")
+	}
+	d := &desktop{busy: true, currentSession: 2, sessions: []*workspaceSession{{id: 1, fileDir: dir, files: []remoteFile{{Name: "old"}}}, {id: 2}}}
+	d.finishTransfer(1, nil, dir, true, nil)
+	if !d.sessions[0].refreshPending || d.sessions[0].files != nil {
+		t.Fatal("background copy did not mark its source session for refresh")
+	}
+}
 
 func TestTransferCancellationIsAvailableWhileBusy(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
