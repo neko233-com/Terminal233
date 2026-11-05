@@ -81,6 +81,30 @@ func (d *desktop) loadProfile(p profile) {
 	d.selectedProfile = string(p.ID)
 	d.status = "已载入连接，请输入密码并核对指纹。"
 }
+
+// Only a locally saved fingerprint from this exact endpoint may be reused.
+// The SSH handshake still compares the server key before sending credentials.
+func (d *desktop) trustedProfileFingerprint() string {
+	for _, p := range d.profiles {
+		if string(p.ID) == d.selectedProfile && p.Settings.Host == d.settings.Host &&
+			p.Settings.Port == d.settings.Port && p.Settings.User == d.settings.User &&
+			p.Settings.Fingerprint != "" && p.Settings.Fingerprint == d.expectedFingerprint {
+			return p.Settings.Fingerprint
+		}
+	}
+	return ""
+}
+
+func (d *desktop) connectTrustedProfile() {
+	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
+		return
+	}
+	if fingerprint := d.trustedProfileFingerprint(); fingerprint != "" {
+		d.fingerprint = fingerprint
+		d.connect()
+	}
+}
+
 func (d *desktop) profileView(c *ui.Context) {
 	width, _ := c.Size()
 	if !d.sidebarCollapsed {

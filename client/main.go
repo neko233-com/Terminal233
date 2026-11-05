@@ -402,6 +402,11 @@ func (d *desktop) connectionView(c *ui.Context) {
 		}
 	}
 	ui.Button(c.Key("inspect"), "获取主机指纹").Disabled(d.busy).OnClick(d.inspect)
+	if trusted := d.trustedProfileFingerprint(); trusted != "" {
+		ui.Text(c, "本机已信任指纹："+trusted).FontSize(12).Wrap()
+		ui.Text(c, "重连时仍会验证服务器指纹；若指纹变化，将在发送凭据前阻止连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+		ui.Button(c.Key("connect-trusted"), "使用已信任指纹连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.connectTrustedProfile)
+	}
 	if d.fingerprint != "" {
 		ui.Text(c, d.fingerprint).FontSize(12)
 	}

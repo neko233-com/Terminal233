@@ -24,7 +24,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("nekossh-test-%d.sock", os.Getpid()))
 	t.Cleanup(func() { _ = os.Remove(socket) })
 	app := exec.Command(exe)
-	app.Env = append(os.Environ(), "MYGO_AUTOMATION="+socket)
+	app.Env = append(os.Environ(), "MYGO_AUTOMATION="+socket, "APPDATA="+t.TempDir())
 	if err := app.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +102,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	for key, value := range map[string]string{"host": settings.Host, "port": settings.Port, "user": settings.User, "password": settings.Password} {
 		call("act", map[string]any{"key": key, "action": "setValue", "text": value})
 	}
+	call("act", map[string]any{"key": "profile-add", "action": "press"})
 	call("act", map[string]any{"key": "inspect", "action": "press"})
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -253,6 +254,92 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if strings.Contains(tree, "session-1") || !strings.Contains(tree, "session-2") || !strings.Contains(tree, "session-3") {
 		t.Fatalf("closing inactive SSH tab changed other sessions: %s", tree)
 	}
+	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "profile-search") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "profile-search") {
+		t.Fatalf("connection list missing after navigation: %s", tree)
+	}
+	call("act", map[string]any{"key": "profile-search", "action": "setValue", "text": settings.Host})
+	tree = fmt.Sprint(call("tree"))
+	if !strings.Contains(tree, "profile-1") {
+		t.Fatalf("saved connection missing from search: %s", tree)
+	}
+	call("act", map[string]any{"key": "profile-1", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "connect-trusted") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "connect-trusted") {
+		t.Fatalf("trusted reconnect action missing: %s", tree)
+	}
+	call("act", map[string]any{"key": "password", "action": "setValue", "text": settings.Password})
+	call("act", map[string]any{"key": "connect-trusted", "action": "press"})
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "session-4") && attempts.Load() == 2 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "session-4") || attempts.Load() != 2 {
+		t.Fatalf("trusted reconnect did not establish the SSH session: %s", tree)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "session-close-4" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				deadline = time.Time{}
+				break
+			}
+		}
+		if deadline.IsZero() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !deadline.IsZero() {
+		t.Fatal("reconnected session did not become idle")
+	}
+	// Closing the new tab returns to a local session; restore tab 2 for the
+	// active-tab close check below.
+	call("act", map[string]any{"key": "session-close-4", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if !strings.Contains(tree, "session-4") && strings.Contains(tree, "已关闭会话；当前：") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if strings.Contains(tree, "session-4") {
+		t.Fatalf("reconnected tab did not close: %s", tree)
+	}
+	call("act", map[string]any{"key": "session-2", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "当前会话：本机终端 2") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "当前会话：本机终端 2") {
+		t.Fatalf("could not restore second tab: %s", tree)
+	}
 	call("act", map[string]any{"key": "disconnect", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -275,6 +362,6 @@ func TestDesktopNativeWindow(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !strings.Contains(tree, "已断开") {
-		t.Fatal("local terminal failed to close")
+		t.Fatalf("local terminal failed to close: %s", tree)
 	}
 }
