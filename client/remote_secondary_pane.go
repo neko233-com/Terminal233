@@ -16,6 +16,8 @@ type secondaryRemotePane struct {
 	sessionID                          int
 	shell                              *remoteShell
 	directory, input, selected, status string
+	filter                             string
+	showFilter                         bool
 	files                              []remoteFile
 	history                            fileHistory
 	loading                            bool
@@ -227,7 +229,7 @@ func (d *desktop) finishSecondaryPaneLoad(generation uint64, id int, shell *remo
 
 func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 	p := &d.secondaryPane
-	ui.Row(c).FillWidth().Height(36).AlignItems(ui.Center).Children(func() { d.secondaryFilePicker(c) })
+	ui.Row(c).FillWidth().Height(36).AlignItems(ui.Center).Children(func() { d.secondaryFilePicker(c); d.leftPaneToolbar(c) })
 	if d.secondarySession() == nil {
 		ui.Text(c, "会话已断开，请选择其他主机。").Wrap()
 		return
@@ -259,6 +261,13 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 			d.requestSecondaryPane(p.input, -1)
 		}
 	})
+	if p.showFilter {
+		ui.TextInput(c.Key("secondary-pane-filter"), &p.filter).Label("筛选左侧远程文件").Placeholder("筛选文件").OnChange(func() {
+			p.selected = ""
+			p.paneSelection = paneSelection{}
+		})
+	}
+	d.leftPaneActionView(c)
 	if p.status != "" {
 		ui.Text(c, p.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
@@ -266,8 +275,9 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 		ui.Text(c, "名称").Grow(1).FontSize(12).TextColor(c.Theme().TextMuted)
 		ui.Text(c, "大小").Width(70).FontSize(12).TextColor(c.Theme().TextMuted)
 	})
+	visible := displayedFiles(p.files, p.filter, "name", false, false)
 	ui.Scroll(c.Key("secondary-list")).Label("左侧远程文件列表").Height(listHeight).FillWidth().Children(func() {
-		for _, entry := range p.files {
+		for _, entry := range visible {
 			f := entry
 			label := f.Name
 			if f.IsDir {
@@ -291,6 +301,7 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 					row = row.Drag(item)
 				}
 				row.ContextMenu(func(menu *ui.Menu) {
+					d.leftPaneContextMenu(menu, f.Name)
 					if f.IsDir && menu.Item("打开目录").Chosen() {
 						d.requestSecondaryPane(path.Join(p.directory, f.Name), -1)
 					}
@@ -301,7 +312,7 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 				if row.DoubleClicked() && f.IsDir {
 					d.requestSecondaryPane(path.Join(p.directory, f.Name), -1)
 				} else if row.Clicked() {
-					selected, err := p.paneSelection.choose(f.Name, p.files, row.ClickModifiers())
+					selected, err := p.paneSelection.choose(f.Name, visible, row.ClickModifiers())
 					if err != nil {
 						p.status = err.Error()
 					} else {

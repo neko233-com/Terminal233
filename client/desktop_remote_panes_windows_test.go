@@ -128,6 +128,17 @@ func TestDesktopRemotePanes(t *testing.T) {
 		}
 		t.Fatalf("directory input %s did not update", key)
 	}
+	waitSelected := func(key string) {
+		t.Helper()
+		until := time.Now().Add(5 * time.Second)
+		for time.Now().Before(until) {
+			if strings.Contains(fmt.Sprint(waitKey(key)["states"]), "checked") {
+				return
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+		t.Fatalf("selection did not settle: %s: %v", key, waitKey(key))
+	}
 	connect := func(key, expected string) {
 		node := waitKey(key)
 		bounds := node["bounds"].(map[string]any)
@@ -162,6 +173,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 	}
 	for _, item := range []struct{ root, name, text string }{
 		{leftDir, "batch-one.txt", "batch one"}, {leftDir, "batch-conflict.txt", "new"},
+		{leftDir, "left-action.txt", "remote edit"},
 		{rightDir, "batch-conflict.txt", "existing"},
 	} {
 		if err := os.WriteFile(filepath.Join(item.root, item.name), []byte(item.text), 0600); err != nil {
@@ -202,6 +214,35 @@ func TestDesktopRemotePanes(t *testing.T) {
 		t.Fatalf("remote copy did not finish: %s; tree: %v", filepath.Base(name), call("tree", nil))
 	}
 	waitFile(filepath.Join(rightDir, "left.txt"), "left to right")
+	// Left-pane file management operates on its own SSH host and requires
+	// explicit confirmation before deleting an item.
+	press("secondary-file-left-action.txt")
+	waitSelected("secondary-file-left-action.txt")
+	press("left-pane-rename")
+	setPath("left-action-name", "left-renamed.txt")
+	press("left-action-confirm")
+	waitFile(filepath.Join(leftDir, "left-renamed.txt"), "remote edit")
+	press("secondary-file-left-renamed.txt")
+	waitSelected("secondary-file-left-renamed.txt")
+	press("left-pane-delete")
+	if _, err := os.Stat(filepath.Join(leftDir, "left-renamed.txt")); err != nil {
+		t.Fatal("left file disappeared before deletion confirmation")
+	}
+	press("left-action-confirm")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) {
+		if _, err := os.Stat(filepath.Join(leftDir, "left-renamed.txt")); os.IsNotExist(err) {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(leftDir, "left-renamed.txt")); !os.IsNotExist(err) {
+		t.Fatal("left file was not deleted")
+	}
+	press("left-pane-mkdir")
+	setPath("left-action-name", "left-created")
+	press("left-action-confirm")
+	waitKey("secondary-file-left-created")
 	// Real pointer modifiers select a mixed batch in the native window. A
 	// conflicting destination must remain untouched while other items copy.
 	press("secondary-file-batch-one.txt")
@@ -273,9 +314,32 @@ func TestDesktopRemotePanes(t *testing.T) {
 	press("secondary-picker")
 	press("secondary-local")
 	waitKey("local-pane-path")
+	if err := os.WriteFile(filepath.Join(localPaneDir, "local-action.txt"), []byte("local edit"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	setPath("local-pane-path", localPaneDir)
 	press("local-pane-open")
 	waitKey("local-pane-file-local-to-right")
+	press("local-pane-file-local-action.txt")
+	waitSelected("local-pane-file-local-action.txt")
+	press("left-pane-rename")
+	setPath("left-action-name", "local-renamed.txt")
+	press("left-action-confirm")
+	waitFile(filepath.Join(localPaneDir, "local-renamed.txt"), "local edit")
+	press("local-pane-file-local-renamed.txt")
+	waitSelected("local-pane-file-local-renamed.txt")
+	press("left-pane-delete")
+	press("left-action-confirm")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) {
+		if _, err := os.Stat(filepath.Join(localPaneDir, "local-renamed.txt")); os.IsNotExist(err) {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(localPaneDir, "local-renamed.txt")); !os.IsNotExist(err) {
+		t.Fatal("local file was not deleted")
+	}
 	press("local-pane-file-local-to-right")
 	waitKey("local-pane-open-selected")
 	press("local-pane-upload")

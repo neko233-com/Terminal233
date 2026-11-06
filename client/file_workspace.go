@@ -16,6 +16,8 @@ import (
 // the remote pane's path, selection, or directory history.
 type localFilePane struct {
 	directory, input, selected, status string
+	filter                             string
+	showFilter                         bool
 	files                              []remoteFile
 	history                            fileHistory
 	initialized, loading               bool
@@ -212,7 +214,7 @@ func (d *desktop) navigateLocalPane(offset int) {
 
 func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 	d.initializeLocalPane()
-	ui.Row(c).FillWidth().Height(36).AlignItems(ui.Center).Children(func() { d.secondaryFilePicker(c) })
+	ui.Row(c).FillWidth().Height(36).AlignItems(ui.Center).Children(func() { d.secondaryFilePicker(c); d.leftPaneToolbar(c) })
 	ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 		_, _, back := d.localPane.history.target(-1)
 		_, _, forward := d.localPane.history.target(1)
@@ -240,6 +242,13 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 			d.requestLocalPane(d.localPane.input, -1)
 		}
 	})
+	if d.localPane.showFilter {
+		ui.TextInput(c.Key("local-pane-filter"), &d.localPane.filter).Label("筛选左侧本机文件").Placeholder("筛选文件").OnChange(func() {
+			d.localPane.selected = ""
+			d.localPane.paneSelection = paneSelection{}
+		})
+	}
+	d.leftPaneActionView(c)
 	if d.localPane.status != "" {
 		ui.Text(c, d.localPane.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
@@ -247,8 +256,9 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 		ui.Text(c, "名称").Grow(1).FontSize(12).TextColor(c.Theme().TextMuted)
 		ui.Text(c, "大小").Width(70).FontSize(12).TextColor(c.Theme().TextMuted)
 	})
+	visible := displayedFiles(d.localPane.files, d.localPane.filter, "name", false, false)
 	ui.Scroll(c.Key("local-pane-list")).Label("本机文件列表").Height(listHeight).FillWidth().Children(func() {
-		for _, entry := range d.localPane.files {
+		for _, entry := range visible {
 			f := entry
 			label := f.Name
 			if f.IsDir {
@@ -272,6 +282,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 					row = row.Drag(item)
 				}
 				row.ContextMenu(func(menu *ui.Menu) {
+					d.leftPaneContextMenu(menu, f.Name)
 					if f.IsDir && menu.Item("打开目录").Disabled(d.localPane.loading).Chosen() {
 						d.requestLocalPane(filepath.Join(d.localPane.directory, f.Name), -1)
 					}
@@ -288,7 +299,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 				if row.DoubleClicked() && f.IsDir {
 					d.requestLocalPane(filepath.Join(d.localPane.directory, f.Name), -1)
 				} else if row.Clicked() {
-					selected, err := d.localPane.paneSelection.choose(f.Name, d.localPane.files, row.ClickModifiers())
+					selected, err := d.localPane.paneSelection.choose(f.Name, visible, row.ClickModifiers())
 					if err != nil {
 						d.localPane.status = err.Error()
 					} else {

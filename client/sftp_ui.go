@@ -691,6 +691,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if d.showFileFilter {
 		ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录").OnChange(func() {
 			d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""
+			d.filePaneSelection = paneSelection{}
 		})
 	}
 	if d.showFileOptions {
@@ -714,6 +715,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			}
 			if ui.Button(c.Key("file-toggle-dotfiles"), label).Clicked() {
 				d.fileHideDotfiles = !d.fileHideDotfiles
+				d.filePaneSelection = paneSelection{}
 				if d.fileHideDotfiles && strings.HasPrefix(d.selectedFile, ".") {
 					d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""
 				}
