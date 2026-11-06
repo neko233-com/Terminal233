@@ -18,6 +18,7 @@ type workspaceRestore struct {
 	cancel     context.CancelFunc
 	closed     atomic.Bool
 	cancelling bool
+	groupQuick bool
 }
 type workspaceRestoreTarget struct {
 	entry           workspaceTemplateEntry
@@ -426,6 +427,9 @@ func (d *desktop) cancelWorkspaceRestore() {
 	if d.workspaceRestore != nil && !d.workspaceRestore.cancelling {
 		d.workspaceRestore.cancelling = true
 		d.workspaceTemplatesStatus = "正在取消，等待当前连接结束…"
+		if d.workspaceRestore.groupQuick {
+			d.status = d.workspaceTemplatesStatus
+		}
 		d.workspaceRestore.cancel()
 	}
 }

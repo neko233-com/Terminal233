@@ -89,6 +89,8 @@ type desktop struct {
 	profileTagQuery                                                                         string
 	profileTagFilters                                                                       []string
 	showProfileTagFilter                                                                    bool
+	groupConnectFailures                                                                    []string
+	showGroupConnectFailures                                                                bool
 	showProfileInspector                                                                    bool
 	profileInspectorAt                                                                      time.Time
 	connectionDraft                                                                         connectionDraft
@@ -495,7 +497,11 @@ func (d *desktop) view(c *ui.Context) {
 				ui.Box(c).Grow(1)
 			}
 			if d.workspaceRestore != nil && d.workspace != "new-tab" {
-				if ui.Button(c.Key("workspace-restore-cancel-header"), "取消恢复").Disabled(d.workspaceRestore.cancelling).Clicked() {
+				label := "取消恢复"
+				if d.workspaceRestore.groupQuick {
+					label = "取消连接"
+				}
+				if ui.Button(c.Key("workspace-restore-cancel-header"), label).Disabled(d.workspaceRestore.cancelling).Clicked() {
 					d.cancelWorkspaceRestore()
 				}
 			}
@@ -666,6 +672,9 @@ func (d *desktop) view(c *ui.Context) {
 									}
 									button := navigationButton(c, "group-entry-"+name, fmt.Sprintf("%s  %d", groupLeaf(name), counts[name]), d.profileFilter == name).Label(groupLabel).Disabled(d.busy || draftBlocked).Grow(1)
 									button.ContextMenu(func(menu *ui.Menu) {
+										if menu.Item("快速连接").Disabled(d.busy || draftBlocked || counts[name] == 0).Chosen() {
+											d.quickConnectGroup(name, isCloudGroups)
+										}
 										if menu.Item("管理分组").Disabled(draftBlocked).Chosen() {
 											if !d.closeConnectionForNavigation() {
 												return
@@ -734,6 +743,9 @@ func (d *desktop) view(c *ui.Context) {
 						}
 						if width >= 900 {
 							ui.Text(c, status).FontSize(12).TextColor(t.TextMuted).MaxWidth(240).SingleLine().Tooltip(status)
+						}
+						if len(d.groupConnectFailures) > 0 {
+							d.groupConnectionFailuresButton(c)
 						}
 						ui.Box(c).Grow(1)
 						if terminalActionButton(c, "terminal-search-toggle", "查找", searchIcon, d.terminalSearchOpen, d.term == nil).Clicked() {
@@ -1104,7 +1116,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.108"
+const version = "0.3.109"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

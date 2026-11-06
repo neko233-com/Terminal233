@@ -118,6 +118,9 @@ func (d *desktop) profileGroupCards(c *ui.Context, cardWidth float32, draftBlock
 				})
 			})
 			card.ContextMenu(func(menu *ui.Menu) {
+				if menu.Item("快速连接").Disabled(d.busy || draftBlocked || counts[group] == 0).Chosen() {
+					d.quickConnectGroup(group, cloud)
+				}
 				if menu.Item("管理分组").Disabled(draftBlocked).Chosen() {
 					if !d.closeConnectionForNavigation() {
 						return

@@ -300,6 +300,10 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				d.profileInspectorAt = time.Time{}
 			}
 			ui.Text(c, "分组 / "+d.profileFilter).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+			ui.Box(c).Grow(1)
+			if ui.Button(c.Key("group-quick-connect"), "快速连接").Label("快速连接当前分组").Tooltip("为分组及子分组中的主机打开独立标签页").Disabled(d.busy || draftBlocked).Clicked() {
+				d.quickConnectGroup(d.profileFilter, d.profileSource == "cloud")
+			}
 		})
 	}
 	if d.profileSort != "" && !d.profileRecent {

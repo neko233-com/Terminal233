@@ -53,7 +53,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("native automation not available: %v", err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(40 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
 	reader := bufio.NewReader(conn)
 	call := func(method string, params ...map[string]any) map[string]any {
 		t.Helper()
@@ -1957,6 +1957,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	// Switching immediately after an edit must save before replacing the form.
 	call("act", map[string]any{"key": "profile-label", "action": "setValue", "text": "native-edited-host"})
+	call("act", map[string]any{"key": "profile-group", "action": "setValue", "text": "fixture-group"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		result := call("tree")["result"].(map[string]any)
@@ -2210,5 +2211,29 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if err != nil || !prefs.Light || !prefs.SidebarCollapsed || prefs.TerminalFontSize != 14 {
 		t.Fatalf("native appearance controls did not persist: %+v, %v", prefs, err)
+	}
+	// The isolated SSH fixture has already been verified on this device.
+	navigate("nav-connections")
+	call("act", map[string]any{"key": "profile-search", "action": "setValue", "text": ""})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "key:group-card-fixture-group ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "group-card-fixture-group", "action": "press"})
+	beforeAttempts := attempts.Load()
+	call("act", map[string]any{"key": "group-quick-connect", "action": "press"})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "分组连接完成：1 个已连接") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "分组连接完成：1 个已连接") || attempts.Load() != beforeAttempts+1 {
+		t.Fatal("native group quick connection failed")
 	}
 }
