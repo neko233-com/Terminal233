@@ -82,6 +82,7 @@ type workspaceSession struct {
 	lastTerminalDir                                          string
 	files                                                    []remoteFile
 	fileHistory                                              fileHistory
+	filePaneSelection                                        paneSelection
 	fileBatchErrors                                          []string
 	fileBatchDetails                                         bool
 	fileChecked                                              map[string]bool
@@ -109,6 +110,7 @@ func (d *desktop) saveSessionState() {
 		s.lastTerminalDir = d.lastTerminalDir
 		s.files = d.files
 		s.fileHistory = d.fileHistory
+		s.filePaneSelection = d.filePaneSelection
 		s.fileBatchErrors, s.fileBatchDetails = d.fileBatchErrors, d.fileBatchDetails
 		s.fileChecked, s.fileCheckedDir, s.fileBatchTarget = d.fileChecked, d.fileCheckedDir, d.fileBatchTarget
 		s.terminalSearchOpen, s.terminalSearchText = d.terminalSearchOpen, d.terminalSearchText
@@ -147,6 +149,7 @@ func (d *desktop) activateSessionWithRefresh(id int, refresh bool) {
 		d.fileNewDirectory, d.fileRename = "", ""
 		d.files, d.confirmDelete = s.files, ""
 		d.fileHistory = s.fileHistory
+		d.filePaneSelection = s.filePaneSelection
 		d.fileBatchErrors, d.fileBatchDetails = s.fileBatchErrors, s.fileBatchDetails
 		d.fileChecked, d.fileCheckedDir, d.fileBatchTarget = s.fileChecked, s.fileCheckedDir, s.fileBatchTarget
 		d.terminalSearchOpen, d.terminalSearchText = s.terminalSearchOpen, s.terminalSearchText
@@ -219,6 +222,7 @@ func (d *desktop) closeSession(id int) {
 		d.term, d.shell, d.active = nil, nil, connectionSettings{}
 		d.files, d.fileDir, d.fileLocal, d.fileStatus, d.selectedFile, d.confirmDelete = nil, "", "", "", "", ""
 		d.fileHistory = fileHistory{}
+		d.filePaneSelection = paneSelection{}
 		d.fileBatchErrors, d.fileBatchDetails = nil, false
 		d.fileChecked, d.fileCheckedDir, d.fileBatchTarget = nil, "", ""
 		d.terminalSearchOpen, d.terminalSearchText = false, ""

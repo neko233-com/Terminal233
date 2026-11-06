@@ -63,7 +63,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 		t.Fatalf("native automation: %v", err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(120 * time.Second))
 	reader := bufio.NewReader(conn)
 	call := func(method string, params map[string]any) map[string]any {
 		t.Helper()
@@ -147,8 +147,16 @@ func TestDesktopRemotePanes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rightDir, "right-drag.txt"), []byte("drag right to left"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	for _, item := range []struct{ root, name, text string }{
+		{leftDir, "batch-one.txt", "batch one"}, {leftDir, "batch-conflict.txt", "new"},
+		{rightDir, "batch-conflict.txt", "existing"},
+	} {
+		if err := os.WriteFile(filepath.Join(item.root, item.name), []byte(item.text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, item := range []struct{ root, dir, text string }{
-		{leftDir, "left-folder", "left folder"}, {rightDir, "right-folder", "right folder"},
+		{leftDir, "batch-folder", "batch folder"}, {leftDir, "left-folder", "left folder"}, {rightDir, "right-folder", "right folder"},
 		{leftDir, "left-drag-folder", "left drag folder"}, {rightDir, "right-drag-folder", "right drag folder"},
 		{leftDir, "left-local-folder", "remote to local folder"},
 		{rightDir, "right-to-local-pane", "right to local pane"},
@@ -181,6 +189,36 @@ func TestDesktopRemotePanes(t *testing.T) {
 		t.Fatalf("remote copy did not finish: %s; tree: %v", filepath.Base(name), call("tree", nil))
 	}
 	waitFile(filepath.Join(rightDir, "left.txt"), "left to right")
+	// Real pointer modifiers select a mixed batch in the native window. A
+	// conflicting destination must remain untouched while other items copy.
+	press("secondary-file-batch-one.txt")
+	controlClick := func(key string) {
+		t.Helper()
+		waitKey(key)
+		call("act", map[string]any{"key": key, "action": "scrollIntoView"})
+		bounds := waitKey(key)["bounds"].(map[string]any)
+		call("input", map[string]any{"events": []any{map[string]any{"type": "click", "mods": []string{"ctrl"}, "x": bounds["x"].(float64) + bounds["width"].(float64)/2, "y": bounds["y"].(float64) + bounds["height"].(float64)/2}}})
+	}
+	controlClick("secondary-file-batch-conflict.txt")
+	controlClick("secondary-file-batch-folder")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "复制 3 项") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "复制 3 项") {
+		t.Fatal("native Ctrl selection did not produce a three-item batch")
+	}
+	press("secondary-copy-right")
+	waitFile(filepath.Join(rightDir, "batch-one.txt"), "batch one")
+	waitFile(filepath.Join(rightDir, "batch-folder", "nested", "data.txt"), "batch folder")
+	waitFile(filepath.Join(rightDir, "batch-conflict.txt"), "existing")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "成功 2，失败 1") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "成功 2，失败 1") {
+		t.Fatal("native batch result did not report the conflict")
+	}
 	press("file-right.txt")
 	press("secondary-copy-left")
 	waitFile(filepath.Join(leftDir, "right.txt"), "right to left")

@@ -145,7 +145,7 @@ func TestPaneTransferRejectsStaleSelectionsAndUnsafeNames(t *testing.T) {
 		localPane: localFilePane{directory: dir, input: dir, generation: 3, files: []remoteFile{{Name: "local.txt"}, {Name: "folder", IsDir: true}}},
 	}
 	d.fileHistory.visit("/remote")
-	upload := localPaneDrag{directory: dir, name: "local.txt", generation: 3, sessionID: 7, shell: shell, remoteDir: "/remote"}
+	upload := d.localPaneDrag("local.txt")
 	if got, err := d.paneUploadSource(upload); err != nil || got != filepath.Join(dir, "local.txt") {
 		t.Fatalf("valid upload: %q %v", got, err)
 	}
@@ -154,7 +154,7 @@ func TestPaneTransferRejectsStaleSelectionsAndUnsafeNames(t *testing.T) {
 		t.Fatal("accepted a stale local selection")
 	}
 	upload.generation++
-	upload.name = "folder"
+	upload = d.localPaneDrag("folder")
 	if _, err := d.paneUploadSource(upload); err != nil {
 		t.Fatal("rejected a directory upload")
 	}
@@ -165,21 +165,21 @@ func TestPaneTransferRejectsStaleSelectionsAndUnsafeNames(t *testing.T) {
 	}
 	upload.shell = shell
 	d.shell = shell
-	download := remotePaneDrag{directory: "/remote", name: "remote.txt", sessionID: 7, shell: shell}
+	download := d.rightPaneDrag("remote.txt")
 	if got, err := d.paneDownloadTarget(download); err != nil || got != filepath.Join(dir, "remote.txt") {
 		t.Fatalf("valid download: %q %v", got, err)
 	}
-	download.name = "folder"
+	download = d.rightPaneDrag("folder")
 	if _, err := d.paneDownloadTarget(download); err != nil {
 		t.Fatal("rejected a directory download")
 	}
 	for _, name := range []string{"../bad", "link", "C:bad"} {
-		download.name = name
+		download = d.rightPaneDrag(name)
 		if _, err := d.paneDownloadTarget(download); err == nil {
 			t.Fatalf("accepted unsafe or non-file name %q", name)
 		}
 	}
-	download.name = "remote.txt"
+	download = d.rightPaneDrag("remote.txt")
 	d.localPane.input = filepath.Join(dir, "unopened")
 	if _, err := d.paneDownloadTarget(download); err == nil {
 		t.Fatal("accepted a changed but unopened target path")

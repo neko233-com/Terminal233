@@ -116,6 +116,7 @@ type desktop struct {
 	lastTerminalDir                                                                         string
 	files                                                                                   []remoteFile
 	fileHistory                                                                             fileHistory
+	filePaneSelection                                                                       paneSelection
 	localPane                                                                               localFilePane
 	narrowFilePane                                                                          string
 	fileBatchErrors                                                                         []string
@@ -1041,7 +1042,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.93"
+const version = "0.3.94"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

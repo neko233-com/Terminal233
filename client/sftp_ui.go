@@ -148,6 +148,7 @@ func (d *desktop) refreshFilesWithHistory(previousStatus string, historyIndex in
 				d.fileHistory.visit(dir)
 			}
 			d.files = files
+			d.filePaneSelection = paneSelection{}
 			d.reconcileCheckedFiles()
 			d.fileStatus = fmt.Sprintf("%d 个条目", len(files))
 			if previousStatus != "" {
@@ -652,6 +653,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		}
 		ui.TextInput(c.Key("remote-dir"), &d.fileDir).Label("当前目录").Placeholder("目录路径").OnChange(func() {
 			d.selectedFile = ""
+			d.filePaneSelection = paneSelection{}
 			d.confirmDelete = ""
 			d.fileNewDirectory = ""
 			d.fileRename = ""
@@ -782,9 +784,9 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 						ui.Text(c, f.Name)
 					})
 					if d.workspace == "files" && eligiblePaneItem(f) {
-						row = row.Drag(d.rightPaneDrag(f.Name))
+						row = row.Drag(d.rightPaneDragForFile(f))
 					}
-					if d.selectedFile == f.Name {
+					if d.selectedFile == f.Name || d.filePaneSelection.names[f.Name] {
 						row = row.Selected(true).Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
 					}
 					row.ContextMenu(func(menu *ui.Menu) {
@@ -792,7 +794,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							d.openSessionDirectory(f, local)
 						}
 						if eligiblePaneItem(f) && d.workspace == "files" {
-							item := d.rightPaneDrag(f.Name)
+							item := d.rightPaneDragForFile(f)
 							if d.secondaryPane.sessionID == 0 {
 								_, targetErr := d.paneDownloadTarget(item)
 								if menu.Item("复制到本机当前目录").Disabled(targetErr != nil).Chosen() {
@@ -834,8 +836,13 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 					if row.DoubleClicked() && f.IsDir {
 						d.openSessionDirectory(f, local)
 					} else if row.Clicked() {
-						d.confirmDelete = ""
-						d.selectedFile, d.fileRename = f.Name, f.Name
+						selected, err := d.filePaneSelection.choose(f.Name, visible, row.ClickModifiers())
+						if err != nil {
+							d.fileStatus = err.Error()
+						} else {
+							d.confirmDelete = ""
+							d.selectedFile, d.fileRename = selected, selected
+						}
 					}
 					kind := "文件"
 					if f.IsDir {
@@ -851,6 +858,15 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 						ui.Text(c, fileModifiedLabel(f)).Width(150).TextColor(c.Theme().TextMuted)
 					}
 				})
+			}
+		})
+	}
+	if len(d.filePaneSelection.names) > 1 && d.workspace == "files" {
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, fmt.Sprintf("已选择 %d 项", len(d.filePaneSelection.names))).FontSize(12).TextColor(c.Theme().TextMuted)
+			if ui.Button(c.Key("file-pane-clear-selection"), "清除").Label("清除会话文件选择").Disabled(d.busy).Clicked() {
+				d.filePaneSelection = paneSelection{}
+				d.selectedFile, d.fileRename = "", ""
 			}
 		})
 	}
@@ -996,13 +1012,20 @@ func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {
 				cancelLabel = "取消后台传输"
 			}
 			if ui.Button(c.Key("cancel-transfer"), cancelLabel).Clicked() {
-				d.cancelTransfer()
-				if d.transferSessionID == d.currentSession {
-					d.fileStatus = "正在取消传输…"
-				} else {
-					d.status = "正在取消后台传输…"
-				}
+				d.cancelFileTransfer()
 			}
 		}
 	})
+}
+
+func (d *desktop) cancelFileTransfer() {
+	if d.cancelTransfer == nil {
+		return
+	}
+	d.cancelTransfer()
+	if d.transferSessionID == d.currentSession {
+		d.fileStatus = "正在取消传输…"
+	} else {
+		d.status = "正在取消后台传输…"
+	}
 }

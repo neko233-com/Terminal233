@@ -151,6 +151,10 @@ func verifyCreatedParents(dst paneFilesystem, targetRoot string, parts []string)
 // target. Completed entries remain if a later operation fails or is canceled;
 // we do not recursively remove a directory that another process may modify.
 func copyPaneEntryContext(ctx context.Context, source *remoteShell, sourceDir string, target *remoteShell, targetDir, name string, progress func(int64)) (partial bool, err error) {
+	return copyPaneExpectedEntryContext(ctx, source, sourceDir, target, targetDir, name, nil, progress)
+}
+
+func copyPaneExpectedEntryContext(ctx context.Context, source *remoteShell, sourceDir string, target *remoteShell, targetDir, name string, expectedDirectory *bool, progress func(int64)) (partial bool, err error) {
 	if !validDirectoryName(name) || strings.TrimSpace(sourceDir) == "" || strings.TrimSpace(targetDir) == "" {
 		return false, errors.New("请选择有效的源和目标目录")
 	}
@@ -171,6 +175,9 @@ func copyPaneEntryContext(ctx context.Context, source *remoteShell, sourceDir st
 	info, err := src.stat(sourceRoot)
 	if err != nil {
 		return false, err
+	}
+	if expectedDirectory != nil && info.IsDir() != *expectedDirectory {
+		return false, errors.New("源文件类型已改变，请重新选择")
 	}
 	if info.Mode().IsRegular() {
 		if source == nil && target == nil {
