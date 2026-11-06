@@ -49,6 +49,10 @@ func testSSHServerWithSlowSFTP(t *testing.T, slow *atomic.Bool, authorized ...ss
 }
 
 func testSSHServerWithPause(t *testing.T, slow, pauseEnabled *atomic.Bool, resume <-chan struct{}, authorized ...ssh.PublicKey) (connectionSettings, string, *atomic.Int32) {
+	return testSSHServerWithExec(t, slow, pauseEnabled, resume, nil, authorized...)
+}
+
+func testSSHServerWithExec(t *testing.T, slow, pauseEnabled *atomic.Bool, resume <-chan struct{}, onExec func(string), authorized ...ssh.PublicKey) (connectionSettings, string, *atomic.Int32) {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -146,9 +150,20 @@ func testSSHServerWithPause(t *testing.T, slow, pauseEnabled *atomic.Bool, resum
 								_ = req.Reply(true, nil)
 							case "exec":
 								var request struct{ Command string }
-								if ssh.Unmarshal(req.Payload, &request) != nil || request.Command != monitorCommand {
+								if ssh.Unmarshal(req.Payload, &request) != nil {
 									_ = req.Reply(false, nil)
 									continue
+								}
+								if request.Command != monitorCommand {
+									if onExec == nil {
+										_ = req.Reply(false, nil)
+										continue
+									}
+									onExec(request.Command)
+									_ = req.Reply(true, nil)
+									_, _ = channel.Write([]byte("\x1b]7;file://host/fixture%20work\x07ready\r\n"))
+									_, _ = io.Copy(channel, channel)
+									return
 								}
 								_ = req.Reply(true, nil)
 								step := monitorReads.Add(1)
@@ -174,6 +189,9 @@ func testSSHServerWithPause(t *testing.T, slow, pauseEnabled *atomic.Bool, resum
 								return
 							case "shell":
 								_ = req.Reply(true, nil)
+								if onExec != nil {
+									_, _ = channel.Write([]byte("\x1b]7;file://host/fixture%20work\x07"))
+								}
 								_, _ = channel.Write([]byte("ready\r\n"))
 								buffer := make([]byte, 1024)
 								var seen string

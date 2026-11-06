@@ -30,6 +30,7 @@ type workspaceTemplateEntry struct {
 	Fingerprint string `json:"fingerprint,omitempty"`
 	FileDir     string `json:"file_dir,omitempty"`
 	LocalDir    string `json:"local_dir,omitempty"`
+	TerminalDir string `json:"terminal_dir,omitempty"`
 	CloudURL    string `json:"cloud_url,omitempty"`
 	CloudUser   string `json:"cloud_user,omitempty"`
 	CloudTeam   string `json:"cloud_team,omitempty"`
@@ -88,14 +89,14 @@ func validateSavedWorkspace(w savedWorkspace) error {
 		return errors.New("工作区分屏无效")
 	}
 	for _, e := range w.Entries {
-		for _, s := range []string{e.Label, e.Group, e.Host, e.Port, e.User, e.KeyPath, e.Fingerprint, e.FileDir, e.LocalDir, e.CloudURL, e.CloudUser, e.CloudTeam, e.CloudID} {
+		for _, s := range []string{e.Label, e.Group, e.Host, e.Port, e.User, e.KeyPath, e.Fingerprint, e.FileDir, e.LocalDir, e.TerminalDir, e.CloudURL, e.CloudUser, e.CloudTeam, e.CloudID} {
 			if !validWorkspaceText(s, 4096) {
 				return errors.New("工作区内容无效")
 			}
 		}
 		switch e.Kind {
 		case "local":
-			if e.Host != "" || e.Port != "" || e.User != "" || e.KeyPath != "" || e.Fingerprint != "" || e.CloudID != "" || e.CloudURL != "" || e.CloudUser != "" || e.CloudTeam != "" {
+			if e.Host != "" || e.Port != "" || e.User != "" || e.KeyPath != "" || e.Fingerprint != "" || e.TerminalDir != "" || e.CloudID != "" || e.CloudURL != "" || e.CloudUser != "" || e.CloudTeam != "" {
 				return errors.New("本机会话内容无效")
 			}
 			if e.LocalDir != "" {
@@ -107,6 +108,12 @@ func validateSavedWorkspace(w savedWorkspace) error {
 		case "profile", "cloud":
 			if _, err := (connectionSettings{Host: e.Host, Port: e.Port, User: e.User}).address(); err != nil || !strings.HasPrefix(e.Fingerprint, "SHA256:") || e.LocalDir != "" {
 				return errors.New("SSH 会话信息无效")
+			}
+			if e.TerminalDir != "" {
+				cleaned, err := terminalDirectory(e.TerminalDir, false)
+				if err != nil || cleaned != e.TerminalDir {
+					return errors.New("远程终端目录无效")
+				}
 			}
 			if e.Kind == "profile" && (e.CloudURL != "" || e.CloudUser != "" || e.CloudTeam != "" || e.CloudID != "") {
 				return errors.New("本机主机引用无效")
@@ -146,13 +153,20 @@ func readWorkspaceTemplates(filename string) (workspaceTemplatesFile, error) {
 	if err = dec.Decode(&struct{}{}); err != io.EOF {
 		return workspaceTemplatesFile{}, errors.New("工作区文件格式无效")
 	}
-	if (saved.Version != 1 && saved.Version != 2) || len(saved.Items) > maxWorkspaceTemplates {
+	if (saved.Version != 1 && saved.Version != 2 && saved.Version != 3) || len(saved.Items) > maxWorkspaceTemplates {
 		return workspaceTemplatesFile{}, errors.New("工作区版本或数量无效")
 	}
 	seen := map[string]bool{}
 	for i, w := range saved.Items {
 		if saved.Version == 1 && (w.ViewMode != "" || len(w.RowPerc) != 0 || len(w.ColumnPerc) != 0) {
 			return workspaceTemplatesFile{}, errors.New("工作区版本与内容不符")
+		}
+		if saved.Version < 3 {
+			for _, entry := range w.Entries {
+				if entry.TerminalDir != "" {
+					return workspaceTemplatesFile{}, errors.New("工作区版本与目录内容不符")
+				}
+			}
 		}
 		if validateSavedWorkspace(w) != nil || seen[w.ID] {
 			return workspaceTemplatesFile{}, errors.New("工作区内容无效")
@@ -195,8 +209,13 @@ func updateWorkspaceTemplates(filename string, update func(*workspaceTemplatesFi
 		return workspaceTemplatesFile{}, errors.New("工作区数量已达上限")
 	}
 	for _, w := range saved.Items {
-		if w.ViewMode != "" {
+		if w.ViewMode != "" && saved.Version < 2 {
 			saved.Version = 2
+		}
+		for _, entry := range w.Entries {
+			if entry.TerminalDir != "" {
+				saved.Version = 3
+			}
 		}
 	}
 	data, err := json.MarshalIndent(saved, "", "  ")
@@ -298,6 +317,11 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 				return savedWorkspace{}, fmt.Errorf("会话 %s 需要唯一的已保存主机和可用凭据", s.label)
 			}
 			e.Label, e.Group = candidates[0].Label, candidates[0].Group
+		}
+		if s.shell != nil {
+			if current, err := terminalDirectory(s.term.Dir(), false); err == nil {
+				e.TerminalDir = current
+			}
 		}
 		w.Entries = append(w.Entries, e)
 		if s.id == d.currentSession {

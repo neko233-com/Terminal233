@@ -81,6 +81,31 @@ func (s *remoteShell) Resize(cols, rows int) error { return s.session.WindowChan
 func (s *remoteShell) Close() error                { _ = s.in.Close(); _ = s.session.Close(); return s.client.Close() }
 
 func connectShell(s connectionSettings) (*remoteShell, error) {
+	return connectShellAt(s, "")
+}
+
+// quotePOSIX passes untrusted paths as literal data, including quotes and
+// shell metacharacters. It must be used for each nesting level of sh -c.
+func quotePOSIX(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+
+func remoteDirectoryCommand(dir string) (string, error) {
+	cleaned, err := terminalDirectory(dir, false)
+	if err != nil || cleaned != dir || !validWorkspaceText(dir, 4096) {
+		return "", errors.New("远程终端目录无效")
+	}
+	script := "if ! cd " + quotePOSIX(dir) + "; then printf '%s\\n' 'NekoSSH：无法恢复终端目录，已进入默认目录。' >&2; fi; exec \"${SHELL:-/bin/sh}\" -i"
+	return "/bin/sh -c " + quotePOSIX(script), nil
+}
+
+func connectShellAt(s connectionSettings, dir string) (*remoteShell, error) {
+	command := ""
+	if dir != "" {
+		var err error
+		command, err = remoteDirectoryCommand(dir)
+		if err != nil {
+			return nil, err
+		}
+	}
 	addr, err := s.address()
 	if err != nil {
 		return nil, err
@@ -144,7 +169,12 @@ func connectShell(s connectionSettings) (*remoteShell, error) {
 	out, output := io.Pipe()
 	session.Stdout = output
 	session.Stderr = output
-	if err = session.Shell(); err != nil {
+	if command == "" {
+		err = session.Shell()
+	} else {
+		err = session.Start(command)
+	}
+	if err != nil {
 		_ = out.Close()
 		_ = output.Close()
 		return fail(err)

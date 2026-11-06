@@ -158,6 +158,12 @@ func (d *desktop) saveWorkspaceTemplate() {
 	d.workspaceTemplates = saved.Items
 	d.workspaceTemplateName = ""
 	d.workspaceTemplatesStatus = "工作区已保存"
+	for _, entry := range w.Entries {
+		if entry.Kind != "local" && entry.TerminalDir == "" {
+			d.workspaceTemplatesStatus = "工作区已保存；部分远程终端未报告目录（需支持 OSC 7）"
+			break
+		}
+	}
 }
 
 func (d *desktop) removeWorkspaceTemplate(id string) {
@@ -302,7 +308,7 @@ func (d *desktop) startWorkspace(w savedWorkspace, saved bool) {
 					localOptions.Dir = target.entry.LocalDir
 					term, err = newLocalTerminal(localOptions)
 				} else {
-					shell, term, err = openSSHSession(target.settings, options)
+					shell, term, err = openSSHSessionAt(target.settings, options, target.entry.TerminalDir)
 				}
 				return workspaceRestoredSession{target: target, shell: shell, term: term}, err
 			}, closeSession, func(index int) {

@@ -55,6 +55,17 @@ func (d *desktop) terminalGroupSessions(g *terminalGroup) []*workspaceSession {
 	}
 	return result
 }
+
+func sessionTerminalDirectory(s *workspaceSession) string {
+	if s == nil || s.term == nil {
+		return ""
+	}
+	dir, err := terminalDirectory(s.term.Dir(), s.shell == nil)
+	if err != nil || !validWorkspaceText(dir, 4096) {
+		return ""
+	}
+	return dir
+}
 func (d *desktop) createTerminalGroup(name string, ids []int, focus int, grid bool) error {
 	name = strings.TrimSpace(name)
 	if name == "" || !validWorkspaceText(name, 120) || len(ids) == 0 || len(ids) > maxWorkspaceSessions {
@@ -373,7 +384,7 @@ func (d *desktop) terminalGroupView(c *ui.Context, g *terminalGroup, width float
 			if header {
 				ui.Row(c).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
 					label := "切换到终端：" + sessionDisplayLabel(s)
-					button := ui.Button(c.Key(fmt.Sprintf("group-focus-%d", s.id)), sessionDisplayLabel(s)).Label(label).BorderWidth(0).Padding(4, 8).FontSize(12).Grow(1).Justify(ui.Start).Disabled(!d.canSwitchSession()).Drag(terminalGroupMemberDrag(s.id))
+					button := ui.Button(c.Key(fmt.Sprintf("group-focus-%d", s.id)), sessionDisplayLabel(s)).Label(label).BorderWidth(0).Background(c.Theme().Background).Padding(4, 8).FontSize(12).Grow(1).Justify(ui.Start).Disabled(!d.canSwitchSession()).Drag(terminalGroupMemberDrag(s.id))
 					if s.id == d.currentSession {
 						button = button.Selected(true).Background(c.Theme().SurfacePressed)
 					}
@@ -384,6 +395,9 @@ func (d *desktop) terminalGroupView(c *ui.Context, g *terminalGroup, width float
 					if button.Clicked() {
 						explicitFocusID = s.id
 						d.selectSession(s.id)
+					}
+					if dir := sessionTerminalDirectory(s); dir != "" {
+						ui.Text(c, dir).FontSize(11).TextColor(c.Theme().TextMuted).MaxWidth(160).SingleLine().Tooltip(dir)
 					}
 					if ui.Button(c.Key(fmt.Sprintf("group-close-member-%d", s.id)), "×").Label("关闭终端：" + s.label).BorderWidth(0).Background(c.Theme().Surface).Width(30).Disabled(d.busy).Clicked() {
 						closeID = s.id
@@ -418,7 +432,15 @@ func (d *desktop) terminalGroupView(c *ui.Context, g *terminalGroup, width float
 				for _, entry := range sessions {
 					s := entry
 					ui.Row(c).FillWidth().Padding(2, 4).AlignItems(ui.Center).Children(func() {
-						button := ui.Button(c.Key(fmt.Sprintf("group-focus-%d", s.id)), sessionDisplayLabel(s)).Label("切换到终端："+sessionDisplayLabel(s)).BorderWidth(0).Background(c.Theme().Background).Radius(5).FontSize(12).Padding(7, 8).Grow(1).Justify(ui.Start).Drag(terminalGroupMemberDrag(s.id))
+						button := ui.Button(c.Key(fmt.Sprintf("group-focus-%d", s.id)), "").Label("切换到终端："+sessionDisplayLabel(s)).BorderWidth(0).Background(c.Theme().Background).Radius(5).FontSize(12).Padding(7, 8).Grow(1).Justify(ui.Start).Drag(terminalGroupMemberDrag(s.id))
+						button.Children(func() {
+							ui.Column(c).Gap(2).Children(func() {
+								ui.Text(c, sessionDisplayLabel(s)).FontSize(12).SingleLine()
+								if dir := sessionTerminalDirectory(s); dir != "" {
+									ui.Text(c, dir).FontSize(10).TextColor(c.Theme().TextMuted).MaxWidth(110).SingleLine().Tooltip(dir)
+								}
+							})
+						})
 						if s.id == d.currentSession {
 							button = button.Selected(true).Background(c.Theme().SurfacePressed)
 						}

@@ -17,7 +17,8 @@ import (
 )
 
 func TestDesktopRemotePanes(t *testing.T) {
-	a, af, _ := testSSHServer(t)
+	workspaceCommands := make(chan string, 8)
+	a, af, _ := testSSHServerWithExec(t, nil, nil, nil, func(command string) { workspaceCommands <- command })
 	a.Fingerprint = af
 	b, bf, _ := testSSHServer(t)
 	b.Fingerprint = bf
@@ -574,6 +575,9 @@ func TestDesktopRemotePanes(t *testing.T) {
 	if err != nil || len(saved.Items) != 1 || len(saved.Items[0].Entries) != 3 {
 		t.Fatalf("workspace was not saved: %v; tree: %v", err, call("tree", nil))
 	}
+	if saved.Version != 3 || saved.Items[0].Entries[1].TerminalDir != "/fixture work" {
+		t.Fatalf("remote terminal directory was not saved: %+v", saved.Items[0].Entries)
+	}
 	data, err := os.ReadFile(workspaceFile)
 	if err != nil || strings.Contains(string(data), "test-password") {
 		t.Fatal("workspace serialized a password")
@@ -589,6 +593,15 @@ func TestDesktopRemotePanes(t *testing.T) {
 	waitKey("workspace-open-" + id)
 	press("workspace-open-" + id)
 	waitKey("group-tab-1")
+	select {
+	case got := <-workspaceCommands:
+		want, _ := remoteDirectoryCommand("/fixture work")
+		if got != want {
+			t.Fatalf("workspace restored wrong remote directory: %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("workspace did not restore the remote directory")
+	}
 	waitKey("group-focus-6")
 	waitKey("group-focus-7")
 	if !strings.Contains(fmt.Sprint(call("tree", nil)), "已恢复工作区") {
@@ -630,7 +643,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 		}
 		time.Sleep(30 * time.Millisecond)
 	}
-	if err != nil || saved.Version != 2 || len(saved.Items) != 2 || saved.Items[1].ViewMode != "grid" || len(saved.Items[1].Entries) != 3 || len(saved.Items[1].ColumnPerc) != 12 {
+	if err != nil || saved.Version != 3 || len(saved.Items) != 2 || saved.Items[1].ViewMode != "grid" || len(saved.Items[1].Entries) != 3 || len(saved.Items[1].ColumnPerc) != 12 {
 		t.Fatal("grouped workspace layout was not saved")
 	}
 	groupTemplateID := saved.Items[1].ID

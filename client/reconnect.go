@@ -6,7 +6,11 @@ import (
 )
 
 func openSSHSession(settings connectionSettings, options terminal.Options) (*remoteShell, *terminal.Terminal, error) {
-	shell, err := connectShell(settings)
+	return openSSHSessionAt(settings, options, "")
+}
+
+func openSSHSessionAt(settings connectionSettings, options terminal.Options, dir string) (*remoteShell, *terminal.Terminal, error) {
+	shell, err := connectShellAt(settings, dir)
 	if err != nil {
 		return nil, nil, err
 	}
