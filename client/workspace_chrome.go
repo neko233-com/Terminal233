@@ -25,6 +25,7 @@ func (d *desktop) workspaceHeader(c *ui.Context, width, height float32) {
 			}
 		}
 		if usableWidth >= 1000 {
+			ui.Image(c, nekoLogo).Width(26).Height(26).Shrink(0).Label("NekoSSH 标志")
 			ui.Text(c, "NekoSSH").FontSize(15).Bold().Margin(0, 10, 0, 2)
 		}
 		libraryActive := d.workspace != "terminal" && d.workspace != "files" && d.workspace != "new-tab"
