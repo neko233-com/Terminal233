@@ -265,15 +265,16 @@ func TestDesktopRemotePanes(t *testing.T) {
 	// Real pointer modifiers select a mixed batch in the native window. A
 	// conflicting destination must remain untouched while other items copy.
 	press("secondary-file-batch-one.txt")
+	waitSelected("secondary-file-batch-one.txt")
 	controlClick := func(key string) {
 		t.Helper()
-		waitKey(key)
-		call("act", map[string]any{"key": key, "action": "scrollIntoView"})
-		bounds := waitKey(key)["bounds"].(map[string]any)
+		bounds := visibleBounds(key)
 		call("input", map[string]any{"events": []any{map[string]any{"type": "click", "mods": []string{"ctrl"}, "x": bounds["x"].(float64) + bounds["width"].(float64)/2, "y": bounds["y"].(float64) + bounds["height"].(float64)/2}}})
 	}
 	controlClick("secondary-file-batch-conflict.txt")
+	waitSelected("secondary-file-batch-conflict.txt")
 	controlClick("secondary-file-batch-folder")
+	waitSelected("secondary-file-batch-folder")
 	until = time.Now().Add(10 * time.Second)
 	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "复制 3 项") {
 		time.Sleep(30 * time.Millisecond)

@@ -207,6 +207,12 @@ func prepareWorkspaceSessions(ctx context.Context, targets []workspaceRestoreTar
 		rollback()
 		return nil, err
 	}
+	for i, session := range opened {
+		if session.term != nil && terminalEnded(session.term) {
+			rollback()
+			return nil, fmt.Errorf("第 %d 个会话在恢复期间已断开", i+1)
+		}
+	}
 	return opened, nil
 }
 
@@ -322,6 +328,15 @@ func (d *desktop) restoreWorkspaceTemplate(w savedWorkspace) {
 			if failure == nil && ctx.Err() != nil {
 				closeOpened()
 				failure = ctx.Err()
+			}
+			if failure == nil {
+				for i, session := range opened {
+					if session.term == nil || terminalEnded(session.term) {
+						closeOpened()
+						failure = fmt.Errorf("第 %d 个会话在恢复期间已断开", i+1)
+						break
+					}
+				}
 			}
 			d.workspaceRestore = nil
 			d.busy = false

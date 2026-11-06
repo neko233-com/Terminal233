@@ -1973,6 +1973,16 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	call("act", map[string]any{"key": "key", "action": "setValue", "text": keyPath})
 	call("act", map[string]any{"key": "connection-options", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "key:profile-add") {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "key:profile-add") {
+		t.Fatal("host save action did not become available")
+	}
 	call("act", map[string]any{"key": "profile-add", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

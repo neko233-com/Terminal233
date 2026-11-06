@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
@@ -304,5 +306,26 @@ func TestWorkspaceRejectsStaleTemplateBeforeRestore(t *testing.T) {
 	}
 	if err := workspaceTemplateUnchanged(filename, w); err == nil {
 		t.Fatal("accepted a stale template")
+	}
+}
+
+func TestWorkspaceRestoreRejectsSessionThatEndsBeforeCommit(t *testing.T) {
+	left, right := net.Pipe()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = right.Close()
+	select {
+	case <-term.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("test terminal did not finish")
+	}
+	closed := 0
+	_, err = prepareWorkspaceSessions(context.Background(), []workspaceRestoreTarget{{label: "ended"}}, func(target workspaceRestoreTarget) (workspaceRestoredSession, error) {
+		return workspaceRestoredSession{target: target, term: term}, nil
+	}, func(s workspaceRestoredSession) { closed++; _ = s.term.Close() }, nil)
+	if err == nil || closed != 1 {
+		t.Fatalf("accepted an ended session: %v", err)
 	}
 }
