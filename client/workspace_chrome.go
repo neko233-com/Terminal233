@@ -1,0 +1,105 @@
+package main
+
+import "github.com/egoist/mygo/ui"
+
+// The same strip owns navigation and sessions at every window width. Keeping
+// it outside the workspace prevents tabs disappearing when changing tools.
+func (d *desktop) workspaceHeader(c *ui.Context, width, height float32) {
+	ui.Row(c.Key("workspace-header")).Label("全局标签栏").FillWidth().Height(52).Shrink(0).Padding(8, 12).Gap(6).AlignItems(ui.Center).Background(workspaceChrome(c)).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Children(func() {
+		sidebarLabel := "收起侧栏"
+		if !d.sidebarVisible() {
+			sidebarLabel = "展开侧栏"
+		}
+		if terminalActionButton(c, "toggle-sidebar", sidebarLabel, menuIcon, false, false).Clicked() {
+			if (d.workspace == "terminal" && d.term != nil) || d.workspace == "new-tab" {
+				d.terminalNavigationOpen = !d.terminalNavigationOpen
+			} else {
+				d.sidebarCollapsed = !d.sidebarCollapsed
+				d.savePreference("sidebar", d.sidebarCollapsed)
+			}
+		}
+		if width >= 1000 {
+			ui.Text(c, "NekoSSH").FontSize(15).Bold().Margin(0, 10, 0, 2)
+		}
+		libraryActive := d.workspace != "terminal" && d.workspace != "files" && d.workspace != "new-tab"
+		if workspaceTabButton(c, "workspace-hosts-tab", "主机", serverIcon, libraryActive).Clicked() {
+			// Returning to the library resumes any host draft rather than
+			// silently closing its inspector.
+			d.workspace = "connections"
+		}
+		if workspaceTabButton(c, "workspace-files-tab", "SFTP", fileIcon, d.workspace == "files").Label("SFTP 标签页").Clicked() {
+			d.workspace = "files"
+			if d.term != nil && d.shell == nil && d.files == nil && !d.busy && d.win != nil {
+				d.refreshFiles()
+			}
+		}
+		ui.ScrollHorizontal(c.Key("workspace-session-tabs")).Label("会话标签栏").Grow(1).MinWidth(40).Height(36).Scrollbars(false).Gap(6).Children(func() { d.sessionTabs(c) })
+		if d.workspaceRestore != nil && d.workspace != "new-tab" {
+			label := "取消恢复"
+			if d.workspaceRestore.groupQuick {
+				label = "取消连接"
+			}
+			if terminalActionButton(c, "workspace-restore-cancel-header", label, closeIcon, false, d.workspaceRestore.cancelling).Clicked() {
+				d.cancelWorkspaceRestore()
+			}
+		}
+		themeLabel := "浅色"
+		if d.lightTheme {
+			themeLabel = "深色"
+		}
+		if terminalActionButton(c, "theme-toggle", themeLabel, appearanceIcon, false, false).Tooltip("切换" + themeLabel + "主题").Clicked() {
+			d.lightTheme = !d.lightTheme
+			d.savePreference("light", d.lightTheme)
+		}
+		settings := terminalActionButton(c, "settings-toggle", d.settingsButtonLabel(), settingsIcon, d.showSettings || d.updateAvailable != nil, false)
+		if settings.Clicked() {
+			d.showSettings = !d.showSettings
+		}
+		ui.PopoverBase(c, settings, &d.showSettings, func(panel ui.Element) {
+			panel.AttachTo(settings, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() { d.settingsView(c, height) })
+		})
+		terminalActionButton(c, "local-terminal", "新建标签页", plusIcon, d.workspace == "new-tab", d.busy && !d.canSwitchSession()).OnClick(d.openNewTab)
+	})
+}
+
+func workspaceTabButton(c *ui.Context, key, label string, icon *ui.SVG, active bool) ui.Element {
+	width, _ := c.Size()
+	labelWidth := float32(160)
+	if width < 800 {
+		labelWidth = 100
+	}
+	button := ui.Button(c.Key(key), "").Label(label).Tooltip(label).Height(32).Shrink(0).Padding(6, 10).Gap(8).BorderWidth(0).Radius(7).Selected(active).Background(c.Theme().Surface)
+	color := c.Theme().TextMuted
+	if active {
+		button = button.Background(c.Theme().SurfacePressed)
+		color = c.Theme().Text
+	} else if button.Hovered() {
+		button = button.Background(c.Theme().SurfaceHover)
+		color = c.Theme().Text
+	}
+	button.Children(func() {
+		if icon != nil {
+			ui.Icon(c, icon).Width(16).Height(16).TextColor(color)
+		}
+		ui.Text(c, label).FontSize(13).MaxWidth(labelWidth).SingleLine().TextColor(color)
+	})
+	return button
+}
+
+func workspaceTabClose(c *ui.Context, key, label string, disabled bool) ui.Element {
+	button := ui.Button(c.Key(key), "").Label(label).Tooltip(label).Width(26).Height(28).Padding(6).BorderWidth(0).Radius(5).Background(ui.Transparent).Disabled(disabled)
+	color := c.Theme().TextMuted
+	if button.Hovered() {
+		button = button.Background(c.Theme().SurfaceHover)
+		color = c.Theme().Text
+	}
+	button.Children(func() { ui.Icon(c, closeIcon).Width(12).Height(12).TextColor(color) })
+	return button
+}
+
+func workspaceTabSurface(c *ui.Context, active bool) ui.Color {
+	if active {
+		return c.Theme().SurfacePressed
+	}
+	return c.Theme().Surface
+}

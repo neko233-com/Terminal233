@@ -94,6 +94,28 @@ func TestWorkspaceVisualReview(t *testing.T) {
 			}
 		})
 	}
+	for _, light := range []bool{false, true} {
+		name := "integrated-files-dark"
+		if light {
+			name = "integrated-files-light"
+		}
+		t.Run(name, func(t *testing.T) {
+			term := groupTestTerminals(t, 1)[0]
+			d := &desktop{workspace: "files", lightTheme: light, railExpanded: true, currentSession: 1, term: term, fileDir: "/home/devops", files: []remoteFile{{Name: "services", IsDir: true}, {Name: "README.md", Size: 2048}},
+				localPane: localFilePane{initialized: true, directory: "C:/Users/devops", input: "C:/Users/devops", files: []remoteFile{{Name: "Documents", IsDir: true}, {Name: "config.json", Size: 512}}},
+				sessions:  []*workspaceSession{{id: 1, label: "Production API", term: term}},
+			}
+			v := ui.NewTester(d.view, 1400, 900)
+			f, err := os.Create(filepath.Join(root, name+".png"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			if err := png.Encode(f, v.Image()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 	t.Run("terminal", func(t *testing.T) {
 		term := groupTestTerminals(t, 1)[0]
 		term.Feed([]byte("\x1b[38;5;40mdevops@production\x1b[0m:~/services/api$ git status\r\nOn branch main\r\nYour branch is up to date with 'origin/main'.\r\n\r\n\x1b[32mworking tree clean\x1b[0m\r\n\r\n\x1b[38;5;40mdevops@production\x1b[0m:~/services/api$ "))

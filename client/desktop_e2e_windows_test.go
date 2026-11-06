@@ -2483,7 +2483,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "当前会话：本机终端 2") {
 		t.Fatalf("could not restore second tab: %s", tree)
 	}
-	call("act", map[string]any{"key": "disconnect", "action": "press"})
+	call("act", map[string]any{"key": "session-close-2", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -2495,7 +2495,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "已关闭会话；当前：本机终端 3") {
 		t.Fatalf("closing one tab lost the remaining session: %s", tree)
 	}
-	call("act", map[string]any{"key": "disconnect", "action": "press"})
+	call("act", map[string]any{"key": "session-close-3", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

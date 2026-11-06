@@ -8,6 +8,10 @@ import (
 )
 
 func (d *desktop) sessionTabs(c *ui.Context) {
+	width, _ := c.Size()
+	revealKey := fmt.Sprintf("%s/%d/%d", d.workspace, d.currentSession, d.confirmTerminalGroupClose)
+	reveal := revealKey != d.lastTabRevealKey || width != d.lastTabRevealWidth
+	d.lastTabRevealKey, d.lastTabRevealWidth = revealKey, width
 	closeSessionID, closeGroupID, disbandGroupID := 0, 0, 0
 	var moveFrom, moveTo sessionDragID
 	var splitFrom, splitTo sessionDragID
@@ -37,10 +41,15 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 	for index, entry := range tabs {
 		tabInfo := entry
 		index := index
-		ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
+		active := d.workspace == "terminal" && d.terminalGroupFor(d.currentSession) == tabInfo.group
+		if tabInfo.group == nil {
+			s := tabInfo.sessions[0]
+			active = s.id == d.currentSession && ((s.fileOnly && d.workspace == "files") || (!s.fileOnly && d.workspace == "terminal"))
+		}
+		container := ui.Row(c.Key(fmt.Sprintf("session-tab-surface-%d", tabInfo.representative))).Height(36).Shrink(0).Padding(2).Gap(0).Radius(8).AlignItems(ui.Center).Background(workspaceTabSurface(c, active))
+		container.Children(func() {
 			if g := tabInfo.group; g != nil {
-				active := d.workspace == "terminal" && d.terminalGroupFor(d.currentSession) == g
-				tab := workspaceButton(c, fmt.Sprintf("group-tab-%d", g.id), g.name, active).Label("工作区：" + g.name).Tooltip("拖入主机或终端加入分屏；拖到边缘调整顺序").Disabled(!d.canSwitchSession()).Drag(sessionDragID(tabInfo.representative))
+				tab := workspaceTabButton(c, fmt.Sprintf("group-tab-%d", g.id), g.name, splitIcon, active).Label("工作区：" + g.name).Tooltip(g.name + " · 拖入主机或终端加入分屏；拖到边缘调整顺序").Disabled(!d.canSwitchSession()).Drag(sessionDragID(tabInfo.representative))
 				tab.ContextMenu(func(menu *ui.Menu) {
 					if menu.Item("向左移动").Disabled(index == 0).Chosen() {
 						moveFrom, moveTo = sessionDragID(tabInfo.representative), sessionDragID(tabs[index-1].representative)
@@ -85,28 +94,35 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 				}
 				handleDrop(tab, tabInfo.representative)
 				if d.workspaceGroupDirty(g) {
-					if ui.Button(c.Key(fmt.Sprintf("group-save-%d", g.id)), "●").Label("保存工作区：" + g.name).Tooltip("保存工作区").Width(24).Height(30).Padding(0).BorderWidth(0).Background(c.Theme().Background).TextColor(c.Theme().TextMuted).Disabled(d.busy).Clicked() {
+					if ui.Button(c.Key(fmt.Sprintf("group-save-%d", g.id)), "●").Label("保存工作区：" + g.name).Tooltip("保存工作区").Width(24).Height(28).Padding(0).BorderWidth(0).Background(ui.Transparent).TextColor(c.Theme().TextMuted).Disabled(d.busy).Clicked() {
 						d.selectSession(g.focused)
 						d.saveActiveWorkspaceGroup(g)
 					}
 				}
-				closeLabel, closeText := "关闭工作区："+g.name, "×"
+				closeLabel := "关闭工作区：" + g.name
+				var close ui.Element
 				if d.confirmTerminalGroupClose == g.id {
-					closeLabel, closeText = "确认关闭工作区："+g.name, "确认"
+					closeLabel = "确认关闭工作区：" + g.name
+					close = ui.Button(c.Key(fmt.Sprintf("group-close-%d", g.id)), "确认").Label(closeLabel).Height(28).Padding(4, 8).BorderWidth(0).Disabled(d.busy)
+				} else {
+					close = workspaceTabClose(c, fmt.Sprintf("group-close-%d", g.id), closeLabel, d.busy)
 				}
-				if ui.Button(c.Key(fmt.Sprintf("group-close-%d", g.id)), closeText).Label(closeLabel).Disabled(d.busy).Clicked() {
+				if close.Clicked() {
 					closeGroupID = g.id
 				}
 				if d.confirmTerminalGroupClose == g.id {
-					if ui.Button(c.Key(fmt.Sprintf("group-close-cancel-%d", g.id)), "取消").Label("取消关闭工作区：" + g.name).Clicked() {
+					if ui.Button(c.Key(fmt.Sprintf("group-close-cancel-%d", g.id)), "取消").Label("取消关闭工作区："+g.name).Height(28).Padding(4, 8).BorderWidth(0).Background(ui.Transparent).Clicked() {
 						d.confirmTerminalGroupClose = 0
 					}
 				}
 				return
 			}
 			s := tabInfo.sessions[0]
-			active := s.id == d.currentSession && ((s.fileOnly && d.workspace == "files") || (!s.fileOnly && d.workspace == "terminal"))
-			tab := workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), active).Label("会话标签：" + sessionDisplayLabel(s)).Tooltip("拖入主机或终端创建分屏；拖到边缘调整顺序").Disabled(!d.canSwitchSession()).Drag(sessionDragID(s.id))
+			icon := terminalIcon
+			if s.fileOnly {
+				icon = fileIcon
+			}
+			tab := workspaceTabButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), icon, active).Label("会话标签：" + sessionDisplayLabel(s)).Tooltip(sessionDisplayLabel(s) + " · 拖入主机或终端创建分屏；拖到边缘调整顺序").Disabled(!d.canSwitchSession()).Drag(sessionDragID(s.id))
 			tab.ContextMenu(func(menu *ui.Menu) {
 				if menu.Item("向左移动").Disabled(index == 0).Chosen() {
 					moveFrom, moveTo = sessionDragID(s.id), sessionDragID(tabs[index-1].representative)
@@ -123,21 +139,29 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 				d.selectSession(s.id)
 			}
 			handleDrop(tab, s.id)
-			if ui.Button(c.Key(fmt.Sprintf("session-close-%d", s.id)), "×").Label("关闭会话：" + s.label).Disabled(d.busy).Clicked() {
+			if workspaceTabClose(c, fmt.Sprintf("session-close-%d", s.id), "关闭会话："+s.label, d.busy).Clicked() {
 				closeSessionID = s.id
 			}
 		})
+		confirming := tabInfo.group != nil && d.confirmTerminalGroupClose == tabInfo.group.id
+		if reveal && (confirming || (d.confirmTerminalGroupClose == 0 && active)) {
+			container.ScrollIntoView()
+		}
 	}
 	if d.newTabOpen {
-		ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
-			if workspaceButton(c, "new-tab-session", "新标签页", d.workspace == "new-tab").Label("切换到新标签页").Clicked() {
+		container := ui.Row(c.Key("new-tab-surface")).Height(36).Shrink(0).Padding(2).Gap(0).Radius(8).AlignItems(ui.Center).Background(workspaceTabSurface(c, d.workspace == "new-tab"))
+		container.Children(func() {
+			if workspaceTabButton(c, "new-tab-session", "新标签页", nil, d.workspace == "new-tab").Label("切换到新标签页").Clicked() {
 				d.confirmTerminalGroupClose = 0
 				d.workspace = "new-tab"
 			}
-			if ui.Button(c.Key("new-tab-close"), "×").Label("关闭新标签页").Clicked() {
+			if workspaceTabClose(c, "new-tab-close", "关闭新标签页", false).Clicked() {
 				d.closeNewTab()
 			}
 		})
+		if d.workspace == "new-tab" && reveal && d.confirmTerminalGroupClose == 0 {
+			container.ScrollIntoView()
+		}
 	}
 	if hostTarget != 0 {
 		d.startWorkspaceHostDrop(hostTarget, localHost, cloudHost)

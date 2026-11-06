@@ -16,6 +16,8 @@ import (
 )
 
 type desktop struct {
+	lastTabRevealKey                                                                        string
+	lastTabRevealWidth                                                                      float32
 	workspace                                                                               string
 	newTabOpen                                                                              bool
 	newTabQuery, newTabReturn, newTabStatus                                                 string
@@ -316,6 +318,12 @@ func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	mods := ui.Cmd | ui.Shift
 	group := d.terminalGroupFor(d.currentSession)
 	switch {
+	case (d.workspace == "terminal" || d.workspace == "files" || d.workspace == "new-tab") && !d.busy && c.Shortcut(ui.Cmd, ui.KeyW):
+		if d.workspace == "new-tab" {
+			d.closeNewTab()
+		} else {
+			d.closeCurrentSession()
+		}
 	case (d.workspace == "terminal" || d.workspace == "files") && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(ui.Cmd, ui.KeyTab):
 		d.selectAdjacentSession(1)
 	case (d.workspace == "terminal" || d.workspace == "files") && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(mods, ui.KeyTab):
@@ -607,71 +615,10 @@ func (d *desktop) view(c *ui.Context) {
 	}
 	t := c.Theme()
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Padding(8, 16).Gap(10).AlignItems(ui.Center).Background(workspaceChrome(c)).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-			sidebarLabel := "收起侧栏"
-			if !d.sidebarVisible() {
-				sidebarLabel = "展开侧栏"
-			}
-			if terminalActionButton(c, "toggle-sidebar", sidebarLabel, menuIcon, false, false).Clicked() {
-				if (d.workspace == "terminal" && d.term != nil) || d.workspace == "new-tab" {
-					d.terminalNavigationOpen = !d.terminalNavigationOpen
-				} else {
-					d.sidebarCollapsed = !d.sidebarCollapsed
-					d.savePreference("sidebar", d.sidebarCollapsed)
-				}
-			}
-			ui.Text(c, "NekoSSH").FontSize(20).Bold()
-			if d.preferencesStatus != "" {
-				ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).Wrap()
-			}
-			if len(d.sessions) > 0 || d.newTabOpen {
-				if workspaceButton(c, "workspace-hosts-tab", "主机", d.workspace == "" || d.workspace == "connections").Clicked() {
-					d.workspace = "connections"
-				}
-			}
-			if width >= 1100 && (len(d.sessions) > 0 || d.newTabOpen) {
-				ui.ScrollHorizontal(c).Grow(1).Gap(6).Children(func() { d.sessionTabs(c) })
-			} else {
-				ui.Box(c).Grow(1)
-			}
-			if d.workspaceRestore != nil && d.workspace != "new-tab" {
-				label := "取消恢复"
-				if d.workspaceRestore.groupQuick {
-					label = "取消连接"
-				}
-				if ui.Button(c.Key("workspace-restore-cancel-header"), label).Disabled(d.workspaceRestore.cancelling).Clicked() {
-					d.cancelWorkspaceRestore()
-				}
-			}
-			themeLabel := "浅色"
-			if d.lightTheme {
-				themeLabel = "深色"
-			}
-			if terminalActionButton(c, "theme-toggle", themeLabel, appearanceIcon, false, false).Tooltip("切换" + themeLabel + "主题").Clicked() {
-				d.lightTheme = !d.lightTheme
-				d.savePreference("light", d.lightTheme)
-			}
-			settingsLabel := d.settingsButtonLabel()
-			settingsButton := terminalActionButton(c, "settings-toggle", settingsLabel, settingsIcon, d.showSettings || d.updateAvailable != nil, false)
-			if settingsButton.Clicked() {
-				d.showSettings = !d.showSettings
-			}
-			ui.PopoverBase(c, settingsButton, &d.showSettings, func(panel ui.Element) {
-				panel.AttachTo(settingsButton, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() { d.settingsView(c, height) })
-			})
-			terminalActionButton(c, "local-terminal", "新建标签页", plusIcon, d.workspace == "new-tab", d.busy && !d.canSwitchSession()).OnClick(d.openNewTab)
-			closeLabel, closeDisabled := "关闭当前会话", d.busy || d.currentSession == 0
-			if d.workspace == "new-tab" {
-				closeLabel, closeDisabled = "关闭新标签页", false
-			}
-			if terminalActionButton(c, "disconnect", closeLabel, closeIcon, false, closeDisabled).Clicked() {
-				if d.workspace == "new-tab" {
-					d.closeNewTab()
-				} else {
-					d.closeCurrentSession()
-				}
-			}
-		})
+		d.workspaceHeader(c, width, height)
+		if d.preferencesStatus != "" {
+			ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).FillWidth().Padding(4, 12).Wrap()
+		}
 		showSidebar := d.sidebarVisible()
 		workspaceWidth := width
 		if showSidebar {
@@ -680,7 +627,7 @@ func (d *desktop) view(c *ui.Context) {
 		compactAuxiliaryPanels := height < 650 || (workspaceWidth < 940 && height < 1000)
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
 			if showSidebar {
-				ui.Scroll(c).Width(d.sidebarWidth(width)).FillHeight().Background(workspaceChrome(c)).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
+				ui.Scroll(c).Width(d.sidebarWidth(width)).FillHeight().Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
 					if !d.railExpanded {
 						d.compactWorkspaceNavigation(c)
 						return
@@ -878,9 +825,6 @@ func (d *desktop) view(c *ui.Context) {
 			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
 				if d.workspace == "terminal" || d.workspace == "new-tab" {
-					if width < 1100 {
-						ui.ScrollHorizontal(c).FillWidth().Padding(8, 12).Gap(6).Children(func() { d.sessionTabs(c) })
-					}
 					if d.workspace == "new-tab" {
 						ui.Scroll(c).Grow(1).FillWidth().Children(func() { d.newTabView(c) })
 						return
