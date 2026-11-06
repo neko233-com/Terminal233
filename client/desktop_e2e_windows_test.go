@@ -852,7 +852,9 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "本机文件") {
 		t.Fatalf("local file workspace missing: %s", tree)
 	}
-	if !strings.Contains(tree, "pick-batch-upload") {
+	// The picker can be outside the viewport even while the tools are open.
+	// Read the toggle's state instead of treating a missing picker as closed.
+	if !strings.Contains(tree, "收起文件操作") {
 		call("act", map[string]any{"key": "file-tools-toggle", "action": "press"})
 	}
 	deadline = time.Now().Add(5 * time.Second)
