@@ -1911,6 +1911,55 @@ func TestDesktopNativeWindow(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	// Switching immediately after an edit must save before replacing the form.
+	call("act", map[string]any{"key": "profile-label", "action": "setValue", "text": "native-edited-host"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "profile-label" && fmt.Sprint(node["value"]) == "native-edited-host" {
+				deadline = time.Time{}
+				break
+			}
+		}
+		if deadline.IsZero() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !deadline.IsZero() {
+		t.Fatal("native host edit was not applied")
+	}
+	call("act", map[string]any{"key": "connection-new", "action": "press"})
+	newEditor := false
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "host" && (node["value"] == nil || fmt.Sprint(node["value"]) == "") {
+				newEditor = true
+				break
+			}
+		}
+		if newEditor {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	data, readErr := os.ReadFile(filepath.Join(configDir, "NekoSSH", "profiles.json"))
+	if !newEditor || readErr != nil || !strings.Contains(string(data), "native-edited-host") {
+		t.Fatal("native host navigation did not flush the pending edit")
+	}
+	call("act", map[string]any{"key": "profile-1", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "使用已信任指纹连接") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	call("act", map[string]any{"key": "key-options-toggle", "action": "scrollIntoView"})
 	call("act", map[string]any{"key": "key-options-toggle", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)

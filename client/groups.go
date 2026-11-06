@@ -119,15 +119,15 @@ func (d *desktop) profileGroupCards(c *ui.Context, cardWidth float32, draftBlock
 			})
 			card.ContextMenu(func(menu *ui.Menu) {
 				if menu.Item("管理分组").Disabled(draftBlocked).Chosen() {
-					if d.editConnection {
-						d.closeConnectionEditor()
+					if !d.closeConnectionForNavigation() {
+						return
 					}
 					d.profileFilter, d.showGroupControls, d.confirmGroupDelete = group, true, false
 				}
 			})
 			if card.Clicked() {
-				if d.editConnection {
-					d.closeConnectionEditor()
+				if !d.closeConnectionForNavigation() {
+					return
 				}
 				d.profileFilter, d.confirmGroupDelete = group, false
 				d.profileFavorites, d.profileRecent = false, false
@@ -135,11 +135,11 @@ func (d *desktop) profileGroupCards(c *ui.Context, cardWidth float32, draftBlock
 				d.profileInspectorAt = time.Time{}
 			}
 			if cloud {
-				if dragged, ok := ui.Drop[cloudGroupDragID](card); ok && !d.busy && !draftBlocked {
+				if dragged, ok := ui.Drop[cloudGroupDragID](card); ok && !d.busy && !draftBlocked && d.prepareConnectionNavigation() {
 					d.cloudGroupOperation("move", string(dragged), group)
 				}
 			} else {
-				if dragged, ok := ui.Drop[profileID](card); ok && !d.busy && !draftBlocked {
+				if dragged, ok := ui.Drop[profileID](card); ok && !d.busy && !draftBlocked && d.prepareConnectionNavigation() {
 					d.moveProfileToGroup(dragged, group)
 				}
 			}

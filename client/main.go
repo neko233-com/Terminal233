@@ -394,7 +394,7 @@ func (d *desktop) view(c *ui.Context) {
 			}
 		}
 	}
-	draftBlocked := d.hasUnsavedConnection()
+	draftBlocked := d.connectionNavigationBlocked()
 	if (d.workspace == "files" || d.workspace == "terminal") && d.fileFollowTerminal {
 		d.followReportedDirectory(false)
 	}
@@ -516,10 +516,10 @@ func (d *desktop) view(c *ui.Context) {
 								connectionCount += len(d.accounts)
 							}
 							if navigationButton(c, "group-all", fmt.Sprintf("全部连接  %d", connectionCount), d.profileFilter == "" && !d.profileFavorites && !d.profileRecent).Disabled(draftBlocked).Clicked() {
-								d.workspace = "connections"
-								if d.editConnection {
-									d.closeConnectionEditor()
+								if !d.closeConnectionForNavigation() {
+									return
 								}
+								d.workspace = "connections"
 								d.profileFilter = ""
 								d.profileFavorites = false
 								d.profileRecent = false
@@ -542,10 +542,10 @@ func (d *desktop) view(c *ui.Context) {
 								}
 							}
 							if navigationButton(c, "group-favorites", fmt.Sprintf("收藏的连接  %d", favorites), d.profileFavorites).Disabled(draftBlocked).Clicked() {
-								d.workspace = "connections"
-								if d.editConnection {
-									d.closeConnectionEditor()
+								if !d.closeConnectionForNavigation() {
+									return
 								}
+								d.workspace = "connections"
 								d.profileFilter = ""
 								d.profileFavorites = true
 								d.profileRecent = false
@@ -554,10 +554,10 @@ func (d *desktop) view(c *ui.Context) {
 								}
 							}
 							if navigationButton(c, "group-recent", fmt.Sprintf("最近连接  %d", recent), d.profileRecent).Disabled(draftBlocked).Clicked() {
-								d.workspace = "connections"
-								if d.editConnection {
-									d.closeConnectionEditor()
+								if !d.closeConnectionForNavigation() {
+									return
 								}
+								d.workspace = "connections"
 								d.profileFilter = ""
 								d.profileFavorites = false
 								d.profileRecent = true
@@ -601,10 +601,10 @@ func (d *desktop) view(c *ui.Context) {
 									button := navigationButton(c, "group-entry-"+name, fmt.Sprintf("%s  %d", groupLeaf(name), counts[name]), d.profileFilter == name).Label(groupLabel).Disabled(d.busy || draftBlocked).Grow(1)
 									button.ContextMenu(func(menu *ui.Menu) {
 										if menu.Item("管理分组").Disabled(draftBlocked).Chosen() {
-											d.workspace = "connections"
-											if d.editConnection {
-												d.closeConnectionEditor()
+											if !d.closeConnectionForNavigation() {
+												return
 											}
+											d.workspace = "connections"
 											if isCloudGroups {
 												d.profileSource = "cloud"
 											} else {
@@ -615,10 +615,10 @@ func (d *desktop) view(c *ui.Context) {
 										}
 									})
 									if button.Clicked() {
-										d.workspace = "connections"
-										if d.editConnection {
-											d.closeConnectionEditor()
+										if !d.closeConnectionForNavigation() {
+											return
 										}
+										d.workspace = "connections"
 										d.profileFilter = name
 										d.confirmGroupDelete = false
 										d.profileFavorites = false
@@ -628,11 +628,11 @@ func (d *desktop) view(c *ui.Context) {
 										}
 									}
 									if isCloudGroups {
-										if dragged, ok := ui.Drop[cloudGroupDragID](button); ok && !d.busy {
+										if dragged, ok := ui.Drop[cloudGroupDragID](button); ok && !d.busy && d.prepareConnectionNavigation() {
 											d.cloudGroupOperation("move", string(dragged), name)
 										}
 									} else {
-										if dragged, ok := ui.Drop[profileID](button); ok && !d.busy {
+										if dragged, ok := ui.Drop[profileID](button); ok && !d.busy && d.prepareConnectionNavigation() {
 											d.moveProfileToGroup(dragged, name)
 										}
 									}
@@ -1011,7 +1011,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.88"
+const version = "0.3.89"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

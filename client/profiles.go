@@ -155,10 +155,20 @@ func (d *desktop) openProfileConnection(p profile) {
 	}
 }
 
+// Re-read after a navigation flush, which may have updated the selected host.
+func (d *desktop) currentProfile(id profileID) (profile, bool) {
+	for _, p := range d.profiles {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return profile{}, false
+}
+
 func (d *desktop) profileView(c *ui.Context) {
 	width, _ := c.Size()
 	inspectorCapable := d.connectionInspectorDocked(width)
-	draftBlocked := d.hasUnsavedConnection()
+	draftBlocked := d.connectionNavigationBlocked()
 	docked := d.connectionInspectorDocked(width) && d.editConnection
 	if !d.sidebarCollapsed {
 		width -= workspaceSidebarWidth(width)
@@ -186,10 +196,6 @@ func (d *desktop) profileView(c *ui.Context) {
 		}
 		ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
 			ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("连接列表：搜索连接或快速连接").Placeholder("搜索主机或输入 SSH 地址").Grow(1).OnSubmit(func() {
-				if d.hasUnsavedConnection() {
-					d.status = "请先保存或关闭当前主机详情。"
-					return
-				}
 				d.submitConnectionSearch()
 			})
 			if looksLikeQuickConnection(d.profileSearch) {
@@ -200,6 +206,9 @@ func (d *desktop) profileView(c *ui.Context) {
 		})
 		ui.Row(c).FillWidth().Wrap().Gap(8).Padding(0, 0, 10, 0).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).AlignItems(ui.Center).Children(func() {
 			if ui.Button(c.Key("connection-new"), "+ 新建连接").Disabled(draftBlocked).Clicked() {
+				if !d.prepareConnectionNavigation() {
+					return
+				}
 				d.settings = connectionSettings{Port: "22"}
 				d.profileSecretError = false
 				d.showKeyOptions = false
@@ -271,8 +280,8 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 	if d.profileFilter != "" {
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 			if ui.Button(c.Key("profile-group-parent"), "‹").Label("返回上级分组").Tooltip("返回上级分组").Width(36).Disabled(draftBlocked).Clicked() {
-				if d.editConnection {
-					d.closeConnectionEditor()
+				if !d.closeConnectionForNavigation() {
+					return
 				}
 				if i := strings.LastIndex(d.profileFilter, "/"); i >= 0 {
 					d.profileFilter = d.profileFilter[:i]
@@ -517,13 +526,23 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				blockedByEditor := draftBlocked
 				row.ContextMenu(func(menu *ui.Menu) {
 					if menu.Item("连接").Disabled(d.busy || blockedByEditor || len(d.sessions) >= maxWorkspaceSessions).Chosen() {
-						d.openProfileConnection(p)
+						if d.prepareConnectionNavigation() {
+							if current, ok := d.currentProfile(p.ID); ok {
+								d.openProfileConnection(current)
+							}
+						}
 					}
 					if menu.Item("载入").Disabled(blockedByEditor).Chosen() {
-						d.loadProfile(p)
+						if d.prepareConnectionNavigation() {
+							if current, ok := d.currentProfile(p.ID); ok {
+								d.loadProfile(current)
+							}
+						}
 					}
 					if menu.Item("移除…").Disabled(blockedByEditor).Chosen() {
-						d.confirmProfileDelete = p.ID
+						if d.prepareConnectionNavigation() {
+							d.confirmProfileDelete = p.ID
+						}
 					}
 					favorite := "加入收藏"
 					if p.Favorite {
@@ -538,13 +557,21 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 					}
 				})
 				if row.DoubleClicked() && !blockedByEditor {
-					d.openProfileConnection(p)
+					if d.prepareConnectionNavigation() {
+						if current, ok := d.currentProfile(p.ID); ok {
+							d.openProfileConnection(current)
+						}
+					}
 				} else if row.Clicked() {
 					if blockedByEditor {
 						d.status = "请先保存或关闭当前主机详情。"
+					} else if !d.prepareConnectionNavigation() {
+						// A failed save keeps the current editor and its error.
 					} else if d.editConnection {
 						if d.settingsFromCloud || d.selectedProfile != string(p.ID) {
-							d.loadProfile(p)
+							if current, ok := d.currentProfile(p.ID); ok {
+								d.loadProfile(current)
+							}
 						}
 					} else {
 						d.selectedProfile = string(p.ID)
@@ -582,10 +609,18 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 						}
 						ui.Box(c).Grow(1)
 						if ui.Button(c.Key("profile-connect-"+string(p.ID)), "↗").Label("连接：" + p.Label).Tooltip("连接").Width(36).Disabled(d.busy || blockedByEditor || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
-							d.openProfileConnection(p)
+							if d.prepareConnectionNavigation() {
+								if current, ok := d.currentProfile(p.ID); ok {
+									d.openProfileConnection(current)
+								}
+							}
 						}
 						if ui.Button(c.Key("profile-edit-"+string(p.ID)), "✎").Label("编辑").Tooltip("编辑连接").Width(36).Disabled(blockedByEditor).Clicked() {
-							d.loadProfile(p)
+							if d.prepareConnectionNavigation() {
+								if current, ok := d.currentProfile(p.ID); ok {
+									d.loadProfile(current)
+								}
+							}
 						}
 						if ui.Button(c.Key("profile-copy-"+string(p.ID)), "⧉").Label("复制地址：" + p.Label).Tooltip("复制地址").Width(36).Clicked() {
 							mygo.Clipboard.WriteText(net.JoinHostPort(p.Settings.Host, p.Settings.Port))
@@ -687,14 +722,20 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 					blockedByEditor := draftBlocked
 					row.ContextMenu(func(menu *ui.Menu) {
 						if menu.Item("连接").Disabled(d.busy || blockedByEditor).Chosen() {
-							d.loadCloudAccount(account)
+							if d.prepareConnectionNavigation() {
+								d.loadCloudAccount(account)
+							}
 						}
 					})
 					if row.DoubleClicked() && !blockedByEditor {
-						d.loadCloudAccount(account)
+						if d.prepareConnectionNavigation() {
+							d.loadCloudAccount(account)
+						}
 					} else if row.Clicked() {
 						if blockedByEditor {
 							d.status = "请先保存或关闭当前主机详情。"
+						} else if !d.prepareConnectionNavigation() {
+							// A failed save keeps the current editor and its error.
 						} else if d.editConnection {
 							if !d.settingsFromCloud || d.selectedCloudProfile != account.ID {
 								d.loadCloudAccount(account)
@@ -714,7 +755,9 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 							}
 							ui.Box(c).Grow(1)
 							if ui.Button(c.Key("profile-cloud-connect-"+account.ID), "↗").Label("连接云端：" + account.Label).Tooltip("连接").Width(36).Disabled(d.busy || blockedByEditor).Clicked() {
-								d.loadCloudAccount(account)
+								if d.prepareConnectionNavigation() {
+									d.loadCloudAccount(account)
+								}
 							}
 							if ui.Button(c.Key("profile-cloud-copy-"+account.ID), "⧉").Label("复制云端地址：" + account.Label).Tooltip("复制地址").Width(36).Clicked() {
 								mygo.Clipboard.WriteText(net.JoinHostPort(account.Host, fmt.Sprint(account.Port)))
@@ -732,7 +775,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 	if (len(d.profiles) > 0 || d.cloud != nil || query != "") && shown == 0 && !showLocal {
 		ui.Text(c, "没有匹配的连接").TextColor(c.Theme().TextMuted)
 	}
-	if moveFrom != "" {
+	if moveFrom != "" && d.prepareConnectionNavigation() {
 		d.moveProfile(moveFrom, moveTo)
 		if err := d.saveProfiles(); err != nil {
 			d.status = "排序已调整，但本机保存失败：" + err.Error()

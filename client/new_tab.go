@@ -35,7 +35,11 @@ func (d *desktop) closeNewTab() {
 }
 
 func (d *desktop) newTabQuickConnect() {
-	if d.busy || d.hasUnsavedConnection() || len(d.sessions) >= maxWorkspaceSessions {
+	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
+		return
+	}
+	if !d.prepareConnectionNavigation() {
+		d.newTabStatus = d.status
 		return
 	}
 	if _, err := parseQuickConnection(d.newTabQuery); err != nil {
@@ -67,7 +71,7 @@ func newTabMatches(query, text string) bool {
 
 func (d *desktop) newTabResults(query string) []newTabResult {
 	query = strings.TrimSpace(query)
-	openDisabled := d.busy || d.hasUnsavedConnection() || len(d.sessions) >= maxWorkspaceSessions
+	openDisabled := d.busy || d.connectionNavigationBlocked() || len(d.sessions) >= maxWorkspaceSessions
 	localDisabled := d.busy || len(d.sessions) >= maxWorkspaceSessions
 	quick := newTabResult{key: "new-tab-quick-connect", label: "填写 SSH 连接信息", accessible: "填写 SSH 连接信息", kind: "quick", enabled: !openDisabled}
 	results := make([]newTabResult, 0, 1+len(d.sessions)+len(d.profiles)+len(d.accounts))
@@ -137,6 +141,10 @@ func (d *desktop) activateNewTabResult(key string) {
 		case "session":
 			d.selectSession(result.sessionID)
 		case "profile":
+			if !d.prepareConnectionNavigation() {
+				d.newTabStatus = d.status
+				return
+			}
 			for _, p := range d.profiles {
 				if string(p.ID) == result.id {
 					d.newTabOpen, d.newTabQuery = false, ""
@@ -146,6 +154,10 @@ func (d *desktop) activateNewTabResult(key string) {
 				}
 			}
 		case "cloud":
+			if !d.prepareConnectionNavigation() {
+				d.newTabStatus = d.status
+				return
+			}
 			for _, a := range d.accounts {
 				if a.ID == result.id {
 					d.newTabOpen, d.newTabQuery = false, ""
@@ -254,7 +266,7 @@ func (d *desktop) newTabView(c *ui.Context) {
 			if d.newTabStatus != "" {
 				ui.Text(c, d.newTabStatus).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 			}
-			if d.hasUnsavedConnection() {
+			if d.connectionNavigationBlocked() {
 				ui.Text(c, "主机详情有未保存的更改；保存或关闭后可打开其他主机。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 			}
 			if len(results) == 0 && strings.TrimSpace(d.newTabQuery) != "" {

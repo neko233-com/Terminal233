@@ -18,6 +18,9 @@ func (d *desktop) submitConnectionSearch() {
 	if d.busy || !looksLikeQuickConnection(d.profileSearch) {
 		return
 	}
+	if !d.prepareConnectionNavigation() {
+		return
+	}
 	d.quickConnect = d.profileSearch
 	d.openQuickConnection()
 	if d.editConnection {

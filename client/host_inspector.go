@@ -46,6 +46,42 @@ func (d *desktop) hasUnsavedConnection() bool {
 	return d.editConnection && d.connectionDraftSet && d.currentConnectionDraft() != d.connectionDraft
 }
 
+// A complete local draft can be committed when the user moves elsewhere,
+// without waiting for the debounce timer. Incomplete and cloud drafts still
+// require an explicit decision, and failed writes never discard the form.
+func (d *desktop) connectionDraftCanAutosave() bool {
+	if !d.editConnection || !d.connectionDraftSet || d.settingsFromCloud || d.profilePath == "" || d.busy || d.profileStoreConflict || d.profileStoreBlocked || d.profileSecretError || (!d.profileAutoDirty && d.profileAutoAt.IsZero()) {
+		return false
+	}
+	_, err := d.settings.address()
+	return err == nil
+}
+
+func (d *desktop) connectionNavigationBlocked() bool {
+	return d.hasUnsavedConnection() && !d.connectionDraftCanAutosave()
+}
+
+func (d *desktop) prepareConnectionNavigation() bool {
+	attemptedSave := d.connectionDraftCanAutosave()
+	if attemptedSave {
+		d.flushProfileAutosave()
+	}
+	if d.hasUnsavedConnection() {
+		if !attemptedSave {
+			d.status = "请先保存或关闭当前主机详情。"
+		}
+		return false
+	}
+	return true
+}
+
+func (d *desktop) closeConnectionForNavigation() bool {
+	if !d.prepareConnectionNavigation() {
+		return false
+	}
+	return !d.editConnection || d.closeConnectionEditor()
+}
+
 func (d *desktop) closeConnectionEditor() bool {
 	if d.busy {
 		return false

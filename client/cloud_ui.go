@@ -520,14 +520,18 @@ func (d *desktop) cloudView(c *ui.Context) {
 	}
 	for _, item := range d.accounts {
 		account := item
-		row := ui.Button(c.Key("account-"+account.ID), account.Label).BorderWidth(0).Justify(ui.Start).Disabled(d.busy)
+		row := ui.Button(c.Key("account-"+account.ID), account.Label).BorderWidth(0).Justify(ui.Start).Disabled(d.busy || d.connectionNavigationBlocked())
 		row.ContextMenu(func(menu *ui.Menu) {
 			if d.canWriteCloudScope() && menu.Item("删除…").Chosen() {
 				d.prepareCloudDelete(account)
 			}
 		})
 		if row.Clicked() {
-			d.loadCloudAccount(account)
+			if d.prepareConnectionNavigation() {
+				d.loadCloudAccount(account)
+			} else {
+				d.cloudStatus = d.status
+			}
 		}
 	}
 }

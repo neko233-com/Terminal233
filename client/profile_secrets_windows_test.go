@@ -194,3 +194,23 @@ func TestCloudLogoutDoesNotEraseLocalCredentials(t *testing.T) {
 		t.Fatal("logout did not preserve local data and clear cloud credentials")
 	}
 }
+
+func TestNavigationSavesPendingProtectedCredential(t *testing.T) {
+	d, path := navigationFixture(t)
+	d.settings.Password, d.profileAutoDirty = "pending-secret", true
+	if !d.prepareConnectionNavigation() {
+		t.Fatal("valid credential draft failed to save")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || strings.Contains(string(data), "pending-secret") {
+		t.Fatal("credential leaked into plaintext storage")
+	}
+	var reopened desktop
+	if err := reopened.loadProfiles(path); err != nil {
+		t.Fatal(err)
+	}
+	reopened.loadProfile(reopened.profiles[0])
+	if reopened.settings.Password != "pending-secret" {
+		t.Fatal("navigation did not protect the pending credential")
+	}
+}

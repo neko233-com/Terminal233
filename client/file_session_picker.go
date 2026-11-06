@@ -30,7 +30,7 @@ func (d *desktop) selectFileSession(id int) {
 
 func (d *desktop) fileSessionPicker(c *ui.Context) {
 	query := strings.ToLower(strings.TrimSpace(d.fileSessionSearch))
-	draftBlocked := d.hasUnsavedConnection()
+	draftBlocked := d.connectionNavigationBlocked()
 	matches := func(text string) bool { return query == "" || strings.Contains(strings.ToLower(text), query) }
 	itemCount := len(d.sessions) + len(d.profiles)
 	if d.cloud != nil {
@@ -73,8 +73,16 @@ func (d *desktop) fileSessionPicker(c *ui.Context) {
 					}
 					shown++
 					if ui.Button(c.Key("file-picker-profile-"+string(p.ID)), name+" · 本机").Label("文件主机：" + name + " · 本机").FillWidth().Justify(ui.Start).Disabled(d.busy || draftBlocked || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+						if !d.prepareConnectionNavigation() {
+							d.fileStatus = d.status
+							return
+						}
+						current, ok := d.currentProfile(p.ID)
+						if !ok {
+							return
+						}
 						d.showFileSessionPicker, d.fileReturnAfterConnect = false, true
-						d.openProfileConnection(p)
+						d.openProfileConnection(current)
 					}
 				}
 				if d.cloud != nil {
@@ -89,6 +97,10 @@ func (d *desktop) fileSessionPicker(c *ui.Context) {
 						}
 						shown++
 						if ui.Button(c.Key("file-picker-cloud-"+a.ID), name+" · 云端").Label("文件主机：" + name + " · 云端").FillWidth().Justify(ui.Start).Disabled(d.busy || draftBlocked || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+							if !d.prepareConnectionNavigation() {
+								d.fileStatus = d.status
+								return
+							}
 							d.showFileSessionPicker, d.fileReturnAfterConnect = false, true
 							d.loadCloudAccount(a)
 						}
