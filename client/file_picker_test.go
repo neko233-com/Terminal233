@@ -124,6 +124,9 @@ func TestFileWorkspaceExposesBatchPicker(t *testing.T) {
 func TestConnectionFormExposesPrivateKeyPicker(t *testing.T) {
 	d := &desktop{workspace: "connections", editConnection: true}
 	view := ui.NewTester(d.view, 1200, 1600)
+	if err := view.Click("使用私钥…"); err != nil {
+		t.Fatal(err)
+	}
 	if !view.HasText("选择私钥文件…") {
 		t.Fatal("private key picker is missing")
 	}

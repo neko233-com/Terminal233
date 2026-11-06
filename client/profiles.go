@@ -85,6 +85,7 @@ func (d *desktop) moveProfile(from, to profileID) {
 func (d *desktop) loadProfile(p profile) {
 	d.workspace = "connections"
 	d.editConnection = true
+	d.showKeyOptions = false
 	d.showProfileInspector = false
 	d.profileInspectorAt = time.Time{}
 	d.selectedCloudProfile = ""
@@ -184,6 +185,7 @@ func (d *desktop) profileView(c *ui.Context) {
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
 		if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Disabled(draftBlocked).Clicked() {
 			d.settings = connectionSettings{Port: "22"}
+			d.showKeyOptions = false
 			d.settingsFromCloud = false
 			d.cloudFormSources = nil
 			d.cloudFormVersions = nil

@@ -77,3 +77,49 @@ func TestHostInspectorNarrowWindowUsesFullWidthEditor(t *testing.T) {
 		t.Fatal("narrow window should use the full-width editor")
 	}
 }
+
+func TestHostInspectorKeepsHeaderAndCloudActionVisible(t *testing.T) {
+	d := &desktop{workspace: "connections", editConnection: true, cloud: &cloudClient{}, settings: connectionSettings{Host: "one.test", Port: "22", User: "alice", Password: "test"}, fingerprint: "SHA256:verified"}
+	view := ui.NewTester(d.view, 1280, 600)
+	header, headerOK := view.Find("返回连接列表")
+	scroll, scrollOK := view.Find("主机详情内容")
+	cloud, cloudOK := view.Find("确认指纹并同步密码连接")
+	if !headerOK || !scrollOK || !cloudOK || cloud.Y+cloud.H > 600 {
+		t.Fatalf("header, form or cloud action missing: header=%+v form=%+v cloud=%+v", header, scroll, cloud)
+	}
+	view.Scroll(scroll.X+scroll.W/2, scroll.Y+scroll.H/2, 0, 500)
+	after, ok := view.Find("返回连接列表")
+	if !ok || after.Y != header.Y {
+		t.Fatal("host details header moved when the form scrolled")
+	}
+}
+
+func TestPrivateKeyOptionsNeverHideConfiguredAuthentication(t *testing.T) {
+	d := &desktop{workspace: "connections", editConnection: true}
+	view := ui.NewTester(d.view, 1200, 1600)
+	if view.HasText("私钥路径") {
+		t.Fatal("unused key options should start collapsed")
+	}
+	if err := view.Click("使用私钥…"); err != nil {
+		t.Fatal(err)
+	}
+	d.settings.KeyPath = "private-key"
+	view.Frame()
+	if !view.HasText("已配置私钥，连接时优先使用私钥。") {
+		t.Fatal("the effective authentication method is not visible")
+	}
+	if err := view.Click("收起私钥选项"); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasText("私钥路径") || d.settings.KeyPath != "private-key" {
+		t.Fatal("configured key was hidden or discarded")
+	}
+	d.settings.KeyPath = ""
+	view.Frame()
+	if err := view.Click("收起私钥选项"); err != nil {
+		t.Fatal(err)
+	}
+	if view.HasText("私钥路径") || !view.HasText("使用私钥…") {
+		t.Fatal("cleared key options did not collapse")
+	}
+}

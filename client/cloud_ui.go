@@ -350,6 +350,7 @@ func (d *desktop) finishCloudSave(accounts []cloudAccount, mutationErr, refreshE
 func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.workspace = "connections"
 	d.editConnection = true
+	d.showKeyOptions = false
 	d.selectedProfile = ""
 	d.selectedCloudProfile = account.ID
 	d.showProfileInspector = false

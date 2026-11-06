@@ -1702,6 +1702,15 @@ func TestDesktopNativeWindow(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	call("act", map[string]any{"key": "key-options-toggle", "action": "scrollIntoView"})
+	call("act", map[string]any{"key": "key-options-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "key:pick-key") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	call("act", map[string]any{"key": "key", "action": "setValue", "text": keyPath})
 	call("act", map[string]any{"key": "profile-add", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
