@@ -85,6 +85,7 @@ id_xmss*
 !id_xmss*.pub
 ssh_host_*_key
 !ssh_host_*_key.pub
+*-cert.pub
 release-toolchain-lock.json
 release-toolchain-lock.local.json
 release-toolchain-lock.*.local.json

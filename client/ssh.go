@@ -286,7 +286,11 @@ func connectSSHClientThrough(ctx context.Context, s connectionSettings, via *ssh
 		if err != nil {
 			return nil, fmt.Errorf("解析私钥失败: %w", err)
 		}
-		auth = ssh.PublicKeys(signer)
+		signers, err := identitySigners(s.KeyPath, signer)
+		if err != nil {
+			return nil, err
+		}
+		auth = ssh.PublicKeys(signers...)
 	} else if s.Password != "" {
 		auth = ssh.Password(s.Password)
 	} else {

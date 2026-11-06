@@ -1217,7 +1217,7 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 				}
 				ui.Text(c, "私钥文件（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
 				ui.Row(c).FillWidth().Gap(10).AlignItems(ui.End).Children(func() {
-					ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）").OnChange(markMetadataChanged).Grow(1)
+					ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Tooltip("自动识别私钥文件名加 -cert.pub 的 OpenSSH 用户证书").Placeholder("私钥路径（可选）").OnChange(markMetadataChanged).Grow(1)
 					if ui.Button(c.Key("pick-key"), "选择私钥文件…").Disabled(d.busy).Clicked() {
 						d.pickLocalPath("key")
 					}

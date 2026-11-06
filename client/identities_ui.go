@@ -59,7 +59,7 @@ func (d *desktop) identityView(c *ui.Context) {
 			ui.TextInput(c.Key("identity-user"), &draft.User).Label("身份用户名").Placeholder("用户名").FillWidth()
 			ui.TextInput(c.Key("identity-password"), &draft.Password).Label("身份密码").Placeholder("密码（可选）").Password().FillWidth()
 			ui.Row(c).FillWidth().Gap(8).Children(func() {
-				ui.TextInput(c.Key("identity-key"), &draft.KeyPath).Label("身份私钥路径").Placeholder("私钥文件路径（可选）").Grow(1)
+				ui.TextInput(c.Key("identity-key"), &draft.KeyPath).Label("身份私钥路径").Tooltip("自动识别私钥文件名加 -cert.pub 的 OpenSSH 用户证书").Placeholder("私钥文件路径（可选）").Grow(1)
 				if ui.Button(c.Key("identity-key-pick"), "选择…").Disabled(d.busy).Clicked() {
 					d.pickLocalPath("identity-key")
 				}
