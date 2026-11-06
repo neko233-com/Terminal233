@@ -24,6 +24,7 @@ type localFilePane struct {
 	history                            fileHistory
 	initialized, loading               bool
 	loadingDirectory                   string
+	statusAfterLoad                    string
 	generation                         uint64
 	paneSelection                      paneSelection
 }
@@ -175,6 +176,7 @@ func (d *desktop) requestLocalPane(dir string, historyIndex int) {
 	}
 	dir = filepath.Clean(dir)
 	d.localPane.input, d.localPane.loading, d.localPane.loadingDirectory = dir, true, dir
+	d.localPane.statusAfterLoad = ""
 	d.localPane.status = "正在读取本机目录…"
 	d.localPane.generation++
 	generation := d.localPane.generation
@@ -191,9 +193,14 @@ func (d *desktop) finishLocalPaneLoad(generation uint64, dir string, historyInde
 	}
 	d.localPane.loading = false
 	d.localPane.loadingDirectory = ""
+	after := d.localPane.statusAfterLoad
+	d.localPane.statusAfterLoad = ""
 	if err != nil {
 		d.localPane.input = d.localPane.directory
 		d.localPane.status = "读取本机目录失败：" + err.Error()
+		if after != "" {
+			d.localPane.status = after + "；" + d.localPane.status
+		}
 		return
 	}
 	if historyIndex < 0 || !d.localPane.history.commitNavigation(historyIndex, dir) {
@@ -203,6 +210,9 @@ func (d *desktop) finishLocalPaneLoad(generation uint64, dir string, historyInde
 	d.localPane.files, d.localPane.selected = files, ""
 	d.localPane.paneSelection = paneSelection{}
 	d.localPane.status = fmt.Sprintf("%d 个条目", len(files))
+	if after != "" {
+		d.localPane.status = after
+	}
 }
 
 func (d *desktop) navigateLocalPane(offset int) {

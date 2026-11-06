@@ -25,6 +25,7 @@ type secondaryRemotePane struct {
 	history                            fileHistory
 	loading                            bool
 	loadingDirectory                   string
+	statusAfterLoad                    string
 	generation                         uint64
 	paneSelection                      paneSelection
 }
@@ -206,6 +207,7 @@ func (d *desktop) requestSecondaryPane(dir string, historyIndex int) {
 	}
 	p := &d.secondaryPane
 	p.input, p.loading, p.loadingDirectory, p.status = dir, true, dir, "正在读取目录…"
+	p.statusAfterLoad = ""
 	p.generation++
 	generation, id, shell := p.generation, p.sessionID, p.shell
 	go func() {
@@ -221,9 +223,14 @@ func (d *desktop) finishSecondaryPaneLoad(generation uint64, id int, shell *remo
 	}
 	p.loading = false
 	p.loadingDirectory = ""
+	after := p.statusAfterLoad
+	p.statusAfterLoad = ""
 	if err != nil {
 		p.input = p.directory
 		p.status = "读取目录失败：" + err.Error()
+		if after != "" {
+			p.status = after + "；" + p.status
+		}
 		return
 	}
 	if historyIndex < 0 || !p.history.commitNavigation(historyIndex, dir) {
@@ -232,6 +239,9 @@ func (d *desktop) finishSecondaryPaneLoad(generation uint64, id int, shell *remo
 	p.directory, p.input, p.files, p.selected = dir, dir, files, ""
 	p.paneSelection = paneSelection{}
 	p.status = fmt.Sprintf("%d 个条目", len(files))
+	if after != "" {
+		p.status = after
+	}
 }
 
 func (d *desktop) secondaryPaneInputChanged() {
@@ -494,6 +504,24 @@ func (d *desktop) startPaneCopySources(src *remoteShell, srcDir string, dst *rem
 	}
 	d.setBatchFailures(rightID, rightShell, nil)
 	d.busy, d.fileStatus = true, "正在传输…"
+	leftCurrent := func() bool {
+		p := &d.secondaryPane
+		if leftID != 0 {
+			return p.sessionID == leftID && p.shell == leftShell && p.directory == leftDir && p.input == leftDir && p.generation == leftGeneration
+		}
+		return p.sessionID == 0 && d.localPane.directory == localDir && d.localPane.generation == localGeneration && sameLocalDirectory(d.localPane.input, localDir)
+	}
+	leftStatus := func(status string) {
+		if targetRight || !leftCurrent() {
+			return
+		}
+		if leftID != 0 {
+			d.secondaryPane.status = status
+		} else {
+			d.localPane.status = status
+		}
+	}
+	leftStatus("正在传输…")
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancelTransfer, d.transferSessionID = cancel, rightID
 	go func() {
@@ -506,6 +534,7 @@ func (d *desktop) startPaneCopySources(src *remoteShell, srcDir string, dst *rem
 				d.win.Update(func() {
 					if ctx.Err() == nil && d.cancelTransfer != nil && d.transferSessionID == rightID {
 						d.transferProgress(rightID, rightShell, rightDir, read)
+						leftStatus("正在传输 · 已读取 " + fileSizeLabel(remoteFile{Size: read}))
 					}
 				})
 			})
@@ -518,6 +547,7 @@ func (d *desktop) startPaneCopySources(src *remoteShell, srcDir string, dst *rem
 						return
 					}
 					status := fmt.Sprintf("正在传输 %d/%d · %s · 已读取 %s", index, total, name, fileSizeLabel(remoteFile{Size: read}))
+					leftStatus(status)
 					if d.currentSession == rightID && d.shell == rightShell && d.fileDir == rightDir {
 						d.fileStatus = status
 						return
@@ -533,25 +563,39 @@ func (d *desktop) startPaneCopySources(src *remoteShell, srcDir string, dst *rem
 		}
 		d.win.Update(func() {
 			changed := err == nil || partial
+			status := "传输完成"
 			if len(items) > 1 {
 				changed = batch.succeeded > 0 || batch.partial > 0
+				status = batch.status()
 				d.setBatchFailures(rightID, rightShell, batch.errors)
-				d.finishTransferStatus(rightID, rightShell, rightDir, batch.status(), targetRight && changed)
+				d.finishTransferStatus(rightID, rightShell, rightDir, status, targetRight && changed)
 			} else if partial && err != nil {
-				status := "目录复制失败，已创建的内容保留在目标目录：" + transferErrorText(err)
+				status = "目录复制失败，已创建的内容保留在目标目录：" + transferErrorText(err)
 				if errors.Is(err, context.Canceled) {
 					status = "目录复制已取消，已创建的内容保留在目标目录"
 				}
 				d.finishTransferStatus(rightID, rightShell, rightDir, status, targetRight)
 			} else {
+				if errors.Is(err, context.Canceled) {
+					status = "传输已取消；未完成的目标文件已清理"
+				} else if err != nil {
+					status = "传输失败：" + transferErrorText(err)
+				}
 				d.finishTransfer(rightID, rightShell, rightDir, targetRight, err)
 			}
 			p := &d.secondaryPane
-			if changed && !targetRight {
-				if leftID != 0 && p.sessionID == leftID && p.shell == leftShell && p.directory == leftDir && p.input == leftDir && p.generation == leftGeneration {
+			if !targetRight && leftCurrent() {
+				leftStatus(status)
+				if changed && leftID != 0 {
 					d.requestSecondaryPane(leftDir, -1)
-				} else if leftID == 0 && p.sessionID == 0 && d.localPane.directory == localDir && d.localPane.generation == localGeneration && sameLocalDirectory(d.localPane.input, localDir) {
+					if p.loading {
+						p.statusAfterLoad = status
+					}
+				} else if changed && leftID == 0 {
 					d.requestLocalPane(localDir, -1)
+					if d.localPane.loading {
+						d.localPane.statusAfterLoad = status
+					}
 				}
 			}
 		})

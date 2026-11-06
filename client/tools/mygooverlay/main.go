@@ -1,6 +1,5 @@
-// mygooverlay applies a narrow, verified input-event hook to the pinned MyGo
-// terminal at build time in a disposable build directory. It does not modify
-// the module cache or commit a dependency copy to the repository.
+// mygooverlay applies verified input and drag hooks to the pinned MyGo
+// module in a disposable build directory without modifying the module cache.
 package main
 
 import (
@@ -104,6 +103,24 @@ func run() error {
 		if err = os.WriteFile(patched, []byte(source), 0600); err != nil {
 			return err
 		}
+	}
+	// MyGo normally refreshes dragged values on each frame. File operations
+	// require the original connection, directory and selection snapshot.
+	dragOriginal := filepath.Join(mod.Dir, "ui", "dragdrop.go")
+	dragData, err := os.ReadFile(dragOriginal)
+	if err != nil {
+		return err
+	}
+	dragSum := sha256.Sum256(dragData)
+	if hex.EncodeToString(dragSum[:]) != "fe3d2658304d3225c95bb7154e7d106c05cc03e3afb28c78c95dbbe1c7ea35d3" {
+		return errors.New("MyGo dragdrop.go checksum mismatch")
+	}
+	dragSource, err := replaceOnce(string(dragData), "\t\tif !d.native {\n\t\t\td.value = value\n\t\t}", "\t\tif !d.native {\n\t\t\tif _, freeze := d.value.(interface{ NekoFreezeDragValue() }); !freeze {\n\t\t\t\td.value = value\n\t\t\t}\n\t\t}")
+	if err != nil {
+		return fmt.Errorf("patch dragdrop.go: %w", err)
+	}
+	if err = os.WriteFile(filepath.Join(mygoCopy, "ui", "dragdrop.go"), []byte(dragSource), 0600); err != nil {
+		return err
 	}
 	data, err := os.ReadFile(filepath.Join(root, "client", "go.mod"))
 	if err != nil {

@@ -17,6 +17,12 @@ type paneFolderTarget struct {
 	right       bool
 }
 
+// The build overlay preserves these values at drag start. Other MyGo drag
+// types retain the framework's normal per-frame update behavior.
+func (localPaneDrag) NekoFreezeDragValue()     {}
+func (remotePaneDrag) NekoFreezeDragValue()    {}
+func (secondaryPaneDrag) NekoFreezeDragValue() {}
+
 // Resolve from the displayed directory, never from an uncommitted path input.
 // A blank name describes the pane itself; a name describes one of its folders.
 func (d *desktop) paneFolderTarget(right bool, name string) (paneFolderTarget, bool) {
