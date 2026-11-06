@@ -366,6 +366,9 @@ func (d *desktop) transfer(upload bool) {
 		}
 		d.win.Update(func() {
 			d.finishTransfer(sessionID, shell, dir, refresh, err)
+			if err == nil && !upload && shell != nil && d.localPane.directory != "" && sameLocalDirectory(filepath.Dir(local), d.localPane.directory) {
+				d.requestLocalPane(d.localPane.directory, -1)
+			}
 		})
 	}()
 }
@@ -548,13 +551,15 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if local {
 		title = "本机文件"
 	}
-	ui.Text(c, title).FontSize(16).Bold()
-	for _, session := range d.sessions {
-		if session.id == d.currentSession {
-			ui.Text(c, "所属会话："+session.label).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-			break
+	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, title).FontSize(16).Bold()
+		for _, session := range d.sessions {
+			if session.id == d.currentSession {
+				ui.Text(c, "所属会话："+session.label).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+				break
+			}
 		}
-	}
+	})
 	if d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0 {
 		ui.Column(c).FillWidth().Padding(24).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
 			ui.Text(c, "先打开一个终端").FontSize(17).Bold()
@@ -580,17 +585,17 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		d.fileNewDirectory = ""
 		d.fileRename = ""
 		d.files = nil
-	})
+	}).OnSubmit(func() { d.refreshFiles() })
 	ui.Row(c).Gap(8).Wrap().Children(func() {
 		_, _, canBack := d.fileHistory.target(-1)
 		_, _, canForward := d.fileHistory.target(1)
-		if ui.Button(c.Key("file-back"), "后退").Disabled(d.busy || d.fileSessionUnavailable() || !canBack).Clicked() {
+		if ui.Button(c.Key("file-back"), "‹").Label("后退").Tooltip("后退").Width(36).Disabled(d.busy || d.fileSessionUnavailable() || !canBack).Clicked() {
 			d.navigateFileHistory(-1)
 		}
-		if ui.Button(c.Key("file-forward"), "前进").Disabled(d.busy || d.fileSessionUnavailable() || !canForward).Clicked() {
+		if ui.Button(c.Key("file-forward"), "›").Label("前进").Tooltip("前进").Width(36).Disabled(d.busy || d.fileSessionUnavailable() || !canForward).Clicked() {
 			d.navigateFileHistory(1)
 		}
-		if ui.Button(c.Key("file-parent"), "上一级").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
+		if ui.Button(c.Key("file-parent"), "↑").Label("上一级").Tooltip("上一级").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			if local {
 				d.fileDir = filepath.Dir(d.fileDir)
 			} else {
@@ -600,10 +605,10 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			d.files = nil
 			d.refreshFiles()
 		}
-		if ui.Button(c.Key("file-terminal-dir"), "定位终端目录").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
+		if ui.Button(c.Key("file-terminal-dir"), "◎").Label("定位终端目录").Tooltip("定位终端目录").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			d.followReportedDirectory(true)
 		}
-		if ui.Button(c.Key("file-refresh"), "打开目录").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
+		if ui.Button(c.Key("file-refresh"), "↻").Label("打开目录").Tooltip("打开目录").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			d.selectedFile, d.confirmDelete, d.fileRename = "", "", ""
 			d.refreshFiles()
 		}
@@ -703,7 +708,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 				}
 				ui.Row(c).FillWidth().Padding(3, 8).Gap(12).AlignItems(ui.Center).Background(c.Theme().Surface).Radius(6).Children(func() {
 					checked := d.fileChecked[f.Name]
-					if ui.Checkbox(c.Key("file-check-"+f.Name), &checked, "").Label("多选文件：" + f.Name).Disabled(d.busy || d.fileSessionUnavailable() || !eligibleBatchFile(f)).Changed() {
+					if (d.showFileTools || len(d.fileChecked) > 0) && ui.Checkbox(c.Key("file-check-"+f.Name), &checked, "").Label("多选文件："+f.Name).Disabled(d.busy || d.fileSessionUnavailable() || !eligibleBatchFile(f)).Changed() {
 						d.showFileTools = true
 						if checked && len(d.fileChecked) >= maxBatchFiles {
 							d.fileStatus = fmt.Sprintf("每次最多选择 %d 个文件", maxBatchFiles)
@@ -717,6 +722,9 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 						}
 					}
 					row := ui.Button(c.Key("file-"+f.Name), label).BorderWidth(0).Justify(ui.Start).Grow(1).Disabled(d.busy || d.fileSessionUnavailable())
+					if d.shell != nil && eligibleBatchFile(f) {
+						row = row.Drag(remotePaneDrag{directory: d.fileDir, name: f.Name, sessionID: d.currentSession, shell: d.shell})
+					}
 					if d.selectedFile == f.Name {
 						row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
 					}

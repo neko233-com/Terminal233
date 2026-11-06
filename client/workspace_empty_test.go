@@ -11,6 +11,11 @@ func TestEmptyWorkspacesOfferConnectionNavigation(t *testing.T) {
 		t.Run(workspace, func(t *testing.T) {
 			d := &desktop{workspace: workspace}
 			view := ui.NewTester(d.view, 640, 480)
+			if workspace == "files" {
+				if err := view.Click("会话文件"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if !view.HasText("选择 SSH 连接") || !view.HasText("打开本机终端") {
 				t.Fatal("empty workspace must offer both ways to start")
 			}

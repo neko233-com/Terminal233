@@ -95,4 +95,5 @@ func (d *desktop) openQuickConnection() {
 	d.changedFingerprint = ""
 	d.editConnection = true
 	d.status = "请填写认证信息，获取并核对服务器指纹。"
+	d.captureConnectionDraft()
 }

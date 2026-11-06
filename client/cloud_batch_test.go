@@ -108,14 +108,14 @@ func TestCloudBatchSelectionAndScopeReset(t *testing.T) {
 	c := &cloudClient{token: "token"}
 	d := &desktop{workspace: "connections", profileSource: "cloud", cloud: c, accounts: []cloudAccount{{ID: "one", Label: "alpha", Host: "one"}, {ID: "two", Label: "beta", Host: "two"}}}
 	view := ui.NewTester(d.view, 1400, 1400)
+	if err := view.Click("更多连接操作"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("勾选云端连接：alpha"); err != nil {
 		t.Fatal(err)
 	}
 	d.profileSearch = "beta"
 	view.Frame()
-	if err := view.Click("更多连接操作"); err != nil {
-		t.Fatal(err)
-	}
 	if err := view.Click("勾选当前显示的云端连接"); err != nil {
 		t.Fatal(err)
 	}

@@ -73,6 +73,9 @@ func TestBatchDownloadSelectionIsScopedAndBounded(t *testing.T) {
 	term := &terminal.Terminal{}
 	d := &desktop{workspace: "files", term: term, currentSession: 1, fileDir: "/one", sessions: []*workspaceSession{{id: 1, term: term}, {id: 2, fileDir: "/two"}}, files: []remoteFile{{Name: "one"}, {Name: "two"}, {Name: "folder", IsDir: true}, {Name: "link", IsLink: true}}}
 	view := ui.NewTester(d.view, 1200, 1400)
+	if err := view.Click("文件操作"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("多选文件：one"); err != nil {
 		t.Fatal(err)
 	}

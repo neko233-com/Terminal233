@@ -351,6 +351,9 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.workspace = "connections"
 	d.editConnection = true
 	d.selectedProfile = ""
+	d.selectedCloudProfile = account.ID
+	d.showProfileInspector = false
+	d.profileInspectorAt = time.Time{}
 	d.profileGroup = ""
 	d.profileLabel = account.Label
 	d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
@@ -365,6 +368,7 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.changedFingerprint = ""
 	d.expectedFingerprint = account.HostKeyFingerprint
 	d.status = "已载入连接，请重新获取并核对主机指纹。"
+	d.captureConnectionDraft()
 }
 
 func (d *desktop) cloudView(c *ui.Context) {

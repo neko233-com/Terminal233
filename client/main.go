@@ -61,6 +61,10 @@ type desktop struct {
 	groupInput                                                                              string
 	confirmGroupDelete                                                                      bool
 	profileSearch, profileGroup, selectedProfile, quickConnect                              string
+	showProfileInspector                                                                    bool
+	profileInspectorAt                                                                      time.Time
+	connectionDraft                                                                         connectionDraft
+	connectionDraftSet, confirmDiscardConnection                                            bool
 	confirmProfileDelete                                                                    profileID
 	checkedProfiles                                                                         map[profileID]bool
 	confirmProfileBatchDelete                                                               bool
@@ -91,6 +95,8 @@ type desktop struct {
 	lastTerminalDir                                                                         string
 	files                                                                                   []remoteFile
 	fileHistory                                                                             fileHistory
+	localPane                                                                               localFilePane
+	narrowFilePane                                                                          string
 	fileBatchErrors                                                                         []string
 	fileBatchDetails                                                                        bool
 	fileChecked                                                                             map[string]bool
@@ -179,7 +185,10 @@ func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	case d.workspace == "terminal" && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(mods, ui.KeyTab):
 		d.selectAdjacentSession(-1)
 	case c.Shortcut(mods, ui.Key1):
-		d.workspace, d.editConnection = "connections", false
+		d.workspace = "connections"
+		if d.editConnection {
+			d.closeConnectionEditor()
+		}
 	case c.Shortcut(mods, ui.Key2):
 		d.workspace = "terminal"
 	case c.Shortcut(mods, ui.Key3):
@@ -268,6 +277,8 @@ func (d *desktop) connect() {
 				return
 			}
 			d.addSession(term, shell, settings, settings.User+"@"+settings.Host)
+			d.editConnection = false
+			d.connectionDraft, d.connectionDraftSet, d.confirmDiscardConnection = connectionDraft{}, false, false
 			for _, session := range d.sessions {
 				if session.id == d.currentSession {
 					session.cloudSources = cloudSources
@@ -294,6 +305,14 @@ func (d *desktop) connect() {
 
 func (d *desktop) view(c *ui.Context) {
 	d.workspaceShortcuts(c)
+	if !d.profileInspectorAt.IsZero() && !d.editConnection && (d.workspace == "" || d.workspace == "connections") {
+		if delay := time.Until(d.profileInspectorAt); delay > 0 {
+			c.After(delay)
+		} else {
+			d.showProfileInspector = true
+			d.profileInspectorAt = time.Time{}
+		}
+	}
 	if (d.workspace == "files" || d.workspace == "terminal") && d.fileFollowTerminal {
 		d.followReportedDirectory(false)
 	}
@@ -341,7 +360,9 @@ func (d *desktop) view(c *ui.Context) {
 						ui.Text(c, "工作区").FontSize(12).TextColor(t.TextMuted)
 						if navigationButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
 							d.workspace = "connections"
-							d.editConnection = false
+							if d.editConnection {
+								d.closeConnectionEditor()
+							}
 						}
 						if navigationButton(c, "nav-terminal", "终端", d.workspace == "terminal").Clicked() {
 							d.workspace = "terminal"
@@ -402,7 +423,7 @@ func (d *desktop) view(c *ui.Context) {
 						if d.cloud != nil {
 							connectionCount += len(d.accounts)
 						}
-						if navigationButton(c, "group-all", fmt.Sprintf("全部连接  %d", connectionCount), d.profileFilter == "" && !d.profileFavorites && !d.profileRecent).Clicked() {
+						if navigationButton(c, "group-all", fmt.Sprintf("全部连接  %d", connectionCount), d.profileFilter == "" && !d.profileFavorites && !d.profileRecent).Disabled(d.editConnection).Clicked() {
 							d.workspace = "connections"
 							d.editConnection = false
 							d.profileFilter = ""
@@ -426,7 +447,7 @@ func (d *desktop) view(c *ui.Context) {
 								recent++
 							}
 						}
-						if navigationButton(c, "group-favorites", fmt.Sprintf("收藏的连接  %d", favorites), d.profileFavorites).Clicked() {
+						if navigationButton(c, "group-favorites", fmt.Sprintf("收藏的连接  %d", favorites), d.profileFavorites).Disabled(d.editConnection).Clicked() {
 							d.workspace = "connections"
 							d.editConnection = false
 							d.profileFilter = ""
@@ -436,7 +457,7 @@ func (d *desktop) view(c *ui.Context) {
 								d.profileSource = "local"
 							}
 						}
-						if navigationButton(c, "group-recent", fmt.Sprintf("最近连接  %d", recent), d.profileRecent).Clicked() {
+						if navigationButton(c, "group-recent", fmt.Sprintf("最近连接  %d", recent), d.profileRecent).Disabled(d.editConnection).Clicked() {
 							d.workspace = "connections"
 							d.editConnection = false
 							d.profileFilter = ""
@@ -479,7 +500,7 @@ func (d *desktop) view(c *ui.Context) {
 								if isCloudGroups {
 									groupLabel = "云端分组：" + name
 								}
-								button := navigationButton(c, "group-entry-"+name, fmt.Sprintf("%s  %d", groupLeaf(name), counts[name]), d.profileFilter == name).Label(groupLabel).Disabled(d.busy).Grow(1)
+								button := navigationButton(c, "group-entry-"+name, fmt.Sprintf("%s  %d", groupLeaf(name), counts[name]), d.profileFilter == name).Label(groupLabel).Disabled(d.busy || d.editConnection).Grow(1)
 								button.ContextMenu(func(menu *ui.Menu) {
 									if menu.Item("管理分组").Chosen() {
 										d.workspace, d.editConnection = "connections", false
@@ -728,14 +749,31 @@ func (d *desktop) view(c *ui.Context) {
 						switch d.workspace {
 						case "files":
 							ui.Text(c, "文件管理").FontSize(22).Bold()
-							d.fileView(c, false)
+							d.fileWorkspace(c, width, height)
 						case "forward":
 							d.forwardView(c)
 						case "cloud":
 							ui.Text(c, "云端工作区").FontSize(22).Bold()
 							d.cloudView(c)
 						default:
-							if d.editConnection {
+							if d.connectionInspectorDocked(width) && (d.editConnection || d.inspectedProfileAvailable()) {
+								ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Start).Children(func() {
+									ui.Column(c).Grow(1).Gap(10).Children(func() { d.profileView(c) })
+									panelHeight := height - 120
+									if panelHeight < 300 {
+										panelHeight = 300
+									}
+									ui.Scroll(c.Key("connection-inspector")).Label("主机详情面板").Width(connectionInspectorWidth).Height(panelHeight).Shrink(0).Background(t.Surface).Radius(10).Children(func() {
+										ui.Column(c).FillWidth().Padding(16).Gap(10).Children(func() {
+											if d.editConnection {
+												d.connectionView(c)
+											} else {
+												d.profileInspectorView(c)
+											}
+										})
+									})
+								})
+							} else if d.editConnection {
 								d.connectionView(c)
 							} else {
 								d.profileView(c)
@@ -749,19 +787,26 @@ func (d *desktop) view(c *ui.Context) {
 }
 
 func (d *desktop) connectionView(c *ui.Context) {
+	width, _ := c.Size()
+	docked := d.connectionInspectorDocked(width)
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "SSH 连接").FontSize(22).Bold().Grow(1)
-		if ui.Button(c.Key("connection-back"), "返回连接列表").Clicked() {
-			d.editConnection = false
+		title, back := "SSH 连接", "返回连接列表"
+		if docked {
+			title, back = "主机详情", "×"
+		}
+		ui.Text(c, title).FontSize(20).Bold().Grow(1)
+		if ui.Button(c.Key("connection-back"), back).Label("返回连接列表").Tooltip("返回连接列表").Disabled(d.busy).Clicked() {
+			d.closeConnectionEditor()
 		}
 	})
 	ui.Text(c, "填写连接信息，核对主机指纹后连接。可将连接保存到列表。").TextColor(c.Theme().TextMuted).Wrap()
-	resetFingerprint := func() { d.fingerprint, d.expectedFingerprint, d.changedFingerprint = "", "", "" }
+	markDraftChanged := func() { d.confirmDiscardConnection = false }
+	resetFingerprint := func() { d.fingerprint, d.expectedFingerprint, d.changedFingerprint = "", "", ""; markDraftChanged() }
 	ui.Column(c).FillWidth().Padding(18).Gap(10).Background(c.Theme().Surface).Radius(10).Children(func() {
 		ui.Text(c, "连接信息").FontSize(16).Bold()
 		ui.Text(c, "名称和分组仅用于整理连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		ui.Text(c, "连接名称（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
-		ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("连接名称（可选）").FillWidth()
+		ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("连接名称（可选）").OnChange(markDraftChanged).FillWidth()
 		ui.Row(c).FillWidth().Gap(10).Children(func() {
 			ui.Column(c).Grow(1).Gap(6).Children(func() {
 				ui.Text(c, "主机地址").FontSize(12).TextColor(c.Theme().TextMuted)
@@ -775,22 +820,22 @@ func (d *desktop) connectionView(c *ui.Context) {
 		ui.Text(c, "用户名").FontSize(12).TextColor(c.Theme().TextMuted)
 		ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint).FillWidth()
 		ui.Text(c, "连接分组（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
-		ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("分组（可选）").FillWidth()
+		ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("分组（可选）").OnChange(markDraftChanged).FillWidth()
 	})
 	ui.Column(c).FillWidth().Padding(18).Gap(10).Background(c.Theme().Surface).Radius(10).Children(func() {
 		ui.Text(c, "身份认证").FontSize(16).Bold()
 		ui.Text(c, "使用密码或选择私钥；本机连接列表不会保存密码。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		ui.Text(c, "SSH 密码").FontSize(12).TextColor(c.Theme().TextMuted)
-		ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().FillWidth()
+		ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().OnChange(markDraftChanged).FillWidth()
 		ui.Text(c, "私钥文件（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
 		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.End).Children(func() {
-			ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）").Grow(1)
+			ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）").OnChange(markDraftChanged).Grow(1)
 			if ui.Button(c.Key("pick-key"), "选择私钥文件…").Disabled(d.busy).Clicked() {
 				d.pickLocalPath("key")
 			}
 		})
 		ui.Text(c, "私钥口令（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
-		ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password().FillWidth()
+		ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password().OnChange(markDraftChanged).FillWidth()
 	})
 	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 		if ui.Button(c.Key("profile-add"), "保存到连接列表").Disabled(d.busy).Clicked() {
@@ -801,6 +846,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 					d.status = "连接已添加，但本机保存失败：" + err.Error()
 				} else {
 					d.status = "连接已保存（不保存密码）"
+					d.captureConnectionDraft()
 				}
 			}
 		}
@@ -844,7 +890,7 @@ func (d *desktop) connectionView(c *ui.Context) {
 	ui.Text(c, d.status).FontSize(13)
 }
 
-const version = "0.3.65"
+const version = "0.3.66"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

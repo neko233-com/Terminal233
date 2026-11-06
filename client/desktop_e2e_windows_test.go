@@ -985,6 +985,196 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(batchTarget, "batch-existing.txt")); err != nil || string(data) != "protected" {
 		t.Fatal("native SFTP batch download overwrote the existing file")
 	}
+	// Exercise the two independent panes with isolated local and SFTP paths.
+	paneDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(paneDir, "pane-upload.txt"), []byte("pane upload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paneDir, "pane-drag.txt"), []byte("pane drag"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	call("act", map[string]any{"key": "local-pane-path", "action": "setValue", "text": paneDir})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		found := false
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "local-pane-path" && strings.EqualFold(fmt.Sprint(node["value"]), paneDir) {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "local-pane-open", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "local-pane-file-pane-upload.txt") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "local-pane-file-pane-upload.txt") {
+		t.Fatal("local transfer pane did not load the isolated directory")
+	}
+	waitPaneAction := func(key string) {
+		t.Helper()
+		until := time.Now().Add(5 * time.Second)
+		for time.Now().Before(until) {
+			result := call("tree")["result"].(map[string]any)
+			for _, value := range result["nodes"].([]any) {
+				node := value.(map[string]any)
+				if node["key"] == key && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+					return
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("dual-pane action %s did not become available", key)
+	}
+	call("act", map[string]any{"key": "local-pane-file-pane-upload.txt", "action": "press"})
+	waitPaneAction("local-pane-upload")
+	call("act", map[string]any{"key": "local-pane-upload", "action": "press"})
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, readErr := os.ReadFile(filepath.Join(transferDir, "pane-upload.txt")); readErr == nil && string(data) == "pane upload" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(transferDir, "pane-upload.txt")); readErr != nil || string(data) != "pane upload" {
+		t.Fatal("dual-pane upload failed")
+	}
+	waitPaneAction("local-pane-file-pane-drag.txt")
+	waitPaneAction("file-refresh")
+	dragTree := call("tree")["result"].(map[string]any)
+	var sourceBounds, targetBounds map[string]any
+	for _, value := range dragTree["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["key"] == "local-pane-file-pane-drag.txt" {
+			sourceBounds, _ = node["bounds"].(map[string]any)
+		}
+		if node["key"] == "session-file-pane" {
+			targetBounds, _ = node["bounds"].(map[string]any)
+		}
+	}
+	if sourceBounds == nil || targetBounds == nil {
+		t.Fatal("dual-pane drag endpoints were not exposed")
+	}
+	sx := sourceBounds["x"].(float64) + sourceBounds["width"].(float64)/2
+	sy := sourceBounds["y"].(float64) + sourceBounds["height"].(float64)/2
+	tx := targetBounds["x"].(float64) + targetBounds["width"].(float64)/2
+	ty := targetBounds["y"].(float64) + 18
+	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerDown", "x": sx, "y": sy}}})
+	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerMove", "x": tx, "y": ty}}})
+	call("tree")
+	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerUp", "x": tx, "y": ty}}})
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, readErr := os.ReadFile(filepath.Join(transferDir, "pane-drag.txt")); readErr == nil && string(data) == "pane drag" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(transferDir, "pane-drag.txt")); readErr != nil || string(data) != "pane drag" {
+		t.Fatal("dual-pane drag upload failed")
+	}
+	waitPaneAction("file-batch-existing.txt")
+	dragTree = call("tree")["result"].(map[string]any)
+	sourceBounds, targetBounds = nil, nil
+	for _, value := range dragTree["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["key"] == "file-batch-existing.txt" {
+			sourceBounds, _ = node["bounds"].(map[string]any)
+		}
+		if node["key"] == "local-file-pane" {
+			targetBounds, _ = node["bounds"].(map[string]any)
+		}
+	}
+	if sourceBounds == nil || targetBounds == nil {
+		t.Fatal("reverse drag endpoints were not exposed")
+	}
+	sx = sourceBounds["x"].(float64) + sourceBounds["width"].(float64)/2
+	sy = sourceBounds["y"].(float64) + sourceBounds["height"].(float64)/2
+	tx = targetBounds["x"].(float64) + targetBounds["width"].(float64)/2
+	ty = targetBounds["y"].(float64) + 18
+	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerDown", "x": sx, "y": sy}}})
+	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerMove", "x": tx, "y": ty}}})
+	call("tree")
+	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerUp", "x": tx, "y": ty}}})
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, readErr := os.ReadFile(filepath.Join(paneDir, "batch-existing.txt")); readErr == nil && string(data) == "batch-existing.txt" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(paneDir, "batch-existing.txt")); readErr != nil || string(data) != "batch-existing.txt" {
+		t.Fatal("dual-pane drag download failed")
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		ready := false
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "file-batch-one.txt" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				ready = true
+				break
+			}
+		}
+		if ready {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "file-batch-one.txt", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	selectedPaneFile := false
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "rename-name" && fmt.Sprint(node["value"]) == "batch-one.txt" {
+				selectedPaneFile = true
+				break
+			}
+		}
+		if selectedPaneFile {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !selectedPaneFile {
+		t.Fatal("dual-pane remote selection did not update")
+	}
+	waitPaneAction("local-pane-download")
+	call("act", map[string]any{"key": "local-pane-download", "action": "press"})
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, readErr := os.ReadFile(filepath.Join(paneDir, "batch-one.txt")); readErr == nil && string(data) == "batch-one.txt" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if data, readErr := os.ReadFile(filepath.Join(paneDir, "batch-one.txt")); readErr != nil || string(data) != "batch-one.txt" {
+		result := call("tree")["result"].(map[string]any)
+		var statuses []string
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			label := fmt.Sprint(node["label"])
+			if strings.Contains(label, "传输") || strings.Contains(label, "文件") || strings.Contains(label, "目录") {
+				statuses = append(statuses, label)
+			}
+		}
+		t.Fatalf("dual-pane download failed: read=%v contents=%q status=%v", readErr, data, statuses)
+	}
+	waitPaneAction("local-file")
 	call("act", map[string]any{"key": "local-file", "action": "setValue", "text": transferSource})
 	slowSFTP.Store(true)
 	call("act", map[string]any{"key": "upload", "action": "press"})
@@ -1330,7 +1520,15 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "profile-1") {
 		t.Fatalf("profile missing before key setup: %s", tree)
 	}
-	call("act", map[string]any{"key": "profile-edit-1", "action": "press"})
+	call("act", map[string]any{"key": "profile-1", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "inspector-edit") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "inspector-edit", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1356,15 +1554,23 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "profile-connect-1") {
+		if strings.Contains(tree, "profile-1") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "profile-connect-1") {
-		t.Fatalf("profile connect action missing: %s", tree)
+	if !strings.Contains(tree, "profile-1") {
+		t.Fatalf("profile missing after editing: %s", tree)
 	}
-	call("act", map[string]any{"key": "profile-connect-1", "action": "press"})
+	call("act", map[string]any{"key": "profile-1", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "inspector-connect") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "inspector-connect", "action": "press"})
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

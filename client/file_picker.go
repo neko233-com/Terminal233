@@ -178,6 +178,7 @@ func (d *desktop) applyPickedPath(kind, selected string, err error) {
 		d.fileBatchTarget = selected
 	case "key":
 		d.settings.KeyPath = selected
+		d.confirmDiscardConnection = false
 	case "backup-open", "backup-save":
 		d.adminBackupPath, d.adminConfirmRestore = selected, false
 	case "archive-open", "archive-save":

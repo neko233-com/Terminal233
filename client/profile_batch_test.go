@@ -24,14 +24,14 @@ func TestProfileBatchSelectionCopyAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := ui.NewTester(d.view, 1400, 1400)
+	if err := view.Click("更多连接操作"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("勾选本机连接：alpha"); err != nil {
 		t.Fatal(err)
 	}
 	d.profileSearch = "beta"
 	view.Frame()
-	if err := view.Click("更多连接操作"); err != nil {
-		t.Fatal(err)
-	}
 	if err := view.Click("勾选当前显示的本机连接"); err != nil {
 		t.Fatal(err)
 	}

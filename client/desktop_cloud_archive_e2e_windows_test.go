@@ -158,7 +158,9 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	if err != nil || len(stored) != 1 {
 		t.Fatal("isolated cloud connection missing")
 	}
-	call("act", map[string]any{"key": "profile-cloud-connect-" + stored[0].ID, "action": "press"})
+	call("act", map[string]any{"key": "profile-cloud-" + stored[0].ID, "action": "press"})
+	waitText("inspector-edit")
+	call("act", map[string]any{"key": "inspector-edit", "action": "press"})
 	waitText("已载入连接，请重新获取并核对主机指纹")
 	if strings.Contains(fmt.Sprint(call("tree")), "connect-trusted") {
 		t.Fatal("cloud fingerprint was silently trusted")

@@ -216,13 +216,13 @@ func TestConnectionSourcesFilterLocalAndCloud(t *testing.T) {
 	if err := view.Click("本地仓库"); err != nil {
 		t.Fatal(err)
 	}
-	if !view.HasText("本地测试机") || view.HasText("云端测试机 · b@cloud.example") || !view.HasText("复制地址：本地测试机") {
+	if !view.HasText("本地测试机") || view.HasText("云端测试机 · b@cloud.example") {
 		t.Fatal("local source did not restrict the visible connections")
 	}
 	if err := view.Click("云端仓库"); err != nil {
 		t.Fatal(err)
 	}
-	if view.HasText("本地测试机") || !view.HasText("云端测试机 · b@cloud.example") || !view.HasText("复制云端地址：云端测试机") {
+	if view.HasText("本地测试机") || !view.HasText("云端测试机 · b@cloud.example") {
 		t.Fatal("cloud source did not restrict the visible connections")
 	}
 	if err := view.Click("全部来源"); err != nil {
@@ -323,6 +323,9 @@ func TestConnectionActionRequestsMissingPassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := ui.NewTester(d.view, 1200, 1400)
+	if err := view.Click("更多连接操作"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("连接：alice@example.test"); err != nil {
 		t.Fatal(err)
 	}
@@ -392,6 +395,9 @@ func TestFavoritesAndCustomNameSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	test := ui.NewTester(d.view, 1200, 1200)
+	if err := test.Click("更多连接操作"); err != nil {
+		t.Fatal(err)
+	}
 	if err := test.Click("加入收藏：生产服务器"); err != nil {
 		t.Fatal(err)
 	}
