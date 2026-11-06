@@ -61,8 +61,8 @@ func TestSecondaryPaneSelectsIndependentSessionAndRejectsStaleCopies(t *testing.
 		t.Fatal("accepted an unconfirmed left directory")
 	}
 	d.secondaryPane.input = "/left"
-	if d.canCopySecondaryToRight(d.leftPaneDrag("folder")) || d.canCopySecondaryToRight(d.leftPaneDrag("link")) {
-		t.Fatal("accepted a directory or symlink")
+	if !d.canCopySecondaryToRight(d.leftPaneDrag("folder")) || d.canCopySecondaryToRight(d.leftPaneDrag("link")) {
+		t.Fatal("directory should be allowed and symlink rejected")
 	}
 	d.sessions = d.sessions[1:]
 	if d.canCopySecondaryToRight(d.leftPaneDrag("left.txt")) || d.canCopyRightToSecondary(d.rightPaneDrag("right.txt")) {

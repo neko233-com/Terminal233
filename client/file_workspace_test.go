@@ -35,7 +35,7 @@ func TestDualPaneUsesIndependentLocalAndSessionDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	menu := strings.Join(view.Menu(), "|")
-	if !strings.Contains(menu, "上传到会话") || !strings.Contains(menu, "复制路径") {
+	if !strings.Contains(menu, "复制到会话当前目录") || !strings.Contains(menu, "复制路径") {
 		t.Fatalf("local file context actions missing: %s", menu)
 	}
 	view.CloseMenu()
@@ -144,6 +144,7 @@ func TestPaneTransferRejectsStaleSelectionsAndUnsafeNames(t *testing.T) {
 		files:     []remoteFile{{Name: "remote.txt"}, {Name: "folder", IsDir: true}, {Name: "link", IsLink: true}},
 		localPane: localFilePane{directory: dir, input: dir, generation: 3, files: []remoteFile{{Name: "local.txt"}, {Name: "folder", IsDir: true}}},
 	}
+	d.fileHistory.visit("/remote")
 	upload := localPaneDrag{directory: dir, name: "local.txt", generation: 3, sessionID: 7, shell: shell, remoteDir: "/remote"}
 	if got, err := d.paneUploadSource(upload); err != nil || got != filepath.Join(dir, "local.txt") {
 		t.Fatalf("valid upload: %q %v", got, err)
@@ -154,14 +155,25 @@ func TestPaneTransferRejectsStaleSelectionsAndUnsafeNames(t *testing.T) {
 	}
 	upload.generation++
 	upload.name = "folder"
-	if _, err := d.paneUploadSource(upload); err == nil {
-		t.Fatal("accepted a directory upload")
+	if _, err := d.paneUploadSource(upload); err != nil {
+		t.Fatal("rejected a directory upload")
 	}
+	upload.shell = nil
+	d.shell = nil
+	if _, err := d.paneUploadSource(upload); err != nil {
+		t.Fatal("rejected a local-to-local directory copy")
+	}
+	upload.shell = shell
+	d.shell = shell
 	download := remotePaneDrag{directory: "/remote", name: "remote.txt", sessionID: 7, shell: shell}
 	if got, err := d.paneDownloadTarget(download); err != nil || got != filepath.Join(dir, "remote.txt") {
 		t.Fatalf("valid download: %q %v", got, err)
 	}
-	for _, name := range []string{"../bad", "folder", "link", "C:bad"} {
+	download.name = "folder"
+	if _, err := d.paneDownloadTarget(download); err != nil {
+		t.Fatal("rejected a directory download")
+	}
+	for _, name := range []string{"../bad", "link", "C:bad"} {
 		download.name = name
 		if _, err := d.paneDownloadTarget(download); err == nil {
 			t.Fatalf("accepted unsafe or non-file name %q", name)

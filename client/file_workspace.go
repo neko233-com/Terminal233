@@ -252,7 +252,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 			ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 				row := ui.Button(c.Key("local-pane-file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8)
 				if d.localPane.selected == f.Name {
-					row = row.Background(c.Theme().SurfacePressed)
+					row = row.Selected(true).Background(c.Theme().SurfacePressed)
 				}
 				row.Children(func() {
 					icon, color := documentIcon, c.Theme().TextMuted
@@ -262,14 +262,14 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 					ui.Icon(c, icon).Width(16).Height(16).Shrink(0).TextColor(color)
 					ui.Text(c, f.Name)
 				})
-				if eligibleBatchFile(f) {
+				if eligiblePaneItem(f) {
 					row = row.Drag(localPaneDrag{directory: d.localPane.directory, name: f.Name, generation: d.localPane.generation, sessionID: d.currentSession, shell: d.shell, remoteDir: d.fileDir})
 				}
 				row.ContextMenu(func(menu *ui.Menu) {
 					if f.IsDir && menu.Item("打开目录").Disabled(d.localPane.loading).Chosen() {
 						d.requestLocalPane(filepath.Join(d.localPane.directory, f.Name), -1)
 					}
-					if eligibleBatchFile(f) && menu.Item("上传到会话").Disabled(d.busy || d.shell == nil || d.fileSessionUnavailable() || d.localPane.loading || !sameLocalDirectory(d.localPane.input, d.localPane.directory)).Chosen() {
+					if eligiblePaneItem(f) && menu.Item("复制到会话当前目录").Disabled(!d.canUploadPaneFile(localPaneDrag{directory: d.localPane.directory, name: f.Name, generation: d.localPane.generation, sessionID: d.currentSession, shell: d.shell, remoteDir: d.fileDir})).Chosen() {
 						d.uploadPaneFile(localPaneDrag{directory: d.localPane.directory, name: f.Name, generation: d.localPane.generation, sessionID: d.currentSession, shell: d.shell, remoteDir: d.fileDir})
 					}
 					if menu.Item("复制路径").Chosen() {
@@ -291,7 +291,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 		localEligible, remoteEligible := false, false
 		for _, entry := range d.localPane.files {
-			if entry.Name == d.localPane.selected && eligibleBatchFile(entry) {
+			if entry.Name == d.localPane.selected && eligiblePaneItem(entry) {
 				localEligible = true
 			}
 			if entry.Name == d.localPane.selected && entry.IsDir {
@@ -302,66 +302,70 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 			}
 		}
 		for _, entry := range d.files {
-			if entry.Name == d.selectedFile && eligibleBatchFile(entry) {
+			if entry.Name == d.selectedFile && eligiblePaneItem(entry) {
 				remoteEligible = true
 				break
 			}
 		}
 		origin := localPaneDrag{directory: d.localPane.directory, name: d.localPane.selected, generation: d.localPane.generation, sessionID: d.currentSession, shell: d.shell, remoteDir: d.fileDir}
 		pathPending := d.localPane.directory == "" || d.localPane.loading || !sameLocalDirectory(d.localPane.input, d.localPane.directory)
-		if ui.Button(c.Key("local-pane-upload"), "上传到会话 →").Disabled(d.busy || d.shell == nil || d.fileSessionUnavailable() || !localEligible || pathPending).Clicked() {
+		if ui.Button(c.Key("local-pane-upload"), "复制到会话 →").Disabled(!localEligible || pathPending || !d.canUploadPaneFile(origin)).Clicked() {
 			d.uploadPaneFile(origin)
 		}
 		source := remotePaneDrag{directory: d.fileDir, name: d.selectedFile, sessionID: d.currentSession, shell: d.shell}
-		if ui.Button(c.Key("local-pane-download"), "← 下载到本机").Disabled(d.busy || d.shell == nil || d.fileSessionUnavailable() || !remoteEligible || pathPending).Clicked() {
+		_, downloadErr := d.paneDownloadTarget(source)
+		if ui.Button(c.Key("local-pane-download"), "← 复制到本机").Disabled(!remoteEligible || pathPending || downloadErr != nil).Clicked() {
 			d.downloadPaneFile(source)
 		}
 	})
 }
 
 func (d *desktop) paneUploadSource(item localPaneDrag) (string, error) {
-	if d.busy || d.win == nil || d.shell == nil || d.fileSessionUnavailable() || item.shell != d.shell || item.sessionID != d.currentSession || item.remoteDir != d.fileDir || item.directory != d.localPane.directory || item.generation != d.localPane.generation || d.localPane.loading || !sameLocalDirectory(d.localPane.input, d.localPane.directory) {
+	if d.busy || d.win == nil || d.fileSessionUnavailable() || item.shell != d.shell || item.sessionID != d.currentSession || item.remoteDir != d.fileDir || item.directory != d.localPane.directory || item.generation != d.localPane.generation || d.localPane.loading || !sameLocalDirectory(d.localPane.input, d.localPane.directory) || !d.rightDirectoryReady() {
 		return "", errors.New("会话或目录已改变，请重新选择文件")
 	}
 	for _, file := range d.localPane.files {
-		if file.Name == item.name && eligibleBatchFile(file) {
+		if file.Name == item.name && eligiblePaneItem(file) {
 			return localItemPath(item.directory, item.name)
 		}
 	}
-	return "", errors.New("请选择本机普通文件")
+	return "", errors.New("请选择本机文件或目录")
+}
+
+func (d *desktop) canUploadPaneFile(item localPaneDrag) bool {
+	_, err := d.paneUploadSource(item)
+	return err == nil
 }
 
 func (d *desktop) uploadPaneFile(item localPaneDrag) {
-	local, err := d.paneUploadSource(item)
+	_, err := d.paneUploadSource(item)
 	if err != nil {
 		d.fileStatus = err.Error()
 		return
 	}
-	d.fileLocal = local
-	d.transfer(true)
+	d.startPaneCopy(nil, item.directory, item.shell, item.remoteDir, item.name, true)
 }
 
 func (d *desktop) paneDownloadTarget(item remotePaneDrag) (string, error) {
-	if d.busy || d.win == nil || d.shell == nil || d.fileSessionUnavailable() || item.shell != d.shell || item.sessionID != d.currentSession || item.directory != d.fileDir || d.localPane.directory == "" || d.localPane.loading || !sameLocalDirectory(d.localPane.input, d.localPane.directory) {
+	if d.busy || d.win == nil || d.fileSessionUnavailable() || item.shell != d.shell || item.sessionID != d.currentSession || item.directory != d.fileDir || d.localPane.directory == "" || d.localPane.loading || !sameLocalDirectory(d.localPane.input, d.localPane.directory) {
 		return "", errors.New("会话或目录已改变，请重新选择文件")
 	}
 	if !validDirectoryName(item.name) {
 		return "", errors.New("文件名不能用于本机目标")
 	}
 	for _, file := range d.files {
-		if file.Name == item.name && eligibleBatchFile(file) {
+		if file.Name == item.name && eligiblePaneItem(file) {
 			return localItemPath(d.localPane.directory, item.name)
 		}
 	}
-	return "", errors.New("请选择会话中的普通文件")
+	return "", errors.New("请选择会话中的文件或目录")
 }
 
 func (d *desktop) downloadPaneFile(item remotePaneDrag) {
-	local, err := d.paneDownloadTarget(item)
+	_, err := d.paneDownloadTarget(item)
 	if err != nil {
 		d.fileStatus = err.Error()
 		return
 	}
-	d.fileLocal, d.selectedFile = local, item.name
-	d.transfer(false)
+	d.startPaneCopy(item.shell, item.directory, nil, d.localPane.directory, item.name, false)
 }

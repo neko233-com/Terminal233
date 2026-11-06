@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -271,7 +272,7 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 			ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 				row := ui.Button(c.Key("secondary-file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Disabled(d.busy || p.loading || p.input != p.directory)
 				if p.selected == f.Name {
-					row = row.Background(c.Theme().SurfacePressed)
+					row = row.Selected(true).Background(c.Theme().SurfacePressed)
 				}
 				row.Children(func() {
 					icon, color := documentIcon, c.Theme().TextMuted
@@ -282,14 +283,14 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 					ui.Text(c, f.Name)
 				})
 				item := d.leftPaneDrag(f.Name)
-				if eligibleBatchFile(f) {
+				if eligiblePaneItem(f) {
 					row = row.Drag(item)
 				}
 				row.ContextMenu(func(menu *ui.Menu) {
 					if f.IsDir && menu.Item("打开目录").Chosen() {
 						d.requestSecondaryPane(path.Join(p.directory, f.Name), -1)
 					}
-					if eligibleBatchFile(f) && menu.Item("复制到右侧当前目录").Disabled(!d.canCopySecondaryToRight(item)).Chosen() {
+					if eligiblePaneItem(f) && menu.Item("复制到右侧当前目录").Disabled(!d.canCopySecondaryToRight(item)).Chosen() {
 						d.copySecondaryToRight(item)
 					}
 				})
@@ -333,16 +334,20 @@ func (d *desktop) canCopySecondaryToRight(item secondaryPaneDrag) bool {
 	if !d.remotePanePairValid(item) || !validDirectoryName(item.name) {
 		return false
 	}
-	h := d.fileHistory
-	if len(h.paths) == 0 || h.index < 0 || h.index >= len(h.paths) || h.paths[h.index] != d.fileDir {
+	if !d.rightDirectoryReady() {
 		return false
 	}
 	for _, f := range d.secondaryPane.files {
-		if f.Name == item.name && eligibleBatchFile(f) {
+		if f.Name == item.name && eligiblePaneItem(f) {
 			return true
 		}
 	}
 	return false
+}
+
+func (d *desktop) rightDirectoryReady() bool {
+	h := d.fileHistory
+	return len(h.paths) > 0 && h.index >= 0 && h.index < len(h.paths) && h.paths[h.index] == d.fileDir
 }
 func (d *desktop) canCopyRightToSecondary(item remotePaneDrag) bool {
 	left := secondaryPaneDrag{sessionID: item.secondaryID, shell: item.secondaryShell, directory: item.secondaryDir, generation: item.secondaryGeneration, rightID: item.sessionID, rightShell: item.shell, rightDir: item.directory}
@@ -350,7 +355,7 @@ func (d *desktop) canCopyRightToSecondary(item remotePaneDrag) bool {
 		return false
 	}
 	for _, f := range d.files {
-		if f.Name == item.name && eligibleBatchFile(f) {
+		if f.Name == item.name && eligiblePaneItem(f) {
 			return true
 		}
 	}
@@ -361,24 +366,25 @@ func (d *desktop) copySecondaryToRight(item secondaryPaneDrag) {
 		d.fileStatus = "会话或目录已改变，请重新选择文件"
 		return
 	}
-	d.startRemotePaneCopy(item.shell, item.directory, item.rightShell, item.rightDir, item.name, true)
+	d.startPaneCopy(item.shell, item.directory, item.rightShell, item.rightDir, item.name, true)
 }
 func (d *desktop) copyRightToSecondary(item remotePaneDrag) {
 	if !d.canCopyRightToSecondary(item) {
 		d.fileStatus = "会话或目录已改变，请重新选择文件"
 		return
 	}
-	d.startRemotePaneCopy(item.shell, item.directory, item.secondaryShell, item.secondaryDir, item.name, false)
+	d.startPaneCopy(item.shell, item.directory, item.secondaryShell, item.secondaryDir, item.name, false)
 }
-func (d *desktop) startRemotePaneCopy(src *remoteShell, srcDir string, dst *remoteShell, dstDir, name string, targetRight bool) {
+func (d *desktop) startPaneCopy(src *remoteShell, srcDir string, dst *remoteShell, dstDir, name string, targetRight bool) {
 	rightID, rightShell, rightDir := d.currentSession, d.shell, d.fileDir
 	leftID, leftShell, leftDir, leftGeneration := d.secondaryPane.sessionID, d.secondaryPane.shell, d.secondaryPane.directory, d.secondaryPane.generation
+	localDir, localGeneration := d.localPane.directory, d.localPane.generation
 	d.busy, d.fileStatus = true, "正在传输…"
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancelTransfer, d.transferSessionID = cancel, rightID
 	go func() {
 		defer cancel()
-		err := copyPaneFileContext(ctx, src, srcDir, dst, dstDir, name, func(read int64) {
+		partial, err := copyPaneEntryContext(ctx, src, srcDir, dst, dstDir, name, func(read int64) {
 			d.win.Update(func() {
 				if ctx.Err() == nil && d.cancelTransfer != nil && d.transferSessionID == rightID {
 					d.transferProgress(rightID, rightShell, rightDir, read)
@@ -386,10 +392,22 @@ func (d *desktop) startRemotePaneCopy(src *remoteShell, srcDir string, dst *remo
 			})
 		})
 		d.win.Update(func() {
-			d.finishTransfer(rightID, rightShell, rightDir, targetRight, err)
+			if partial && err != nil {
+				status := "目录复制失败，已创建的内容保留在目标目录：" + transferErrorText(err)
+				if errors.Is(err, context.Canceled) {
+					status = "目录复制已取消，已创建的内容保留在目标目录"
+				}
+				d.finishTransferStatus(rightID, rightShell, rightDir, status, targetRight)
+			} else {
+				d.finishTransfer(rightID, rightShell, rightDir, targetRight, err)
+			}
 			p := &d.secondaryPane
-			if err == nil && !targetRight && p.sessionID == leftID && p.shell == leftShell && p.directory == leftDir && p.input == leftDir && p.generation == leftGeneration {
-				d.requestSecondaryPane(leftDir, -1)
+			if (err == nil || partial) && !targetRight {
+				if leftID != 0 && p.sessionID == leftID && p.shell == leftShell && p.directory == leftDir && p.input == leftDir && p.generation == leftGeneration {
+					d.requestSecondaryPane(leftDir, -1)
+				} else if leftID == 0 && p.sessionID == 0 && d.localPane.directory == localDir && d.localPane.generation == localGeneration && sameLocalDirectory(d.localPane.input, localDir) {
+					d.requestLocalPane(localDir, -1)
+				}
 			}
 		})
 	}()

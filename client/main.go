@@ -1041,7 +1041,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.92"
+const version = "0.3.93"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

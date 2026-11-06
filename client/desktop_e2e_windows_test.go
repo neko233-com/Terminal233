@@ -1400,7 +1400,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !strings.Contains(tree, "local-pane-file-pane-upload.txt") {
-		t.Fatal("local transfer pane did not load the isolated directory")
+		t.Fatalf("local transfer pane did not load the isolated directory: %s", tree)
 	}
 	waitPaneAction := func(key string) {
 		t.Helper()
@@ -1462,7 +1462,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if data, readErr := os.ReadFile(filepath.Join(transferDir, "pane-drag.txt")); readErr != nil || string(data) != "pane drag" {
-		t.Fatal("dual-pane drag upload failed")
+		t.Fatalf("dual-pane drag upload failed: %s", fmt.Sprint(call("tree")))
 	}
 	waitPaneAction("file-batch-existing.txt")
 	dragTree = call("tree")["result"].(map[string]any)
@@ -1995,18 +1995,19 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "profile-1") {
 		t.Fatalf("profile missing after editing: %s", tree)
 	}
-	call("act", map[string]any{"key": "profile-1", "action": "press"})
-	deadline = time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "使用已信任指纹连接") || strings.Contains(tree, "session-5") {
+	result = call("tree")["result"].(map[string]any)
+	profileBounds = nil
+	for _, value := range result["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["key"] == "profile-1" {
+			profileBounds, _ = node["bounds"].(map[string]any)
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "session-5") {
-		call("act", map[string]any{"key": "connect", "action": "press"})
+	if profileBounds == nil {
+		t.Fatal("key profile bounds missing")
 	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": profileBounds["x"].(float64) + profileBounds["width"].(float64)/2, "y": profileBounds["y"].(float64) + profileBounds["height"].(float64)/2}}})
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

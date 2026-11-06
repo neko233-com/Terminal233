@@ -63,6 +63,10 @@ func copyLocalFileContext(ctx context.Context, source, target string, progress f
 		return err
 	}
 	defer src.Close()
+	opened, err := src.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return errors.New("源文件在打开时已改变")
+	}
 	dst, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return err

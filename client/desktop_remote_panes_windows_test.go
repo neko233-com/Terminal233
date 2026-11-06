@@ -147,6 +147,19 @@ func TestDesktopRemotePanes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rightDir, "right-drag.txt"), []byte("drag right to left"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	for _, item := range []struct{ root, dir, text string }{
+		{leftDir, "left-folder", "left folder"}, {rightDir, "right-folder", "right folder"},
+		{leftDir, "left-drag-folder", "left drag folder"}, {rightDir, "right-drag-folder", "right drag folder"},
+		{leftDir, "left-local-folder", "remote to local folder"},
+		{rightDir, "right-to-local-pane", "right to local pane"},
+	} {
+		if err := os.MkdirAll(filepath.Join(item.root, item.dir, "nested"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(item.root, item.dir, "nested", "data.txt"), []byte(item.text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	waitKey("secondary-path")
 	call("act", map[string]any{"key": "secondary-path", "action": "setValue", "text": filepath.ToSlash(leftDir)})
 	press("secondary-refresh")
@@ -165,7 +178,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 			}
 			time.Sleep(30 * time.Millisecond)
 		}
-		t.Fatalf("remote copy did not finish: %s", filepath.Base(name))
+		t.Fatalf("remote copy did not finish: %s; tree: %v", filepath.Base(name), call("tree", nil))
 	}
 	waitFile(filepath.Join(rightDir, "left.txt"), "left to right")
 	press("file-right.txt")
@@ -173,6 +186,8 @@ func TestDesktopRemotePanes(t *testing.T) {
 	waitFile(filepath.Join(leftDir, "right.txt"), "right to left")
 	drag := func(sourceKey, targetKey string) {
 		t.Helper()
+		waitKey(sourceKey)
+		call("act", map[string]any{"key": sourceKey, "action": "scrollIntoView"})
 		source := waitKey(sourceKey)["bounds"].(map[string]any)
 		target := waitKey(targetKey)["bounds"].(map[string]any)
 		sx, sy := source["x"].(float64)+source["width"].(float64)/2, source["y"].(float64)+source["height"].(float64)/2
@@ -186,6 +201,44 @@ func TestDesktopRemotePanes(t *testing.T) {
 	waitFile(filepath.Join(rightDir, "left-drag.txt"), "drag left to right")
 	drag("file-right-drag.txt", "local-file-pane")
 	waitFile(filepath.Join(leftDir, "right-drag.txt"), "drag right to left")
+	press("secondary-file-left-folder")
+	press("secondary-copy-right")
+	waitFile(filepath.Join(rightDir, "left-folder", "nested", "data.txt"), "left folder")
+	press("file-right-folder")
+	waitKey("file-open-selected")
+	press("secondary-copy-left")
+	waitFile(filepath.Join(leftDir, "right-folder", "nested", "data.txt"), "right folder")
+	drag("secondary-file-left-drag-folder", "session-file-pane")
+	waitFile(filepath.Join(rightDir, "left-drag-folder", "nested", "data.txt"), "left drag folder")
+	drag("file-right-drag-folder", "local-file-pane")
+	waitFile(filepath.Join(leftDir, "right-drag-folder", "nested", "data.txt"), "right drag folder")
+	localPaneDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(localPaneDir, "local-to-right", "nested"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localPaneDir, "local-to-right", "nested", "data.txt"), []byte("local to right pane"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	press("secondary-picker")
+	press("secondary-local")
+	waitKey("local-pane-path")
+	call("act", map[string]any{"key": "local-pane-path", "action": "setValue", "text": localPaneDir})
+	press("local-pane-open")
+	waitKey("local-pane-file-local-to-right")
+	press("local-pane-file-local-to-right")
+	waitKey("local-pane-open-selected")
+	press("local-pane-upload")
+	waitFile(filepath.Join(rightDir, "local-to-right", "nested", "data.txt"), "local to right pane")
+	press("file-right-to-local-pane")
+	waitKey("file-open-selected")
+	press("local-pane-download")
+	waitFile(filepath.Join(localPaneDir, "right-to-local-pane", "nested", "data.txt"), "right to local pane")
+	press("secondary-picker")
+	press("secondary-session-2")
+	waitKey("secondary-path")
+	call("act", map[string]any{"key": "secondary-path", "action": "setValue", "text": filepath.ToSlash(leftDir)})
+	press("secondary-refresh")
+	waitKey("secondary-file-left.txt")
 	// The right pane may also be a local session while the left stays remote.
 	press("local-terminal")
 	press("new-tab-local")
@@ -194,6 +247,12 @@ func TestDesktopRemotePanes(t *testing.T) {
 	press("nav-files")
 	localDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(localDir, "local-upload.txt"), []byte("local to remote"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(localDir, "local-folder", "nested"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "local-folder", "nested", "data.txt"), []byte("local folder"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	waitKey("remote-dir")
@@ -206,6 +265,13 @@ func TestDesktopRemotePanes(t *testing.T) {
 	press("file-local-upload.txt")
 	press("secondary-copy-left")
 	waitFile(filepath.Join(leftDir, "local-upload.txt"), "local to remote")
+	press("secondary-file-left-local-folder")
+	press("secondary-copy-right")
+	waitFile(filepath.Join(localDir, "left-local-folder", "nested", "data.txt"), "remote to local folder")
+	press("file-local-folder")
+	waitKey("file-open-selected")
+	press("secondary-copy-left")
+	waitFile(filepath.Join(leftDir, "local-folder", "nested", "data.txt"), "local folder")
 	// A host without a locally trusted key must stop for verification, then
 	// return to the left panel without replacing the existing right session.
 	press("secondary-picker")
