@@ -117,7 +117,14 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatal("fresh installs should show the text navigation")
 	}
 	call("act", map[string]any{"key": "workspace-rail-compact", "action": "press"})
-	tree = fmt.Sprint(call("tree"))
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "key:workspace-rail-expand ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if !strings.Contains(tree, "key:workspace-rail-expand ") {
 		t.Fatal("compact icon navigation is missing")
 	}
@@ -2545,6 +2552,16 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	navigate("nav-connections")
 	call("act", map[string]any{"key": "connection-new", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "key:host ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "key:host ") {
+		t.Fatalf("new host editor did not become ready: %v", call("tree"))
+	}
 	call("act", map[string]any{"key": "host", "action": "setValue", "text": settings.Host})
 	call("act", map[string]any{"key": "port", "action": "setValue", "text": settings.Port})
 	call("act", map[string]any{"key": "host-identity", "action": "press"})
