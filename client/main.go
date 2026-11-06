@@ -192,6 +192,13 @@ type desktop struct {
 	forwardMode                                                                             string
 	forwardPending                                                                          bool
 	forwardGeneration                                                                       uint64
+	forwardRulesPath, forwardRulesStatus, forwardRuleEditing, forwardRuleHostSelection      string
+	forwardRuleDraft                                                                        savedForwardRule
+	forwardRuleOriginal                                                                     *savedForwardRule
+	forwardRuleConfirmDelete                                                                string
+	forwardRules                                                                            []savedForwardRule
+	savedForwardRuns                                                                        map[string]*savedForwardRun
+	showTemporaryForward                                                                    bool
 	updateStatus, updatePath                                                                string
 	updateAvailable                                                                         *updateCandidate
 	updateChecking, updateDownloading                                                       bool
@@ -1143,7 +1150,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.113"
+const version = "0.3.114"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -1196,6 +1203,16 @@ func main() {
 		}
 	} else {
 		d.workspaceTemplatesStatus = "工作区存储不可用：" + err.Error()
+	}
+	if dir, err := os.UserConfigDir(); err == nil {
+		d.forwardRulesPath = filepath.Join(dir, "NekoSSH", "forward-rules.json")
+		if saved, readErr := readForwardRules(d.forwardRulesPath); readErr != nil {
+			d.forwardRulesStatus = "读取转发规则失败（原文件已保留）：" + readErr.Error()
+		} else {
+			d.forwardRules = saved.Items
+		}
+	} else {
+		d.forwardRulesStatus = "转发规则存储不可用：" + err.Error()
 	}
 	mygo.Theme.SetSource(mygo.ThemeDark)
 	mygo.App.WhenReady(func() {

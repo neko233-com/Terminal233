@@ -568,6 +568,114 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}()
 	_, targetPort, _ := net.SplitHostPort(forwardTarget.Addr().String())
 	navigate("nav-forward")
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		ready, open := false, false
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "forward-rule-name" {
+				open = true
+			}
+			if node["key"] == "forward-rule-new" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				ready = true
+			}
+		}
+		if open {
+			break
+		}
+		if ready {
+			call("act", map[string]any{"key": "forward-rule-new", "action": "press"})
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "key:forward-rule-name ") {
+		t.Fatal("forward rule editor did not open")
+	}
+	call("act", map[string]any{"key": "forward-rule-name", "action": "setValue", "text": "测试转发"})
+	call("act", map[string]any{"key": "forward-rule-port", "action": "setValue", "text": targetPort})
+	call("act", map[string]any{"key": "forward-rule-save", "action": "press"})
+	var savedRule savedForwardRule
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		file, readErr := readForwardRules(filepath.Join(configDir, "NekoSSH", "forward-rules.json"))
+		if readErr == nil && len(file.Items) == 1 {
+			savedRule = file.Items[0]
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if savedRule.ID == "" {
+		t.Fatal("native forwarding rule was not saved")
+	}
+	call("act", map[string]any{"key": "forward-rule-toggle-" + savedRule.ID, "action": "press"})
+	var ruleAddress string
+	rulePattern := regexp.MustCompile(`已启动：(127\.0\.0\.1:[0-9]+)`)
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if match := rulePattern.FindStringSubmatch(tree); len(match) == 2 {
+			ruleAddress = match[1]
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if ruleAddress == "" {
+		t.Fatalf("saved rule did not start: %s", tree)
+	}
+	storedConn, err := net.DialTimeout("tcp", ruleAddress, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = storedConn.SetDeadline(time.Now().Add(3 * time.Second))
+	_, _ = storedConn.Write([]byte("rule"))
+	storedReply := make([]byte, 4)
+	if _, err = io.ReadFull(storedConn, storedReply); err != nil || string(storedReply) != "rule" {
+		t.Fatalf("saved rule relay: %q %v", storedReply, err)
+	}
+	_ = storedConn.Close()
+	call("act", map[string]any{"key": "forward-rule-toggle-" + savedRule.ID, "action": "press"})
+	call("act", map[string]any{"key": "forward-rules-reload", "action": "press"})
+	if !strings.Contains(fmt.Sprint(call("tree")), "测试转发") {
+		t.Fatal("saved rule was not present after reload")
+	}
+	var ruleX, ruleY float64
+	for _, value := range call("tree")["result"].(map[string]any)["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["label"] == savedRule.Name {
+			bounds := node["bounds"].(map[string]any)
+			ruleX = bounds["x"].(float64) + bounds["width"].(float64)/2
+			ruleY = bounds["y"].(float64) + bounds["height"].(float64)/2
+		}
+	}
+	if ruleX == 0 || ruleY == 0 {
+		t.Fatal("saved rule row missing")
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": ruleX, "y": ruleY}}})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "运行中 · 127.0.0.1:") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "运行中 · 127.0.0.1:") {
+		t.Fatal("double-click did not start saved rule")
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": ruleX, "y": ruleY}}})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "已停止") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "已停止") {
+		t.Fatal("double-click did not stop saved rule")
+	}
+	call("act", map[string]any{"key": "forward-rule-delete-" + savedRule.ID, "action": "press"})
+	call("act", map[string]any{"key": "forward-rule-delete-" + savedRule.ID, "action": "press"})
+	call("act", map[string]any{"key": "forward-temporary-toggle", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -721,16 +829,17 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "session-reconnect") || !strings.Contains(tree, "SSH 会话已断开") {
 		t.Fatalf("disconnect was not visible: %s", tree)
 	}
+	previousAttemptCount := attempts.Load()
 	call("act", map[string]any{"key": "session-reconnect", "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "已重新连接") && attempts.Load() == 2 {
+		if strings.Contains(tree, "已重新连接") && attempts.Load() == previousAttemptCount+1 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "已重新连接") || attempts.Load() != 2 {
+	if !strings.Contains(tree, "已重新连接") || attempts.Load() != previousAttemptCount+1 {
 		t.Fatalf("reconnect failed: %s", tree)
 	}
 	navigate("nav-connections")
@@ -930,19 +1039,21 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	// The picker can be outside the viewport even while the tools are open.
 	// Read the toggle's state instead of treating a missing picker as closed.
-	if !strings.Contains(tree, "收起文件操作") {
-		call("act", map[string]any{"key": "file-tools-toggle", "action": "press"})
-	}
 	deadline = time.Now().Add(5 * time.Second)
+	var nextFileToggle time.Time
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
 		if strings.Contains(tree, "pick-batch-upload") {
 			break
 		}
+		if !strings.Contains(tree, "收起文件操作") && time.Now().After(nextFileToggle) {
+			call("act", map[string]any{"key": "file-tools-toggle", "action": "press"})
+			nextFileToggle = time.Now().Add(300 * time.Millisecond)
+		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !strings.Contains(tree, "pick-batch-upload") || !strings.Contains(tree, "选择多文件并复制到此") {
-		t.Fatalf("native batch picker entry missing: %s", tree)
+		t.Fatal("native batch picker entry missing")
 	}
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -1943,18 +2054,19 @@ func TestDesktopNativeWindow(t *testing.T) {
 		return nil
 	}
 	profileBounds := profileBoundsForClick()
+	previousAttemptCount = attempts.Load()
 	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": profileBounds["x"].(float64) + profileBounds["width"].(float64)/2, "y": profileBounds["y"].(float64) + profileBounds["height"].(float64)/2}}})
 	// A double-click uses the protected password and the previously verified
 	// host key without asking for the password again.
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "session-4") && attempts.Load() == 3 {
+		if strings.Contains(tree, "session-4") && attempts.Load() == previousAttemptCount+1 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "session-4") || attempts.Load() != 3 {
+	if !strings.Contains(tree, "session-4") || attempts.Load() != previousAttemptCount+1 {
 		t.Fatalf("trusted reconnect did not establish the SSH session: %s", tree)
 	}
 	deadline = time.Now().Add(5 * time.Second)
@@ -2115,16 +2227,17 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("profile missing after editing: %s", tree)
 	}
 	profileBounds = profileBoundsForClick()
+	previousAttemptCount = attempts.Load()
 	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": profileBounds["x"].(float64) + profileBounds["width"].(float64)/2, "y": profileBounds["y"].(float64) + profileBounds["height"].(float64)/2}}})
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "session-5") && attempts.Load() == 4 {
+		if strings.Contains(tree, "session-5") && attempts.Load() == previousAttemptCount+1 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "session-5") || attempts.Load() != 4 {
+	if !strings.Contains(tree, "session-5") || attempts.Load() != previousAttemptCount+1 {
 		t.Fatalf("key profile did not connect from the list (authentication attempts: %d): %s", attempts.Load(), tree)
 	}
 	deadline = time.Now().Add(5 * time.Second)
@@ -2302,6 +2415,22 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	// Create an encrypted reusable identity and attach it to a new host.
 	navigate("nav-identities")
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		ready := false
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "identity-new" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				ready = true
+				break
+			}
+		}
+		if ready {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	call("act", map[string]any{"key": "identity-new", "action": "press"})
 	for key, value := range map[string]string{"identity-name": "测试身份", "identity-user": settings.User, "identity-password": settings.Password} {
 		call("act", map[string]any{"key": key, "action": "setValue", "text": value})

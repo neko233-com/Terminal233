@@ -8,7 +8,11 @@ import (
 )
 
 func (d *desktop) forwardView(c *ui.Context) {
-	ui.Text(c, "端口转发").FontSize(22).Bold()
+	d.forwardSavedView(c)
+	if !d.showTemporaryForward {
+		return
+	}
+	ui.Text(c, "临时转发").FontSize(16).Bold()
 	var session *workspaceSession
 	for _, s := range d.sessions {
 		if s.id == d.currentSession {

@@ -241,6 +241,9 @@ func (d *desktop) closeSession(id int) {
 }
 
 func (d *desktop) closeAllSessions() {
+	for id := range d.savedForwardRuns {
+		d.stopSavedForward(id)
+	}
 	d.stopMonitor()
 	if d.archiveCancel != nil {
 		d.archiveCancel()

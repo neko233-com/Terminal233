@@ -150,3 +150,5 @@ client/mygo_windows_*.syso
 # Local workspace templates may contain host names and paths
 workspaces.json
 .workspaces-*.tmp
+forward-rules.json
+.forward-rules-*.tmp

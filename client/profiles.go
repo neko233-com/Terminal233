@@ -29,6 +29,7 @@ type profile struct {
 	Settings                    connectionSettings
 	EncryptedCredentials        string
 	IdentityID, IdentityBinding string
+	StableID                    string
 }
 
 func (d *desktop) addProfile() error {
@@ -59,7 +60,7 @@ func (d *desktop) addProfile() error {
 		if safe.Fingerprint == "" && old.Settings.Host == safe.Host && old.Settings.Port == safe.Port && old.Settings.User == safe.User {
 			safe.Fingerprint = old.Settings.Fingerprint
 		}
-		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: label, Tags: tags, Favorite: old.Favorite, LastConnected: old.LastConnected, Settings: safe, EncryptedCredentials: old.EncryptedCredentials, IdentityID: old.IdentityID, IdentityBinding: old.IdentityBinding}
+		d.profiles[i] = profile{ID: old.ID, StableID: old.StableID, Group: strings.TrimSpace(d.profileGroup), Label: label, Tags: tags, Favorite: old.Favorite, LastConnected: old.LastConnected, Settings: safe, EncryptedCredentials: old.EncryptedCredentials, IdentityID: old.IdentityID, IdentityBinding: old.IdentityBinding}
 		return nil
 	}
 	d.nextProfileID++
@@ -691,6 +692,8 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 						ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 							if ui.Button(c.Key("profile-delete-confirm"), "确认移除连接").Disabled(d.busy).Clicked() {
 								id := d.confirmProfileDelete
+								before := append([]profile(nil), d.profiles...)
+								previousSelection, wasChecked := d.selectedProfile, d.checkedProfiles[id]
 								d.confirmProfileDelete = ""
 								delete(d.checkedProfiles, id)
 								d.confirmProfileBatchDelete = false
@@ -704,7 +707,11 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 									d.selectedProfile = ""
 								}
 								if err := d.saveProfiles(); err != nil {
-									d.status = "连接已移除，但本机保存失败：" + err.Error()
+									d.profiles, d.selectedProfile = before, previousSelection
+									if wasChecked {
+										d.checkedProfiles[id] = true
+									}
+									d.status = "移除未保存，连接未更改：" + err.Error()
 								} else {
 									d.status = "连接已移除"
 								}
@@ -929,6 +936,7 @@ func (d *desktop) copyCheckedProfiles() {
 		p.Settings.Password, p.Settings.Passphrase = "", ""
 		p.EncryptedCredentials = ""
 		p.IdentityID, p.IdentityBinding = "", ""
+		p.StableID = ""
 		items = append(items, p)
 	}
 	d.profiles = items

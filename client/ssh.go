@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -106,6 +107,47 @@ func connectShellAt(s connectionSettings, dir string) (*remoteShell, error) {
 			return nil, err
 		}
 	}
+	client, err := connectSSHClient(context.Background(), s)
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (*remoteShell, error) { _ = client.Close(); return nil, err }
+	session, err := client.NewSession()
+	if err != nil {
+		return fail(err)
+	}
+	if err = session.RequestPty("xterm-256color", 24, 80, ssh.TerminalModes{ssh.ECHO: 1, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400}); err != nil {
+		return fail(err)
+	}
+	in, err := session.StdinPipe()
+	if err != nil {
+		return fail(err)
+	}
+	out, output := io.Pipe()
+	session.Stdout = output
+	session.Stderr = output
+	if command == "" {
+		err = session.Shell()
+	} else {
+		err = session.Start(command)
+	}
+	if err != nil {
+		_ = out.Close()
+		_ = output.Close()
+		return fail(err)
+	}
+	go func() {
+		_ = output.CloseWithError(session.Wait())
+		_ = client.Close()
+	}()
+	done := make(chan struct{})
+	go func() { _ = client.Wait(); close(done) }()
+	return &remoteShell{client: client, done: done, session: session, in: in, out: out}, nil
+}
+
+// A forwarding rule needs only an SSH transport, not a shell or PTY. Both
+// paths use the same host-key verification and authentication policy.
+func connectSSHClient(ctx context.Context, s connectionSettings) (*ssh.Client, error) {
 	addr, err := s.address()
 	if err != nil {
 		return nil, err
@@ -142,48 +184,23 @@ func connectShellAt(s connectionSettings, dir string) (*remoteShell, error) {
 		}
 		return nil
 	}}
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	conn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	stopCancellation := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	cc, channels, requests, err := ssh.NewClientConn(conn, addr, cfg)
+	stopCancellation()
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
 	_ = conn.SetDeadline(time.Time{})
 	client := ssh.NewClient(cc, channels, requests)
-	fail := func(err error) (*remoteShell, error) { _ = client.Close(); return nil, err }
-	session, err := client.NewSession()
-	if err != nil {
-		return fail(err)
-	}
-	if err = session.RequestPty("xterm-256color", 24, 80, ssh.TerminalModes{ssh.ECHO: 1, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400}); err != nil {
-		return fail(err)
-	}
-	in, err := session.StdinPipe()
-	if err != nil {
-		return fail(err)
-	}
-	out, output := io.Pipe()
-	session.Stdout = output
-	session.Stderr = output
-	if command == "" {
-		err = session.Shell()
-	} else {
-		err = session.Start(command)
-	}
-	if err != nil {
-		_ = out.Close()
-		_ = output.Close()
-		return fail(err)
-	}
-	go func() {
-		_ = output.CloseWithError(session.Wait())
+	if err := ctx.Err(); err != nil {
 		_ = client.Close()
-	}()
-	done := make(chan struct{})
-	go func() { _ = client.Wait(); close(done) }()
-	return &remoteShell{client: client, done: done, session: session, in: in, out: out}, nil
+		return nil, err
+	}
+	return client, nil
 }

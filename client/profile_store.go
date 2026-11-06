@@ -21,6 +21,7 @@ type diskProfile struct {
 	LastConnected                                        int64    `json:",omitempty"`
 	Tags                                                 []string `json:",omitempty"`
 	IdentityID, IdentityBinding                          string   `json:",omitempty"`
+	StableID                                             string   `json:",omitempty"`
 }
 
 type diskProfiles struct {
@@ -44,6 +45,7 @@ func (d *desktop) loadProfiles(path string) error {
 		d.profileExists = false
 		d.profileRevision = [32]byte{}
 		d.profileStoreConflict = false
+		d.stopChangedForwardRules()
 		return nil
 	}
 	if err != nil {
@@ -56,7 +58,7 @@ func (d *desktop) loadProfiles(path string) error {
 	if err := json.Unmarshal(data, &saved); err != nil {
 		return fmt.Errorf("连接列表格式无效：%w", err)
 	}
-	if saved.Version < 1 || saved.Version > 5 || len(saved.Items) > 10000 || len(saved.Groups) > 10000 || len(saved.Identities) > maxSavedIdentities || (saved.Version < 5 && len(saved.Identities) != 0) {
+	if saved.Version < 1 || saved.Version > 6 || len(saved.Items) > 10000 || len(saved.Groups) > 10000 || len(saved.Identities) > maxSavedIdentities || (saved.Version < 5 && len(saved.Identities) != 0) {
 		return errors.New("连接列表版本或数量无效")
 	}
 	identityByID := make(map[string]savedIdentity, len(saved.Identities))
@@ -75,6 +77,7 @@ func (d *desktop) loadProfiles(path string) error {
 		identityByID[identity.ID] = identity
 	}
 	profiles := make([]profile, 0, len(saved.Items))
+	stableIDs := make(map[string]bool)
 	for i, p := range saved.Items {
 		settings := connectionSettings{Host: p.Host, Port: p.Port, User: p.User, KeyPath: p.KeyPath, Fingerprint: p.Fingerprint}
 		if _, err := settings.address(); err != nil {
@@ -92,7 +95,13 @@ func (d *desktop) loadProfiles(path string) error {
 				return errors.New("主机身份引用无效")
 			}
 		}
-		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Settings: settings, EncryptedCredentials: p.EncryptedCredentials, IdentityID: p.IdentityID, IdentityBinding: p.IdentityBinding})
+		if p.StableID != "" {
+			if saved.Version < 6 || !validRandomID(p.StableID) || stableIDs[p.StableID] {
+				return errors.New("主机标识无效或重复")
+			}
+			stableIDs[p.StableID] = true
+		}
+		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), StableID: p.StableID, Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Settings: settings, EncryptedCredentials: p.EncryptedCredentials, IdentityID: p.IdentityID, IdentityBinding: p.IdentityBinding})
 	}
 	d.profiles, d.nextProfileID, d.profilePath = profiles, len(profiles), path
 	d.identities = saved.Identities
@@ -103,6 +112,7 @@ func (d *desktop) loadProfiles(path string) error {
 	d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
 	d.profileExists, d.profileRevision = true, sha256.Sum256(data)
 	d.profileStoreConflict = false
+	d.stopChangedForwardRules()
 	return nil
 }
 
@@ -138,7 +148,13 @@ func (d *desktop) saveProfiles() error {
 		if p.IdentityID != "" {
 			version = max(version, 5)
 		}
-		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint, EncryptedCredentials: p.EncryptedCredentials, IdentityID: p.IdentityID, IdentityBinding: p.IdentityBinding})
+		if p.StableID != "" {
+			if !validRandomID(p.StableID) {
+				return errors.New("主机标识无效")
+			}
+			version = max(version, 6)
+		}
+		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint, EncryptedCredentials: p.EncryptedCredentials, IdentityID: p.IdentityID, IdentityBinding: p.IdentityBinding, StableID: p.StableID})
 	}
 	saved.Version = version
 	data, err := json.MarshalIndent(saved, "", "  ")
@@ -193,5 +209,6 @@ func (d *desktop) saveProfiles() error {
 	d.profileExists, d.profileRevision = true, sha256.Sum256(data)
 	d.profileFormat = version
 	d.profileStoreConflict = false
+	d.stopChangedForwardRules()
 	return nil
 }
