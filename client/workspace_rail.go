@@ -8,13 +8,19 @@ func (d *desktop) setRailExpanded(expanded bool) {
 }
 
 func railButton(c *ui.Context, key, label string, icon *ui.SVG, active bool) ui.Element {
-	button := terminalActionButton(c, key, label, icon, active, false).Selected(active)
+	button := ui.Button(c.Key(key), "").Label(label).Tooltip(label).Width(36).Height(36).Padding(8).BorderWidth(0).Radius(7).Selected(active)
+	color := c.Theme().TextMuted
+	if active {
+		button = button.Background(c.Theme().SurfacePressed)
+		color = c.Theme().Accent
+	}
 	if !active {
 		button = button.Background(ui.Transparent)
 		if button.Hovered() {
 			button = button.Background(c.Theme().Surface)
 		}
 	}
+	button.Children(func() { ui.Icon(c, icon).Width(18).Height(18).TextColor(color) })
 	return button
 }
 

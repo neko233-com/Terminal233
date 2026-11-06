@@ -912,7 +912,7 @@ func (d *desktop) view(c *ui.Context) {
 						if d.editConnection {
 							inspectorBackground := ui.Hex("#171c30")
 							if d.lightTheme {
-								inspectorBackground = t.Surface
+								inspectorBackground = t.Background
 							}
 							ui.Column(c.Key("connection-inspector")).Label("主机详情面板").Width(connectionInspectorWidth).FillHeight().Shrink(0).Background(inspectorBackground).BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
 								ui.Column(c).FillWidth().Padding(12, 16).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() { d.connectionHeader(c, true) })
@@ -1164,7 +1164,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.115"
+const version = "0.3.116"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
