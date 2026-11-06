@@ -58,6 +58,7 @@ func (d *desktop) saveQuickCommand() bool {
 	d.quickCommands, d.quickEdit, d.quickConfirm = items, nil, ""
 	d.quickName, d.quickText = "", ""
 	d.quickStatus = "快速命令已保存到本机"
+	d.quickSelected = item.ID
 	return true
 }
 
@@ -151,61 +152,6 @@ func (d *desktop) quickCommandTarget() string {
 	return "未选择终端"
 }
 
-func (d *desktop) quickCommandsView(c *ui.Context) {
-	ui.Column(c).FillWidth().Padding(10, 12).Gap(6).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Children(func() {
-		ui.Text(c, "命令目标："+d.quickCommandTarget()).Bold().FontSize(12).Wrap()
-		ui.Text(c, "快速命令保存在本机明文文件中；请勿保存密码或令牌。发送目标为当前选中的会话，发送并回车会与当前输入行一起执行。 ").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
-			ui.TextInput(c.Key("quick-name"), &d.quickName).Label("命令名称").Placeholder("例如查看磁盘").Grow(1)
-			ui.TextArea(c.Key("quick-text"), &d.quickText).Label("命令或脚本").Placeholder("例如 df -h").Height(90).Grow(2)
-			if ui.Button(c.Key("quick-save"), "保存命令").Clicked() {
-				d.saveQuickCommand()
-			}
-			if d.quickEdit != nil && ui.Button(c.Key("quick-cancel-edit"), "取消编辑").Clicked() {
-				d.quickEdit, d.quickName, d.quickText = nil, "", ""
-			}
-			if ui.Button(c.Key("quick-refresh"), "刷新").Clicked() {
-				d.reloadQuickCommands()
-			}
-		})
-		if d.quickStatus != "" {
-			ui.Text(c, d.quickStatus).FontSize(12).Wrap()
-		}
-		if len(d.quickCommands) > 0 {
-			ui.TextInput(c.Key("quick-filter"), &d.quickFilter).Label("搜索快速命令").Placeholder("按名称或命令内容搜索")
-			visible := filterQuickCommands(d.quickCommands, d.quickFilter)
-			if len(visible) == 0 {
-				ui.Text(c, "没有匹配的快速命令").FontSize(12).TextColor(c.Theme().TextMuted)
-			}
-			if len(visible) == 0 {
-				return
-			}
-			ui.Scroll(c.Key("quick-list")).Height(150).FillWidth().Children(func() {
-				for _, command := range visible {
-					item := command
-					ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, fmt.Sprintf("%s · %s", item.Name, quickCommandPreview(item.Command))).Grow(1).Wrap()
-						d.quickInsertButton(c, "quick-insert-"+item.ID, item, d.term == nil || terminalEnded(d.term))
-						if ui.Button(c.Key("quick-run-"+item.ID), "发送并回车").Disabled(terminalEnded(d.term)).Clicked() {
-							d.sendQuickCommand(item, true)
-						}
-						if ui.Button(c.Key("quick-edit-"+item.ID), "编辑").Clicked() {
-							d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
-						}
-						label := "删除"
-						if d.quickConfirm == item.ID {
-							label = "确认删除"
-						}
-						if ui.Button(c.Key("quick-delete-"+item.ID), label).Clicked() {
-							d.deleteQuickCommand(item)
-						}
-					})
-				}
-			})
-		}
-	})
-}
-
 // The wide terminal uses a side panel: the list stays in view and editing is
 // opened explicitly, leaving the terminal itself at full height.
 func (d *desktop) quickCommandsSideView(c *ui.Context) {
@@ -257,26 +203,45 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 		}
 		for _, command := range visible {
 			item := command
-			ui.Column(c).FillWidth().Padding(10).Gap(6).Background(c.Theme().Background).Radius(8).Children(func() {
-				ui.Text(c, item.Name).Bold().Wrap()
-				ui.Text(c, quickCommandPreview(item.Command)).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-				ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
-					d.quickInsertButton(c, "quick-insert-"+item.ID, item, d.term == nil || terminalEnded(d.term))
-					if ui.Button(c.Key("quick-run-"+item.ID), "发送并回车").Disabled(d.term == nil || terminalEnded(d.term)).Clicked() {
-						d.sendQuickCommand(item, true)
-					}
-					if ui.Button(c.Key("quick-edit-"+item.ID), "编辑").Disabled(d.quickEditorOpen).Clicked() {
-						d.quickEditorOpen = true
+			selected := d.quickSelected == item.ID
+			ui.Column(c).FillWidth().Padding(6).Gap(4).Background(c.Theme().Background).Radius(8).Children(func() {
+				row := ui.Button(c.Key("quick-select-"+item.ID), "").Label("选择快速命令：" + item.Name).FillWidth().BorderWidth(0).Justify(ui.Start).Disabled(d.quickEditorOpen)
+				if selected {
+					row = row.Background(c.Theme().SurfacePressed)
+				}
+				row.Children(func() {
+					ui.Column(c).FillWidth().Gap(3).Children(func() {
+						ui.Text(c, item.Name).Bold().Wrap()
+						ui.Text(c, quickCommandPreview(item.Command)).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+					})
+				})
+				row.ContextMenu(func(menu *ui.Menu) {
+					if menu.Item("编辑").Disabled(d.quickEditorOpen).Chosen() {
+						d.quickSelected, d.quickEditorOpen = item.ID, true
 						d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
 					}
-					label := "删除"
-					if d.quickConfirm == item.ID {
-						label = "确认删除"
-					}
-					if ui.Button(c.Key("quick-delete-"+item.ID), label).Disabled(d.quickEditorOpen).Clicked() {
+					if menu.Item("删除…").Disabled(d.quickEditorOpen).Chosen() {
+						d.quickSelected = item.ID
 						d.deleteQuickCommand(item)
 					}
 				})
+				if row.DoubleClicked() && !d.quickEditorOpen && d.term != nil && !terminalEnded(d.term) {
+					d.quickSelected, d.quickConfirm = item.ID, ""
+					d.sendQuickCommand(item, true)
+				} else if row.Clicked() && !d.quickEditorOpen {
+					d.quickSelected, d.quickConfirm = item.ID, ""
+				}
+				if selected && !d.quickEditorOpen {
+					ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+						d.quickInsertButton(c, "quick-insert-"+item.ID, item, d.term == nil || terminalEnded(d.term))
+						if ui.Button(c.Key("quick-run-"+item.ID), "运行").Disabled(d.term == nil || terminalEnded(d.term)).Clicked() {
+							d.sendQuickCommand(item, true)
+						}
+						if d.quickConfirm == item.ID && ui.Button(c.Key("quick-delete-"+item.ID), "确认删除").Clicked() {
+							d.deleteQuickCommand(item)
+						}
+					})
+				}
 			})
 		}
 	})
@@ -300,7 +265,10 @@ func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
 						ui.Text(c, quickCommandPreview(item.Command)).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 					})
 				})
-				if button.Clicked() {
+				if button.DoubleClicked() && !d.quickEditorOpen {
+					d.quickSelected, d.quickEditorOpen = item.ID, true
+					d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
+				} else if button.Clicked() {
 					d.quickSelected, d.quickConfirm = item.ID, ""
 				}
 				if selected {

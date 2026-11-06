@@ -202,6 +202,14 @@ func (d *desktop) sidebarVisible() bool {
 	return !d.sidebarCollapsed
 }
 
+func (d *desktop) toggleQuickCommands() {
+	d.quickOpen = !d.quickOpen
+	if d.quickOpen && d.showFilePanel {
+		d.showFilePanel = false
+		d.savePreference("files", false)
+	}
+}
+
 func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	mods := ui.Cmd | ui.Shift
 	switch {
@@ -229,6 +237,8 @@ func (d *desktop) workspaceShortcuts(c *ui.Context) {
 		if d.term != nil {
 			d.workspace, d.terminalSearchOpen = "terminal", true
 		}
+	case d.workspace == "terminal" && d.term != nil && c.Shortcut(ui.Cmd, ui.KeyPeriod):
+		d.toggleQuickCommands()
 	}
 }
 
@@ -636,11 +646,7 @@ func (d *desktop) view(c *ui.Context) {
 							quickLabel = "收起快速命令"
 						}
 						if terminalActionButton(c, "quick-toggle", quickLabel, snippetIcon, d.quickOpen, d.term == nil).Clicked() {
-							d.quickOpen = !d.quickOpen
-							if d.quickOpen && d.showFilePanel {
-								d.showFilePanel = false
-								d.savePreference("files", false)
-							}
+							d.toggleQuickCommands()
 						}
 						if d.shell != nil || d.monitorCancel != nil {
 							monitorLabel := "服务器状态"
@@ -699,11 +705,11 @@ func (d *desktop) view(c *ui.Context) {
 							}
 						}
 						if d.quickOpen && !sideQuick {
+							panelHeight := float32(200)
 							if compactAuxiliaryPanels {
-								ui.Scroll(c.Key("quick-compact-scroll")).Label("快速命令面板").Height(90).Shrink(0).FillWidth().Children(func() { d.quickCommandsView(c) })
-							} else {
-								d.quickCommandsView(c)
+								panelHeight = 90
 							}
+							ui.Scroll(c.Key("quick-compact-scroll")).Label("快速命令面板").Height(panelHeight).Shrink(0).FillWidth().Children(func() { d.quickCommandsSideView(c) })
 						}
 						if d.terminalSearchOpen {
 							d.terminalSearchView(c)
@@ -938,7 +944,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.77"
+const version = "0.3.78"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

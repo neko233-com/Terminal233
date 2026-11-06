@@ -202,6 +202,83 @@ func TestQuickSideEditorOpensAndClosesAfterSaving(t *testing.T) {
 	}
 }
 
+func TestQuickSideSelectionDoubleClickAndContextMenu(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{workspace: "terminal", term: term, currentSession: 1, quickOpen: true,
+		sessions:      []*workspaceSession{{id: 1, label: "local", term: term}},
+		quickCommands: []quickCommand{{ID: "one", Name: "目录", Command: "pwd"}, {ID: "two", Name: "用户", Command: "whoami"}}}
+	view := ui.NewTester(d.view, 1280, 800)
+	if view.HasText("运行") {
+		t.Fatal("unselected commands should not show action buttons")
+	}
+	if err := view.Click("选择快速命令：目录"); err != nil {
+		t.Fatal(err)
+	}
+	if d.quickSelected != "one" || !view.HasText("运行") {
+		t.Fatal("single click did not reveal selected command actions")
+	}
+	if err := view.Click("选择快速命令：目录"); err != nil {
+		t.Fatal(err)
+	}
+	_ = right.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(right, buf); err != nil || string(buf) != "pwd\r" {
+		t.Fatalf("double click sent %q: %v", buf, err)
+	}
+	if err := view.RightClick("选择快速命令：用户"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.ChooseMenuItem("编辑"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.quickEditorOpen || d.quickEdit == nil || d.quickEdit.ID != "two" || d.quickText != "whoami" {
+		t.Fatal("context edit did not open the selected command")
+	}
+}
+
+func TestQuickPanelShortcut(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{workspace: "terminal", term: term, currentSession: 1, sessions: []*workspaceSession{{id: 1, label: "local", term: term}}}
+	view := ui.NewTester(d.view, 1280, 800)
+	view.Key(ui.Cmd, ui.KeyPeriod)
+	if !d.quickOpen || !view.HasText("快速命令面板") {
+		t.Fatal("Ctrl+. did not open the command panel")
+	}
+	view.Key(ui.Cmd, ui.KeyPeriod)
+	if d.quickOpen {
+		t.Fatal("Ctrl+. did not close the command panel")
+	}
+}
+
+func TestSnippetWorkspaceDoubleClickEdits(t *testing.T) {
+	d := &desktop{workspace: "snippets", quickCommands: []quickCommand{{ID: "one", Name: "目录", Command: "pwd"}}}
+	view := ui.NewTester(d.view, 1280, 800)
+	if err := view.Click("选择命令片段：目录"); err != nil {
+		t.Fatal(err)
+	}
+	if d.quickEditorOpen {
+		t.Fatal("single click unexpectedly opened the editor")
+	}
+	if err := view.Click("选择命令片段：目录"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.quickEditorOpen || d.quickEdit == nil || d.quickEdit.ID != "one" {
+		t.Fatal("double click did not open the snippet editor")
+	}
+}
+
 func TestSnippetWorkspaceWorksWithoutSessionAndReturnsToTarget(t *testing.T) {
 	d := &desktop{workspace: "connections", quickPath: filepath.Join(t.TempDir(), "commands.json")}
 	view := ui.NewTester(d.view, 1280, 800)
