@@ -25,7 +25,7 @@ func (d *desktop) forwardView(c *ui.Context) {
 		return
 	}
 	ui.Text(c, "SSH 主机 · "+session.label).TextColor(c.Theme().TextMuted).Wrap()
-	if terminalEnded(session.term) {
+	if !session.fileAvailable() {
 		ui.Text(c, "SSH 会话已断开，请重新连接。").Wrap()
 	}
 	if d.forwardMode == "" {
@@ -59,7 +59,7 @@ func (d *desktop) forwardView(c *ui.Context) {
 	case "动态 SOCKS5":
 		ui.Text(c, "本机 SOCKS5 代理仅监听 127.0.0.1，目标由 SSH 服务器解析。").TextColor(c.Theme().TextMuted).FontSize(12).Wrap()
 	}
-	if ui.PrimaryButton(c.Key("forward-start"), "启动转发").Disabled(d.busy || d.forwardPending || terminalEnded(session.term) || len(session.forwards) >= maxForwardsPerSession).Clicked() {
+	if ui.PrimaryButton(c.Key("forward-start"), "启动转发").Disabled(d.busy || d.forwardPending || !session.fileAvailable() || len(session.forwards) >= maxForwardsPerSession).Clicked() {
 		d.startForward(session, c.Invalidate)
 	}
 	if d.forwardStatus != "" {
@@ -133,7 +133,7 @@ func (d *desktop) startForward(session *workspaceSession, invalidate func()) {
 					break
 				}
 			}
-			if !alive || terminalEnded(session.term) {
+			if !alive || !session.fileAvailable() {
 				if f != nil {
 					f.Close()
 				}

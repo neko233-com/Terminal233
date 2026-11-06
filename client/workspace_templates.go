@@ -259,7 +259,12 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 	}
 	w := savedWorkspace{ID: hex.EncodeToString(id[:]), Name: name, Active: -1, SplitFirst: -1, SplitSecond: -1, SplitLayout: d.splitLayout}
 	d.saveSessionState()
-	sessions := d.sessions
+	sessions := make([]*workspaceSession, 0, len(d.sessions))
+	for _, s := range d.sessions {
+		if !s.fileOnly {
+			sessions = append(sessions, s)
+		}
+	}
 	group := d.terminalGroupFor(d.currentSession)
 	if group != nil {
 		sessions = d.terminalGroupSessions(group)
@@ -322,7 +327,14 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 			w.SplitSecond = i
 		}
 	}
-	if group != nil || d.splitSession == 0 {
+	activeFileOnly := len(w.Entries) > 0 && w.Active == -1
+	if activeFileOnly {
+		w.Active = 0
+	}
+	if len(w.Entries) == 0 {
+		return savedWorkspace{}, errors.New("请先打开终端；SFTP 文件连接不包含在终端工作区中")
+	}
+	if group != nil || d.splitSession == 0 || activeFileOnly {
 		w.SplitFirst, w.SplitSecond = -1, -1
 	} else if w.SplitFirst == w.SplitSecond {
 		w.SplitSecond = w.Active

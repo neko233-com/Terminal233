@@ -77,7 +77,8 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 				return
 			}
 			s := tabInfo.sessions[0]
-			tab := workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), d.workspace == "terminal" && s.id == d.currentSession).Disabled(!d.canSwitchSession()).Drag(sessionDragID(s.id))
+			active := s.id == d.currentSession && ((s.fileOnly && d.workspace == "files") || (!s.fileOnly && d.workspace == "terminal"))
+			tab := workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), active).Disabled(!d.canSwitchSession()).Drag(sessionDragID(s.id))
 			tab.ContextMenu(func(menu *ui.Menu) {
 				if menu.Item("向左移动").Disabled(index == 0).Chosen() {
 					moveFrom, moveTo = sessionDragID(s.id), sessionDragID(tabs[index-1].representative)
@@ -92,9 +93,6 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 			if tab.Clicked() {
 				d.confirmTerminalGroupClose = 0
 				d.selectSession(s.id)
-				if d.currentSession == s.id {
-					d.workspace = "terminal"
-				}
 			}
 			if dragged, ok := ui.Drop[sessionDragID](tab); ok {
 				moveFrom, moveTo = dragged, sessionDragID(s.id)

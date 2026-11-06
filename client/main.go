@@ -282,9 +282,9 @@ func (d *desktop) toggleQuickCommands() {
 func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	mods := ui.Cmd | ui.Shift
 	switch {
-	case d.workspace == "terminal" && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(ui.Cmd, ui.KeyTab):
+	case (d.workspace == "terminal" || d.workspace == "files") && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(ui.Cmd, ui.KeyTab):
 		d.selectAdjacentSession(1)
-	case d.workspace == "terminal" && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(mods, ui.KeyTab):
+	case (d.workspace == "terminal" || d.workspace == "files") && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(mods, ui.KeyTab):
 		d.selectAdjacentSession(-1)
 	case c.Shortcut(mods, ui.Key1):
 		d.workspace = "connections"
@@ -387,7 +387,16 @@ func (d *desktop) connect() {
 	d.settings.Password = ""
 	d.settings.Passphrase = ""
 	go func() {
-		shell, term, err := openSSHSession(settings, options)
+		var shell *remoteShell
+		var term *terminal.Terminal
+		var err error
+		if returnToFiles {
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			shell, err = openSFTPTransport(ctx, settings)
+			cancel()
+		} else {
+			shell, term, err = openSSHSession(settings, options)
+		}
 		d.win.Update(func() {
 			d.busy = false
 			if err != nil {
@@ -396,6 +405,11 @@ func (d *desktop) connect() {
 				return
 			}
 			showFiles := returnToFiles && d.fileReturnAfterConnect && d.workspace == "connections"
+			if returnToFiles && !showFiles {
+				_ = shell.Close()
+				d.status = "已取消文件连接。"
+				return
+			}
 			showSecondary := showFiles && d.secondaryConnectPending
 			previousID, previousShell, previousTerm := d.secondaryPreviousID, d.secondaryPreviousShell, d.secondaryPreviousTerm
 			d.fileReturnAfterConnect = false
@@ -406,6 +420,9 @@ func (d *desktop) connect() {
 			d.connectionDraft, d.connectionDraftSet, d.confirmDiscardConnection = connectionDraft{}, false, false
 			for _, session := range d.sessions {
 				if session.id == d.currentSession {
+					if session.fileOnly {
+						d.watchSFTPTransport(session, shell)
+					}
 					session.cloudSources = cloudSources
 					session.cloudVersions = cloudVersions
 					session.sourceProfileID = profileID
@@ -416,14 +433,16 @@ func (d *desktop) connect() {
 			if showSecondary {
 				refreshPrevious := false
 				for _, previous := range d.sessions {
-					if previous.id == previousID && previous.shell == previousShell && previous.term == previousTerm && previous.term != nil && !terminalEnded(previous.term) {
+					if previous.id == previousID && previous.shell == previousShell && previous.term == previousTerm && previous.fileAvailable() {
 						d.activateSessionWithRefresh(previousID, false)
 						refreshPrevious, previous.refreshPending = previous.refreshPending, false
 						break
 					}
 				}
 				d.selectSecondarySession(newSessionID)
-				if d.currentSession == newSessionID || refreshPrevious || d.files == nil {
+				if d.currentSession == newSessionID || d.files == nil {
+					d.refreshFiles()
+				} else if refreshPrevious {
 					d.refreshFilesAfter(d.fileStatus)
 				}
 			} else {
@@ -551,7 +570,7 @@ func (d *desktop) view(c *ui.Context) {
 				panel.AttachTo(settingsButton, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() { d.settingsView(c, height) })
 			})
 			terminalActionButton(c, "local-terminal", "新建标签页", plusIcon, d.workspace == "new-tab", d.busy && !d.canSwitchSession()).OnClick(d.openNewTab)
-			closeLabel, closeDisabled := "关闭当前会话", d.busy || d.term == nil
+			closeLabel, closeDisabled := "关闭当前会话", d.busy || d.currentSession == 0
 			if d.workspace == "new-tab" {
 				closeLabel, closeDisabled = "关闭新标签页", false
 			}
@@ -810,7 +829,7 @@ func (d *desktop) view(c *ui.Context) {
 						if terminalActionButton(c, "quick-toggle", quickLabel, snippetIcon, d.quickOpen, d.term == nil).Clicked() {
 							d.toggleQuickCommands()
 						}
-						if d.shell != nil || d.monitorCancel != nil {
+						if (d.shell != nil && d.term != nil) || d.monitorCancel != nil {
 							monitorLabel := "服务器状态"
 							if d.monitorCancel != nil {
 								monitorLabel = "关闭状态"
@@ -1183,7 +1202,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.120"
+const version = "0.3.121"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

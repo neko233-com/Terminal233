@@ -83,6 +83,11 @@ func (d *desktop) leftPaneToolbar(c *ui.Context) {
 	if terminalActionButton(c, "left-pane-filter-toggle", "筛选左侧文件", searchIcon, *show || filter != "", false).Clicked() {
 		*show = !*show
 	}
+	if s := d.secondarySession(); s != nil && s.fileOnly {
+		if terminalActionButton(c, "left-pane-open-terminal", "打开左侧主机终端", terminalIcon, false, d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+			d.openTerminalFromSFTP(s)
+		}
+	}
 	d.leftPaneOptions(c)
 	if terminalActionButton(c, "left-pane-mkdir", "在左侧新建目录", plusIcon, false, d.busy || !ready).Clicked() {
 		d.beginLeftAction("mkdir", "")

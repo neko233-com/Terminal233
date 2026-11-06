@@ -373,7 +373,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	call("act", map[string]any{"key": "files-open-connections", "action": "press"})
+	navigate("nav-connections")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -488,6 +488,14 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatal("credentials sent during host inspection")
 	}
 	call("act", map[string]any{"key": "connect", "action": "press"})
+	deadline = time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "session-1") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	navigate("nav-files")
 	deadline = time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

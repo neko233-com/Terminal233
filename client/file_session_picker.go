@@ -54,7 +54,7 @@ func (d *desktop) fileSessionPicker(c *ui.Context) {
 					}
 					shown++
 					label := fmt.Sprintf("%s · 会话 %d", sessionDisplayLabel(s), s.id)
-					button := ui.Button(c.Key(fmt.Sprintf("file-picker-session-%d", s.id)), label).Label("文件会话：" + label).FillWidth().Justify(ui.Start).Disabled(!d.canSwitchSession() || s.term == nil || terminalEnded(s.term))
+					button := ui.Button(c.Key(fmt.Sprintf("file-picker-session-%d", s.id)), label).Label("文件会话：" + label).FillWidth().Justify(ui.Start).Disabled(!d.canSwitchSession() || !s.fileAvailable())
 					if s.id == d.currentSession {
 						button = button.Background(c.Theme().SurfacePressed)
 					}

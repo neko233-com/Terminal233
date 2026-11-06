@@ -53,6 +53,10 @@ func testSSHServerWithPause(t *testing.T, slow, pauseEnabled *atomic.Bool, resum
 }
 
 func testSSHServerWithExec(t *testing.T, slow, pauseEnabled *atomic.Bool, resume <-chan struct{}, onExec func(string), authorized ...ssh.PublicKey) (connectionSettings, string, *atomic.Int32) {
+	return testSSHServerWithExecPolicy(t, slow, pauseEnabled, resume, onExec, nil, nil, authorized...)
+}
+
+func testSSHServerWithExecPolicy(t *testing.T, slow, pauseEnabled *atomic.Bool, resume <-chan struct{}, onExec func(string), allowRequest func(string) bool, onConnection func(func() error), authorized ...ssh.PublicKey) (connectionSettings, string, *atomic.Int32) {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -99,6 +103,9 @@ func testSSHServerWithExec(t *testing.T, slow, pauseEnabled *atomic.Bool, resume
 					return
 				}
 				defer sc.Close()
+				if onConnection != nil {
+					onConnection(sc.Close)
+				}
 				go ssh.DiscardRequests(reqs)
 				for ch := range chans {
 					if ch.ChannelType() == "direct-tcpip" {
@@ -145,6 +152,10 @@ func testSSHServerWithExec(t *testing.T, slow, pauseEnabled *atomic.Bool, resume
 					go func() {
 						defer channel.Close()
 						for req := range requests {
+							if allowRequest != nil && !allowRequest(req.Type) {
+								_ = req.Reply(false, nil)
+								continue
+							}
 							switch req.Type {
 							case "pty-req", "window-change":
 								_ = req.Reply(true, nil)

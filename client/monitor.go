@@ -299,7 +299,7 @@ func (d *desktop) toggleMonitor() {
 		d.stopMonitor()
 		return
 	}
-	if d.shell == nil || terminalEnded(d.term) || d.win == nil {
+	if d.shell == nil || d.term == nil || terminalEnded(d.term) || d.win == nil {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())

@@ -65,7 +65,7 @@ func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
 	}
 	if width < 860 {
 		if d.narrowFilePane == "" {
-			if d.term == nil && len(d.files) == 0 {
+			if d.fileSessionUnavailable() && len(d.files) == 0 {
 				d.narrowFilePane = "local"
 			} else {
 				d.narrowFilePane = "session"

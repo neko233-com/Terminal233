@@ -583,7 +583,15 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			panel.AttachTo(picker, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() { d.fileSessionPicker(c) })
 		})
 		ui.Box(c).Grow(1)
-		if d.term != nil || len(d.files) > 0 {
+		if s := d.currentSFTPSession(); s != nil {
+			if !s.fileAvailable() && ui.Button(c.Key("file-reconnect"), "重新连接").Disabled(d.busy).Clicked() {
+				d.reconnectSFTP(s)
+			}
+			if terminalActionButton(c, "file-open-terminal", "打开此主机的终端", terminalIcon, false, d.busy || !s.fileAvailable() || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+				d.openTerminalFromSFTP(s)
+			}
+		}
+		if d.term != nil {
 			if ui.Button(c.Key("file-terminal-dir"), "◎").Label("定位终端目录").Tooltip("定位终端目录").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 				d.followReportedDirectory(true)
 			}
@@ -610,7 +618,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			d.showFileOptions = !d.showFileOptions
 		}
 	})
-	if d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0 {
+	if d.fileSessionUnavailable() && d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0 {
 		ui.Column(c).FillWidth().Padding(24).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
 			ui.Text(c, "选择主机").FontSize(17).Bold()
 			ui.Text(c, "连接后浏览和传输文件。").FontSize(13).TextColor(c.Theme().TextMuted).Wrap()
@@ -664,7 +672,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			d.refreshFiles()
 		}
 	})
-	if d.term == nil {
+	if d.term == nil && d.fileSessionUnavailable() {
 		ui.Text(c, "连接 SSH 或打开本机终端后可浏览文件。").TextColor(c.Theme().TextMuted).Wrap()
 	} else if terminalEnded(d.term) {
 		ui.Text(c, "当前会话已结束，文件操作不可用；请重新连接或打开终端。").TextColor(c.Theme().TextMuted).Wrap()

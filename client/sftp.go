@@ -117,6 +117,31 @@ func withSFTP(shell *remoteShell, f func(*sftp.Client) error) error {
 	defer client.Close()
 	return f(client)
 }
+
+// An SFTP-only connection authenticates directly and verifies the subsystem
+// without requesting a PTY or starting an interactive shell.
+func openSFTPTransport(ctx context.Context, settings connectionSettings) (*remoteShell, error) {
+	client, err := connectSSHClient(ctx, settings)
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = client.Close() })
+	probe, err := sftp.NewClient(client)
+	if err == nil {
+		err = probe.Close()
+	}
+	stop()
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	done := make(chan struct{})
+	go func() { _ = client.Wait(); close(done) }()
+	return &remoteShell{client: client, done: done}, nil
+}
 func listRemote(shell *remoteShell, dir string) ([]remoteFile, error) {
 	var result []remoteFile
 	err := withSFTP(shell, func(client *sftp.Client) error {

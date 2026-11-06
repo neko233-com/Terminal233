@@ -165,6 +165,14 @@ func (d *desktop) saveWorkspaceTemplate() {
 			break
 		}
 	}
+	if d.terminalGroupFor(d.currentSession) == nil {
+		for _, session := range d.sessions {
+			if session.fileOnly {
+				d.workspaceTemplatesStatus += "；SFTP 连接未包含在终端工作区中"
+				break
+			}
+		}
+	}
 	if d.cloud != nil && d.cloud.cloudWorkspaces {
 		d.uploadWorkspaceTemplate(w)
 	}
@@ -542,6 +550,14 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 			d.cancelWorkspaceRestore()
 		}
 		return
+	}
+	if d.terminalGroupFor(d.currentSession) == nil {
+		for _, session := range d.sessions {
+			if session.fileOnly {
+				ui.Text(c, "终端工作区不包含 SFTP 文件连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+				break
+			}
+		}
 	}
 	ui.Row(c).FillWidth().Gap(6).Children(func() {
 		ui.TextInput(c.Key("workspace-template-name"), &d.workspaceTemplateName).Label("新工作区名称").Placeholder("工作区名称").Grow(1)

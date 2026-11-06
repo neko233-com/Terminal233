@@ -76,7 +76,7 @@ func (d *desktop) openSecondaryCloudAccount(account cloudAccount) {
 
 func (d *desktop) secondarySession() *workspaceSession {
 	for _, s := range d.sessions {
-		if s.id == d.secondaryPane.sessionID && s.shell == d.secondaryPane.shell && s.shell != nil && s.term != nil && !terminalEnded(s.term) {
+		if s.id == d.secondaryPane.sessionID && s.shell == d.secondaryPane.shell && s.shell != nil && s.fileAvailable() {
 			return s
 		}
 	}
@@ -94,7 +94,7 @@ func (d *desktop) selectSecondarySession(id int) {
 		return
 	}
 	for _, s := range d.sessions {
-		if s.id != id || s.shell == nil || s.term == nil || terminalEnded(s.term) {
+		if s.id != id || s.shell == nil || !s.fileAvailable() {
 			continue
 		}
 		if d.secondaryPane.sessionID == id && d.secondaryPane.shell == s.shell {
@@ -144,7 +144,7 @@ func (d *desktop) secondaryFilePicker(c *ui.Context) {
 					}
 					for _, session := range d.sessions {
 						s := session
-						if s.shell == nil || s.term == nil || terminalEnded(s.term) || !matches(s.label) {
+						if s.shell == nil || !s.fileAvailable() || !matches(s.label) {
 							continue
 						}
 						shown++
@@ -250,6 +250,17 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 	ui.Row(c).FillWidth().Height(36).AlignItems(ui.Center).Children(func() { d.secondaryFilePicker(c); d.leftPaneToolbar(c) })
 	if d.secondarySession() == nil {
 		ui.Text(c, "会话已断开，请选择其他主机。").Wrap()
+		for _, session := range d.sessions {
+			if session.id == p.sessionID && session.shell == p.shell && session.fileOnly {
+				if ui.Button(c.Key("secondary-reconnect"), "重新连接").Disabled(d.busy).Clicked() {
+					d.reconnectSFTP(session)
+				}
+				if p.status != "" {
+					ui.Text(c, p.status).FontSize(12).Wrap()
+				}
+				break
+			}
+		}
 		return
 	}
 	ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {

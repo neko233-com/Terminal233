@@ -79,7 +79,18 @@ func (s *remoteShell) takeMonitorSlot() bool {
 func (s *remoteShell) Read(p []byte) (int, error)  { return s.out.Read(p) }
 func (s *remoteShell) Write(p []byte) (int, error) { return s.in.Write(p) }
 func (s *remoteShell) Resize(cols, rows int) error { return s.session.WindowChange(rows, cols) }
-func (s *remoteShell) Close() error                { _ = s.in.Close(); _ = s.session.Close(); return s.client.Close() }
+func (s *remoteShell) Close() error {
+	if s.in != nil {
+		_ = s.in.Close()
+	}
+	if s.session != nil {
+		_ = s.session.Close()
+	}
+	if s.client != nil {
+		return s.client.Close()
+	}
+	return nil
+}
 
 func connectShell(s connectionSettings) (*remoteShell, error) {
 	return connectShellAt(s, "")

@@ -39,9 +39,47 @@ func terminalEnded(term *terminal.Terminal) bool {
 	}
 }
 
-func (d *desktop) fileSessionUnavailable() bool { return d.term == nil || terminalEnded(d.term) }
+func transportEnded(shell *remoteShell) bool {
+	if shell == nil {
+		return true
+	}
+	select {
+	case <-shell.done:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *workspaceSession) fileAvailable() bool {
+	if s == nil {
+		return false
+	}
+	if s.fileOnly {
+		return s.shell != nil && !transportEnded(s.shell)
+	}
+	return s.term != nil && !terminalEnded(s.term)
+}
+
+func (d *desktop) fileSessionUnavailable() bool {
+	if d.term != nil {
+		return terminalEnded(d.term)
+	}
+	for _, s := range d.sessions {
+		if s.id == d.currentSession && s.fileOnly && s.shell == d.shell {
+			return !s.fileAvailable()
+		}
+	}
+	return true
+}
 
 func sessionDisplayLabel(s *workspaceSession) string {
+	if s.fileOnly {
+		if transportEnded(s.shell) {
+			return "SFTP · " + s.label + " · 已断开"
+		}
+		return "SFTP · " + s.label
+	}
 	if terminalEnded(s.term) {
 		if s.shell != nil {
 			return s.label + " · 已断开"
@@ -56,6 +94,7 @@ func sessionDisplayLabel(s *workspaceSession) string {
 type workspaceSession struct {
 	id                                                              int
 	label                                                           string
+	fileOnly                                                        bool
 	term                                                            *terminal.Terminal
 	shell                                                           *remoteShell
 	active                                                          connectionSettings
@@ -145,6 +184,9 @@ func (d *desktop) activateSessionWithRefresh(id int, refresh bool) {
 		d.fileChecked, d.fileCheckedDir, d.fileBatchTarget = s.fileChecked, s.fileCheckedDir, s.fileBatchTarget
 		d.terminalSearchOpen, d.terminalSearchText = s.terminalSearchOpen, s.terminalSearchText
 		d.workspace = "terminal"
+		if s.fileOnly {
+			d.workspace = "files"
+		}
 		d.status = "当前会话：" + s.label
 		if refresh && s.refreshPending && !d.fileSessionUnavailable() && !d.busy && d.win != nil {
 			s.refreshPending = false
@@ -165,7 +207,7 @@ func (d *desktop) addSession(term *terminal.Terminal, shell *remoteShell, active
 		term.SetTheme(d.terminalLightTheme, d.terminalDarkTheme)
 	}
 	d.nextSession++
-	s := &workspaceSession{id: d.nextSession, label: label, term: term, shell: shell, active: active, fileHideDotfiles: true}
+	s := &workspaceSession{id: d.nextSession, label: label, term: term, shell: shell, active: active, fileHideDotfiles: true, fileOnly: term == nil && shell != nil}
 	d.bindTerminalBroadcast(s)
 	if shell != nil {
 		s.fileDir = "."
@@ -192,6 +234,7 @@ func (d *desktop) closeSession(id int) {
 		if s.id != id {
 			continue
 		}
+		wasFiles := d.workspace == "files"
 		nextGroupMember := d.detachGroupSession(id)
 		if id == d.monitorSession {
 			d.stopMonitor()
@@ -201,6 +244,8 @@ func (d *desktop) closeSession(id int) {
 		}
 		if s.term != nil {
 			_ = s.term.Close()
+		} else if s.fileOnly && s.shell != nil {
+			_ = s.shell.Close()
 		}
 		if d.splitSession == id {
 			d.splitSession, d.splitFirstSession = 0, 0
@@ -224,10 +269,16 @@ func (d *desktop) closeSession(id int) {
 		d.lastTerminalDir = ""
 		if len(d.sessions) == 0 {
 			d.workspace, d.status = "connections", "已断开"
+			if wasFiles {
+				d.workspace = "files"
+			}
 			return
 		}
 		if nextGroupMember != 0 {
 			d.activateSession(nextGroupMember)
+			if wasFiles {
+				d.workspace = "files"
+			}
 			d.status = "已关闭会话；已切换到工作区中的其他终端"
 			return
 		}
@@ -235,6 +286,9 @@ func (d *desktop) closeSession(id int) {
 			i = len(d.sessions) - 1
 		}
 		d.activateSession(d.sessions[i].id)
+		if wasFiles {
+			d.workspace = "files"
+		}
 		d.status = fmt.Sprintf("已关闭会话；当前：%s", d.sessions[i].label)
 		return
 	}
@@ -263,6 +317,8 @@ func (d *desktop) closeAllSessions() {
 		}
 		if s.term != nil {
 			_ = s.term.Close()
+		} else if s.fileOnly && s.shell != nil {
+			_ = s.shell.Close()
 		}
 	}
 	d.sessions = nil
@@ -431,7 +487,7 @@ func (d *desktop) changeSplitLayout(layout string) {
 // Explicit tab and pane selection also directs subsequent typing to that session.
 func (d *desktop) selectSession(id int) {
 	d.activateSession(id)
-	if d.currentSession == id {
+	if d.currentSession == id && d.term != nil {
 		d.pendingTerminalFocus = id
 	}
 }

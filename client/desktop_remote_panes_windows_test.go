@@ -194,16 +194,24 @@ func TestDesktopRemotePanes(t *testing.T) {
 	}
 	connect("profile-2", "session-1")
 	press("workspace-hosts-tab")
+	connect("profile-1", "session-2")
+	press("workspace-hosts-tab")
 	press("nav-files")
+	press("file-session-picker-toggle")
+	press("file-picker-session-1")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(waitKey("file-session-picker-toggle")["description"]), "alice@localhost") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(waitKey("file-session-picker-toggle")["description"]), "alice@localhost") {
+		t.Fatal("right session did not switch")
+	}
 	press("secondary-picker")
-	waitKey("secondary-search")
-	call("act", map[string]any{"key": "secondary-search", "action": "setValue", "text": "fixture-1"})
-	press("secondary-profile-1")
-	waitKey("session-2")
+	press("secondary-session-2")
 	waitKey("secondary-path")
 	rightPicker := waitKey("file-session-picker-toggle")
 	if !strings.Contains(fmt.Sprint(rightPicker["description"]), "alice@localhost") {
-		t.Fatal("connecting left host changed the right session")
+		t.Fatalf("connecting left host changed the right session: %v", rightPicker["description"])
 	}
 	leftDir, rightDir := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(leftDir, "left.txt"), []byte("left to right"), 0600); err != nil {
