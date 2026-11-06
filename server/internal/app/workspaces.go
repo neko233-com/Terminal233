@@ -30,6 +30,7 @@ type cloudWorkspaceEntry struct {
 	AccountID   string `json:"accountId,omitempty"`
 	FileDir     string `json:"fileDir,omitempty"`
 	TerminalDir string `json:"terminalDir,omitempty"`
+	JumpRoute   string `json:"jumpRoute,omitempty"`
 }
 type cloudWorkspace struct {
 	ID          string                `json:"id"`
@@ -52,9 +53,10 @@ type cloudWorkspaceSnapshot struct {
 	Revision string           `json:"revision"`
 }
 type cloudWorkspaceMutation struct {
-	Items            []cloudWorkspace `json:"items"`
-	ExpectedRevision string           `json:"expectedRevision"`
-	SupportsTabNames bool             `json:"supportsTabNames,omitempty"`
+	Items              []cloudWorkspace `json:"items"`
+	ExpectedRevision   string           `json:"expectedRevision"`
+	SupportsTabNames   bool             `json:"supportsTabNames,omitempty"`
+	SupportsJumpRoutes bool             `json:"supportsJumpRoutes,omitempty"`
 }
 
 var errWorkspaceConflict = errors.New("workspace state changed")
@@ -104,6 +106,12 @@ func validateCloudWorkspaces(items []cloudWorkspace) error {
 			}
 		}
 		for _, e := range w.Entries {
+			if e.JumpRoute != "" {
+				b, err := hex.DecodeString(e.JumpRoute)
+				if e.Kind != "cloud" || err != nil || len(b) != 32 || hex.EncodeToString(b) != e.JumpRoute {
+					return errInvalidWorkspace
+				}
+			}
 			if e.TabName != strings.TrimSpace(e.TabName) || !workspaceText(e.TabName, 120) {
 				return errInvalidWorkspace
 			}
@@ -151,6 +159,9 @@ func validateCloudWorkspaceDocument(doc storeDocument) error {
 		return errInvalidWorkspace
 	}
 	for user, state := range doc.Workspaces {
+		if doc.Version < 7 && hasWorkspaceJumpRoutes(state.Items) {
+			return errInvalidWorkspace
+		}
 		if doc.Version < 5 && hasWorkspaceTabNames(state.Items) {
 			return errInvalidWorkspace
 		}
@@ -159,6 +170,17 @@ func validateCloudWorkspaceDocument(doc storeDocument) error {
 		}
 	}
 	return nil
+}
+
+func hasWorkspaceJumpRoutes(items []cloudWorkspace) bool {
+	for _, w := range items {
+		for _, e := range w.Entries {
+			if e.JumpRoute != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func hasWorkspaceTabNames(items []cloudWorkspace) bool {
@@ -211,6 +233,9 @@ func (s *Store) replaceCloudWorkspaces(user string, input cloudWorkspaceMutation
 	if !input.SupportsTabNames && (hasWorkspaceTabNames(state.Items) || hasWorkspaceTabNames(input.Items)) {
 		return cloudWorkspaceSnapshot{}, errWorkspaceClientUpgrade
 	}
+	if !input.SupportsJumpRoutes && (hasWorkspaceJumpRoutes(state.Items) || hasWorkspaceJumpRoutes(input.Items)) {
+		return cloudWorkspaceSnapshot{}, errWorkspaceClientUpgrade
+	}
 	if state.Generation == ^uint64(0) || validateCloudWorkspaces(input.Items) != nil {
 		return cloudWorkspaceSnapshot{}, errInvalidWorkspace
 	}
@@ -223,6 +248,9 @@ func (s *Store) replaceCloudWorkspaces(user string, input cloudWorkspaceMutation
 		s.doc.Version = max(s.doc.Version, 3)
 		if hasWorkspaceTabNames(next.Items) {
 			s.doc.Version = max(s.doc.Version, 5)
+		}
+		if hasWorkspaceJumpRoutes(next.Items) {
+			s.doc.Version = max(s.doc.Version, 7)
 		}
 		return nil
 	})
@@ -239,6 +267,10 @@ func (s *Server) workspaceResource(w http.ResponseWriter, r *http.Request, user 
 			s.error(w, http.StatusForbidden, "forbidden", "同步账号不可用")
 			return
 		}
+		if !jumpClientSupported(r) && hasWorkspaceJumpRoutes(state.Items) {
+			s.error(w, http.StatusConflict, "workspace_client_upgrade", "请升级客户端以保护工作区跳板路径")
+			return
+		}
 		s.json(w, http.StatusOK, state)
 	case http.MethodPut:
 		var input cloudWorkspaceMutation
@@ -250,7 +282,7 @@ func (s *Server) workspaceResource(w http.ResponseWriter, r *http.Request, user 
 		case errors.Is(err, errWorkspaceConflict):
 			s.error(w, http.StatusConflict, "workspace_conflict", "云工作区已变化，请刷新后重试")
 		case errors.Is(err, errWorkspaceClientUpgrade):
-			s.error(w, http.StatusConflict, "workspace_client_upgrade", "请升级客户端以保护工作区终端名称")
+			s.error(w, http.StatusConflict, "workspace_client_upgrade", "请升级客户端以保护工作区终端名称和跳板路径")
 		case errors.Is(err, errInvalidWorkspace):
 			s.error(w, http.StatusBadRequest, "invalid_workspace", "云工作区内容无效")
 		case errors.Is(err, errTeamUnavailable):

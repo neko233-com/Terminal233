@@ -53,6 +53,7 @@ type storedAccount struct {
 	CreatedAt          string   `json:"createdAt"`
 	UpdatedAt          string   `json:"updatedAt"`
 	Tags               []string `json:"tags,omitempty"`
+	JumpID             string   `json:"jumpId,omitempty"`
 }
 
 type Store struct {
@@ -190,7 +191,7 @@ func openStore(path, masterKey string) (result *Store, err error) {
 	return s, nil
 }
 func (s *Store) validateDocument() error {
-	if (s.doc.Version < 1 || s.doc.Version > 5) || s.doc.Users == nil || s.doc.Accounts == nil {
+	if (s.doc.Version < 1 || s.doc.Version > 7) || s.doc.Users == nil || s.doc.Accounts == nil {
 		return errors.New("数据文件版本不受支持")
 	}
 	if s.doc.Teams == nil {
@@ -205,7 +206,10 @@ func (s *Store) validateDocument() error {
 	if err := validateCloudWorkspaceDocument(s.doc); err != nil {
 		return err
 	}
-	return validateAccountTagsDocument(s.doc)
+	if err := validateAccountTagsDocument(s.doc); err != nil {
+		return err
+	}
+	return validateAccountJumpsDocument(s.doc)
 }
 func openSQLite(path string) (*sql.DB, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
@@ -344,13 +348,17 @@ func (s *Store) listAccounts(username string) ([]Account, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, Account{ID: item.ID, Label: item.Label, Host: item.Host, Port: item.Port, Username: item.Username, Password: password, HostKeyFingerprint: item.HostKeyFingerprint, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, Tags: append([]string(nil), item.Tags...)})
+		result = append(result, Account{ID: item.ID, Label: item.Label, Host: item.Host, Port: item.Port, Username: item.Username, Password: password, HostKeyFingerprint: item.HostKeyFingerprint, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, Tags: append([]string(nil), item.Tags...), JumpID: jumpIDPointer(item.JumpID)})
 	}
 	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].Label) < strings.ToLower(result[j].Label) })
 	return result, nil
 }
 
 func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
+	return s.upsertAccountForClient(owner, account, true)
+}
+
+func (s *Store) upsertAccountForClient(owner string, account Account, supportsJumps bool) (Account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	owner = normalizeUsername(owner)
@@ -359,6 +367,9 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 	}
 	if !validAccountTags(account.Tags) {
 		return Account{}, errors.New("invalid account tags")
+	}
+	if account.JumpID != nil && (!supportsJumps || !validCloudJumpID(*account.JumpID)) {
+		return Account{}, errInvalidAccountJump
 	}
 	items := append([]storedAccount(nil), s.doc.Accounts[owner]...)
 	original := s.doc.Accounts[owner]
@@ -370,6 +381,9 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 		found := false
 		for _, item := range items {
 			if item.ID == account.ID {
+				if !supportsJumps && item.JumpID != "" {
+					return Account{}, errJumpClientUpgrade
+				}
 				if account.ExpectedUpdatedAt != "" && account.ExpectedUpdatedAt != item.UpdatedAt {
 					return Account{}, errAccountConflict
 				}
@@ -378,6 +392,9 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 				account.CreatedAt = item.CreatedAt
 				if account.Tags == nil {
 					account.Tags = append([]string(nil), item.Tags...)
+				}
+				if account.JumpID == nil {
+					account.JumpID = jumpIDPointer(item.JumpID)
 				}
 				break
 			}
@@ -395,15 +412,27 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 	if err != nil {
 		return Account{}, err
 	}
-	record := storedAccount{ID: account.ID, Label: account.Label, Host: account.Host, Port: account.Port, Username: account.Username, EncryptedPassword: ciphertext, HostKeyFingerprint: account.HostKeyFingerprint, CreatedAt: account.CreatedAt, UpdatedAt: account.UpdatedAt, Tags: append([]string(nil), account.Tags...)}
+	jumpID := ""
+	if account.JumpID != nil {
+		jumpID = *account.JumpID
+	}
+	account.JumpID = jumpIDPointer(jumpID)
+	record := storedAccount{ID: account.ID, Label: account.Label, Host: account.Host, Port: account.Port, Username: account.Username, EncryptedPassword: ciphertext, HostKeyFingerprint: account.HostKeyFingerprint, CreatedAt: account.CreatedAt, UpdatedAt: account.UpdatedAt, Tags: append([]string(nil), account.Tags...), JumpID: jumpID}
 	previousVersion := s.doc.Version
 	if len(record.Tags) > 0 {
 		s.doc.Version = max(s.doc.Version, 4)
+	}
+	if record.JumpID != "" {
+		s.doc.Version = max(s.doc.Version, 6)
 	}
 	if account.ID != "" {
 		for i, item := range items {
 			if item.ID == account.ID {
 				items[i] = record
+				if err := validateAccountJumps(items); err != nil {
+					s.doc.Version = previousVersion
+					return Account{}, err
+				}
 				s.doc.Accounts[owner] = items
 				if err := s.saveLocked(); err != nil {
 					s.doc.Accounts[owner] = original
@@ -418,7 +447,12 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 		s.doc.Version = previousVersion
 		return Account{}, errAccountLimit
 	}
-	s.doc.Accounts[owner] = append(items, record)
+	items = append(items, record)
+	if err := validateAccountJumps(items); err != nil {
+		s.doc.Version = previousVersion
+		return Account{}, err
+	}
+	s.doc.Accounts[owner] = items
 	if err := s.saveLocked(); err != nil {
 		s.doc.Accounts[owner] = original
 		s.doc.Version = previousVersion
@@ -450,6 +484,9 @@ func (s *Store) deleteAccountIfVersion(owner, id, expected string) error {
 	items := s.doc.Accounts[normalizeUsername(owner)]
 	for i, item := range items {
 		if item.ID == id {
+			if accountJumpReferenced(items, id) {
+				return errAccountJumpInUse
+			}
 			if expected != "" && expected != item.UpdatedAt {
 				return errAccountConflict
 			}

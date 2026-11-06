@@ -31,6 +31,7 @@ type cloudArchiveDocument struct {
 	Accounts      []cloudAccount `json:"accounts"`
 	Groups        []string       `json:"groups"`
 	AccountGroups []string       `json:"accountGroups,omitempty"`
+	JumpIndices   []int          `json:"jumpIndices,omitempty"`
 }
 
 func validateArchivePassword(password string) error {
@@ -46,6 +47,9 @@ func normalizeArchiveAccounts(accounts []cloudAccount) ([]cloudAccount, error) {
 	}
 	result := make([]cloudAccount, 0, len(accounts))
 	for i, account := range accounts {
+		if cloudJumpReference(account) != "" {
+			return nil, fmt.Errorf("备份第 %d 条连接包含云端跳板，当前备份格式不能保存该路径", i+1)
+		}
 		settings := connectionSettings{Host: account.Host, Port: fmt.Sprint(account.Port), User: account.Username, Password: account.Password, Fingerprint: account.HostKeyFingerprint}
 		if len(account.Label) > 128 || len(account.Host) > 253 || len(account.Username) > 128 || len(account.Password) > 64<<10 || len(account.HostKeyFingerprint) > 100 || strings.ContainsAny(account.Username, "/\\@ \t\r\n") {
 			return nil, fmt.Errorf("备份第 %d 条连接无效", i+1)
@@ -83,7 +87,11 @@ func archiveCipher(password string, salt []byte) (cipher.AEAD, error) {
 }
 
 func encodeCloudArchive(accounts []cloudAccount, password string) ([]byte, error) {
-	items, err := normalizeArchiveAccounts(accounts)
+	parents, clean, err := archiveJumpReferences(accounts)
+	if err != nil {
+		return nil, err
+	}
+	items, err := normalizeArchiveAccounts(clean)
 	if err != nil {
 		return nil, err
 	}
@@ -96,11 +104,21 @@ func encodeCloudArchive(accounts []cloudAccount, password string) ([]byte, error
 			break
 		}
 	}
+	if parents != nil {
+		doc.Version = 4
+		doc.JumpIndices = parents
+		doc.Groups = []string{}
+		doc.AccountGroups = make([]string, len(items))
+	}
 	return encodeCloudArchiveDocument(doc, password)
 }
 
 func encodeCloudArchiveWithGroups(accounts []cloudAccount, password string, groups cloudGroupSnapshot) ([]byte, error) {
-	items, err := normalizeArchiveAccounts(accounts)
+	parents, clean, err := archiveJumpReferences(accounts)
+	if err != nil {
+		return nil, err
+	}
+	items, err := normalizeArchiveAccounts(clean)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +136,10 @@ func encodeCloudArchiveWithGroups(accounts []cloudAccount, password string, grou
 			break
 		}
 	}
-	return encodeCloudArchiveDocument(cloudArchiveDocument{Version: version, Accounts: items, Groups: append([]string{}, groups.Groups...), AccountGroups: paths}, password)
+	if parents != nil {
+		version = 4
+	}
+	return encodeCloudArchiveDocument(cloudArchiveDocument{Version: version, Accounts: items, Groups: append([]string{}, groups.Groups...), AccountGroups: paths, JumpIndices: parents}, password)
 }
 
 func encodeCloudArchiveDocument(document cloudArchiveDocument, password string) ([]byte, error) {
@@ -145,6 +166,9 @@ func encodeCloudArchiveDocument(document cloudArchiveDocument, password string) 
 
 func decodeCloudArchive(data []byte, password string) ([]cloudAccount, error) {
 	doc, err := decodeCloudArchiveDocument(data, password)
+	if err == nil && len(doc.JumpIndices) != 0 {
+		return nil, errors.New("该备份包含跳板，请使用完整导入流程")
+	}
 	return doc.Accounts, err
 }
 
@@ -167,8 +191,21 @@ func decodeCloudArchiveDocument(data []byte, password string) (cloudArchiveDocum
 	}
 	defer clear(plain)
 	var document cloudArchiveDocument
-	if json.Unmarshal(plain, &document) != nil || (document.Version < 1 || document.Version > 3) || document.Accounts == nil {
+	if json.Unmarshal(plain, &document) != nil || (document.Version < 1 || document.Version > 4) || document.Accounts == nil {
 		return empty, errors.New("备份内容无效")
+	}
+	for _, account := range document.Accounts {
+		if account.JumpID != nil {
+			return empty, errors.New("备份包含未经映射的跳板编号")
+		}
+	}
+	if document.Version < 4 && len(document.JumpIndices) != 0 {
+		return empty, errors.New("备份版本与跳板路径不符")
+	}
+	if document.Version == 4 {
+		if _, err := archiveJumpOrder(document.JumpIndices, len(document.Accounts)); err != nil {
+			return empty, err
+		}
 	}
 	items, err := normalizeArchiveAccounts(document.Accounts)
 	if err != nil {
@@ -226,6 +263,9 @@ func writeCloudArchive(path string, data []byte) error {
 
 func readCloudArchive(path, password string) ([]cloudAccount, error) {
 	doc, err := readCloudArchiveDocument(path, password)
+	if err == nil && len(doc.JumpIndices) != 0 {
+		return nil, errors.New("该备份包含跳板，请使用完整导入流程")
+	}
 	return doc.Accounts, err
 }
 

@@ -69,7 +69,16 @@ func (d *desktop) groupQuickTargets(group string, cloud bool) ([]workspaceRestor
 				failures = append(failures, fmt.Sprintf("%s：主机信息无效", a.Label))
 				continue
 			}
-			entries = append(entries, workspaceRestoreTarget{entry: e, label: a.Label, settings: connectionSettings{Host: e.Host, Port: e.Port, User: e.User, Fingerprint: fp}})
+			settings := connectionSettings{Host: e.Host, Port: e.Port, User: e.User, Fingerprint: fp, cloudJumpID: cloudJumpReference(a), cloudRouteURL: e.CloudURL, cloudRouteUser: e.CloudUser, cloudRouteTeam: e.CloudTeam}
+			if settings.cloudJumpID != "" {
+				settings, err = d.resolveCloudRoute(settings)
+				if err != nil {
+					failures = append(failures, fmt.Sprintf("%s：%v", a.Label, err))
+					continue
+				}
+				e.JumpRoute = settings.savedRouteSignature()
+			}
+			entries = append(entries, workspaceRestoreTarget{entry: e, label: a.Label, settings: settings, cloudTrust: d.snapshotCloudHostTrust()})
 		}
 	} else {
 		for _, p := range d.profiles {

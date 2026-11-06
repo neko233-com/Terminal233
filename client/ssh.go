@@ -20,7 +20,16 @@ import (
 type connectionSettings struct {
 	Host, Port, User, Password, KeyPath, Passphrase, Fingerprint string
 	JumpID                                                       string `json:",omitempty"`
+	cloudJumpID                                                  string
+	cloudRouteURL, cloudRouteUser, cloudRouteTeam                string
 	route                                                        *savedSSHRoute
+}
+
+func (s connectionSettings) jumpReference() string {
+	if s.cloudJumpID != "" {
+		return s.cloudJumpID
+	}
+	return s.JumpID
 }
 
 func (s connectionSettings) canUseStoredAuth() bool {
@@ -42,8 +51,8 @@ func inspectHost(s connectionSettings) (string, error) {
 }
 
 func inspectHostThrough(s connectionSettings, via *ssh.Client) (string, error) {
-	if via == nil && s.JumpID != "" {
-		if s.route == nil || s.route.jumpID != s.JumpID || len(s.route.hops) == 0 {
+	if via == nil && s.jumpReference() != "" {
+		if s.route == nil || s.route.jumpID != s.jumpReference() || len(s.route.hops) == 0 {
 			return "", errors.New("保存的跳板路径不可用，请重新选择")
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -241,8 +250,8 @@ func connectShellAtThroughContext(ctx context.Context, s connectionSettings, dir
 // A forwarding rule needs only an SSH transport, not a shell or PTY. Both
 // paths use the same host-key verification and authentication policy.
 func connectSSHClient(ctx context.Context, s connectionSettings) (*ssh.Client, error) {
-	if s.JumpID != "" {
-		if s.route == nil || s.route.jumpID != s.JumpID || len(s.route.hops) == 0 {
+	if s.jumpReference() != "" {
+		if s.route == nil || s.route.jumpID != s.jumpReference() || len(s.route.hops) == 0 {
 			return nil, errors.New("保存的跳板路径不可用，请重新选择")
 		}
 		hops := append(append([]connectionSettings(nil), s.route.hops...), s)
@@ -261,7 +270,7 @@ func dialSSHAddress(ctx context.Context, address string, via *ssh.Client) (net.C
 // Each hop uses its own pinned fingerprint and credentials. A tunneled
 // connection is still a separate SSH handshake, not an agent-forwarded shell.
 func connectSSHClientThrough(ctx context.Context, s connectionSettings, via *ssh.Client) (*ssh.Client, error) {
-	if via == nil && s.JumpID != "" {
+	if via == nil && s.jumpReference() != "" {
 		return nil, errors.New("跳板路径不可用，已阻止直连")
 	}
 	addr, err := s.address()

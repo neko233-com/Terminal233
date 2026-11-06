@@ -26,6 +26,7 @@ type workspaceRestoreTarget struct {
 	label           string
 	sourceProfileID string
 	cloudVersion    string
+	cloudTrust      map[string]string
 }
 type workspaceRestoredSession struct {
 	target workspaceRestoreTarget
@@ -97,6 +98,7 @@ func (d *desktop) resolveWorkspace(w savedWorkspace) ([]workspaceRestoreTarget, 
 				return nil, fmt.Errorf("第 %d 个主机需要先登录对应云账号", i+1)
 			}
 			target.settings = connectionSettings{Host: e.Host, Port: e.Port, User: e.User, Fingerprint: e.Fingerprint}
+			target.cloudTrust = d.snapshotCloudHostTrust()
 			target.label = e.User + "@" + e.Host
 			if e.Label != "" {
 				target.label = e.Label
@@ -143,6 +145,18 @@ func hydrateWorkspaceCloudTargets(ctx context.Context, targets []workspaceRestor
 			return nil, fmt.Errorf("第 %d 个云主机已修改或不可用，请重新保存工作区", i+1)
 		}
 		target.settings.Password = match.Password
+		target.settings.cloudJumpID = cloudJumpReference(*match)
+		target.settings.cloudRouteURL, target.settings.cloudRouteUser, target.settings.cloudRouteTeam = e.CloudURL, e.CloudUser, e.CloudTeam
+		if target.settings.cloudJumpID != "" {
+			var err error
+			target.settings, err = resolveCloudJumpChain(target.settings, accounts, func(a cloudAccount) (string, error) { return trustedCloudHostFromSnapshot(target.cloudTrust, a) })
+			if err != nil {
+				return nil, fmt.Errorf("第 %d 个云主机：%w", i+1, err)
+			}
+		}
+		if target.settings.savedRouteSignature() != e.JumpRoute {
+			return nil, fmt.Errorf("第 %d 个云主机的跳板路径已变化，请重新保存工作区", i+1)
+		}
 		if target.entry.Label == "" && match.Label != "" {
 			target.label = match.Label
 		}

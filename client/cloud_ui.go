@@ -253,7 +253,7 @@ func (d *desktop) saveCloudConnection(settings connectionSettings, label, source
 		d.cloudStatus, d.status = "连接列表需要先刷新，避免重复或覆盖错误连接。", "连接列表需要先刷新。"
 		return
 	}
-	account, err := prepareCloudAccount(settings, label, d.accounts, sourceID)
+	account, err := d.prepareCloudAccountWithJump(settings, label, sourceID)
 	if err != nil {
 		d.cloudStatus, d.status = err.Error(), err.Error()
 		return
@@ -412,6 +412,12 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.profileTags = strings.Join(account.Tags, ", ")
 	d.profileLabel = account.Label
 	d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
+	if account.JumpID != nil {
+		d.settings.cloudJumpID = *account.JumpID
+	}
+	if d.cloud != nil && d.cloud.base != nil {
+		d.settings.cloudRouteURL, d.settings.cloudRouteUser, d.settings.cloudRouteTeam = d.cloud.base.String(), d.cloudUser, d.cloud.teamID
+	}
 	d.settingsFromCloud = true
 	d.cloudFormSources = nil
 	d.cloudFormVersions = nil

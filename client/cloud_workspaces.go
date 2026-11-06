@@ -23,6 +23,7 @@ type cloudWorkspaceEntry struct {
 	AccountID   string `json:"accountId,omitempty"`
 	FileDir     string `json:"fileDir,omitempty"`
 	TerminalDir string `json:"terminalDir,omitempty"`
+	JumpRoute   string `json:"jumpRoute,omitempty"`
 }
 type cloudWorkspace struct {
 	ID          string                `json:"id"`
@@ -59,10 +60,13 @@ func portableWorkspace(w savedWorkspace, c *cloudClient, user string) (cloudWork
 		case "local":
 			out.Entries = append(out.Entries, cloudWorkspaceEntry{Kind: "local", Label: e.Label, TabName: e.TabName})
 		case "cloud":
+			if e.JumpRoute != "" && !c.cloudJumps {
+				return cloudWorkspace{}, errors.New("同步服务不支持工作区跳板路径")
+			}
 			if e.CloudURL != c.base.String() || e.CloudUser != user {
 				return cloudWorkspace{}, errors.New("工作区包含其他同步账号的主机")
 			}
-			out.Entries = append(out.Entries, cloudWorkspaceEntry{Kind: "cloud", Label: e.Label, TabName: e.TabName, Host: e.Host, Port: e.Port, User: e.User, TeamID: e.CloudTeam, AccountID: e.CloudID, FileDir: e.FileDir, TerminalDir: e.TerminalDir})
+			out.Entries = append(out.Entries, cloudWorkspaceEntry{Kind: "cloud", Label: e.Label, TabName: e.TabName, Host: e.Host, Port: e.Port, User: e.User, TeamID: e.CloudTeam, AccountID: e.CloudID, FileDir: e.FileDir, TerminalDir: e.TerminalDir, JumpRoute: e.JumpRoute})
 		default:
 			return cloudWorkspace{}, errors.New("本地主机需先保存到云端才能同步工作区")
 		}
@@ -83,6 +87,9 @@ func cloudWorkspaceLocal(w cloudWorkspace, c *cloudClient, user string, fingerpr
 			}
 			out.Entries = append(out.Entries, workspaceTemplateEntry{Kind: "local", Label: e.Label, TabName: e.TabName})
 		case "cloud":
+			if e.JumpRoute != "" && !c.cloudJumps {
+				return savedWorkspace{}, errors.New("当前服务不支持工作区跳板路径")
+			}
 			port, err := strconv.Atoi(e.Port)
 			if err != nil || port < 1 || port > 65535 || strconv.Itoa(port) != e.Port || e.AccountID == "" || len(e.AccountID) > 128 || len(e.TeamID) > 128 || strings.ContainsAny(e.AccountID+e.TeamID, "/\\") {
 				return savedWorkspace{}, errors.New("云主机引用无效")
@@ -91,7 +98,7 @@ func cloudWorkspaceLocal(w cloudWorkspace, c *cloudClient, user string, fingerpr
 			if err != nil {
 				return savedWorkspace{}, fmt.Errorf("%s：%w", e.Host, err)
 			}
-			out.Entries = append(out.Entries, workspaceTemplateEntry{Kind: "cloud", Label: e.Label, TabName: e.TabName, Host: e.Host, Port: e.Port, User: e.User, Fingerprint: fp, CloudURL: c.base.String(), CloudUser: user, CloudTeam: e.TeamID, CloudID: e.AccountID, FileDir: e.FileDir, TerminalDir: e.TerminalDir})
+			out.Entries = append(out.Entries, workspaceTemplateEntry{Kind: "cloud", Label: e.Label, TabName: e.TabName, Host: e.Host, Port: e.Port, User: e.User, Fingerprint: fp, CloudURL: c.base.String(), CloudUser: user, CloudTeam: e.TeamID, CloudID: e.AccountID, FileDir: e.FileDir, TerminalDir: e.TerminalDir, JumpRoute: e.JumpRoute})
 		default:
 			return savedWorkspace{}, errors.New("云工作区包含不支持的会话")
 		}
@@ -153,6 +160,9 @@ func (c *cloudClient) replaceCloudWorkspaces(s cloudWorkspaceSnapshot) (cloudWor
 		}
 	}
 	input := map[string]any{"items": s.Items, "expectedRevision": s.Revision}
+	if c.cloudJumps {
+		input["supportsJumpRoutes"] = true
+	}
 	if c.cloudWorkspaceNames {
 		input["supportsTabNames"] = true
 	} else {

@@ -97,7 +97,16 @@ func (d *desktop) workspaceFromSelection() (savedWorkspace, error) {
 			if err != nil {
 				return savedWorkspace{}, fmt.Errorf("%s：%w", a.Label, err)
 			}
-			w.Entries = append(w.Entries, workspaceTemplateEntry{Kind: "cloud", Host: a.Host, Port: strconv.Itoa(a.Port), User: a.Username, Fingerprint: fingerprint, CloudURL: d.cloud.base.String(), CloudUser: d.cloudUser, CloudTeam: d.cloud.teamID, CloudID: a.ID})
+			e := workspaceTemplateEntry{Kind: "cloud", Host: a.Host, Port: strconv.Itoa(a.Port), User: a.Username, Fingerprint: fingerprint, CloudURL: d.cloud.base.String(), CloudUser: d.cloudUser, CloudTeam: d.cloud.teamID, CloudID: a.ID}
+			if id := cloudJumpReference(a); id != "" {
+				settings := connectionSettings{Host: e.Host, Port: e.Port, User: e.User, Fingerprint: fingerprint, cloudJumpID: id, cloudRouteURL: e.CloudURL, cloudRouteUser: e.CloudUser, cloudRouteTeam: e.CloudTeam}
+				resolved, err := d.resolveCloudRoute(settings)
+				if err != nil {
+					return savedWorkspace{}, err
+				}
+				e.JumpRoute = resolved.savedRouteSignature()
+			}
+			w.Entries = append(w.Entries, e)
 		}
 	}
 	if selected == 0 || selected != len(w.Entries) {

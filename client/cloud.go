@@ -25,6 +25,7 @@ type cloudAccount struct {
 	UpdatedAt          string   `json:"updatedAt,omitempty"`
 	ExpectedUpdatedAt  string   `json:"expectedUpdatedAt,omitempty"`
 	Tags               []string `json:"tags,omitempty"`
+	JumpID             *string  `json:"jumpId,omitempty"`
 }
 
 type cloudClient struct {
@@ -40,6 +41,7 @@ type cloudClient struct {
 	cloudWorkspaces16   bool
 	cloudWorkspaceNames bool
 	cloudTags           bool
+	cloudJumps          bool
 	capabilityUnknown   bool
 }
 
@@ -66,6 +68,7 @@ func (c *cloudClient) discoverCapabilities() {
 	c.cloudWorkspaces16 = false
 	c.cloudWorkspaceNames = false
 	c.cloudTags = false
+	c.cloudJumps = false
 	c.capabilityUnknown = true
 	if c.request(http.MethodGet, "/healthz", nil, &health) != nil || health.Status != "ok" {
 		return
@@ -92,6 +95,9 @@ func (c *cloudClient) discoverCapabilities() {
 		}
 		if capability == "account-tags-v1" {
 			c.cloudTags = true
+		}
+		if capability == "account-jumps-v1" {
+			c.cloudJumps = true
 		}
 	}
 }
@@ -130,6 +136,9 @@ func (c *cloudClient) requestWithRevision(method, path string, input, output any
 	}
 	if expected != "" {
 		req.Header.Set("X-Neko-Expected-Updated-At", expected)
+	}
+	if c.cloudJumps {
+		req.Header.Set("X-Neko-Jump-Support", "1")
 	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
@@ -199,6 +208,9 @@ func (c *cloudClient) list() ([]cloudAccount, error) {
 			if !validStoredProfileTags(account.Tags) {
 				return nil, errors.New("云主机标签无效")
 			}
+			if account.JumpID != nil && (!c.cloudJumps || !validCloudJumpID(*account.JumpID) || *account.JumpID == account.ID) {
+				return nil, errors.New("云端跳板数据无效或服务能力不匹配")
+			}
 		}
 	}
 	return result, err
@@ -212,6 +224,9 @@ func (c *cloudClient) accountPayload(a cloudAccount) (any, error) {
 	}
 	if !c.cloudTags && len(a.Tags) > 0 {
 		return nil, errors.New("当前同步服务尚不支持主机标签，请先更新服务")
+	}
+	if !c.cloudJumps && a.JumpID != nil {
+		return nil, errors.New("当前同步服务尚不支持云端跳板")
 	}
 	var tags *[]string
 	if c.cloudTags && a.Tags != nil {

@@ -253,11 +253,15 @@ func (s *Store) listTeamAccounts(user, id string) ([]Account, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, Account{ID: a.ID, Label: a.Label, Host: a.Host, Port: a.Port, Username: a.Username, Password: password, HostKeyFingerprint: a.HostKeyFingerprint, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, Tags: append([]string(nil), a.Tags...)})
+		result = append(result, Account{ID: a.ID, Label: a.Label, Host: a.Host, Port: a.Port, Username: a.Username, Password: password, HostKeyFingerprint: a.HostKeyFingerprint, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, Tags: append([]string(nil), a.Tags...), JumpID: jumpIDPointer(a.JumpID)})
 	}
 	return result, nil
 }
 func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
+	return s.saveTeamAccountForClient(user, id, a, true)
+}
+
+func (s *Store) saveTeamAccountForClient(user, id string, a Account, supportsJumps bool) (Account, error) {
 	user = normalizeUsername(user)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -268,6 +272,9 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 	}
 	if !validAccountTags(a.Tags) {
 		return Account{}, errors.New("invalid account tags")
+	}
+	if a.JumpID != nil && (!supportsJumps || !validCloudJumpID(*a.JumpID)) {
+		return Account{}, errInvalidAccountJump
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	index := -1
@@ -280,6 +287,9 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 	} else {
 		for i, existing := range t.Accounts {
 			if existing.ID == a.ID {
+				if !supportsJumps && existing.JumpID != "" {
+					return Account{}, errJumpClientUpgrade
+				}
 				if a.ExpectedUpdatedAt != "" && a.ExpectedUpdatedAt != existing.UpdatedAt {
 					return Account{}, errAccountConflict
 				}
@@ -288,6 +298,9 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 				a.CreatedAt = existing.CreatedAt
 				if a.Tags == nil {
 					a.Tags = append([]string(nil), existing.Tags...)
+				}
+				if a.JumpID == nil {
+					a.JumpID = jumpIDPointer(existing.JumpID)
 				}
 				break
 			}
@@ -302,16 +315,27 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 	if err != nil {
 		return Account{}, err
 	}
-	record := storedAccount{ID: a.ID, Label: a.Label, Host: a.Host, Port: a.Port, Username: a.Username, EncryptedPassword: encrypted, HostKeyFingerprint: a.HostKeyFingerprint, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, Tags: append([]string(nil), a.Tags...)}
+	jumpID := ""
+	if a.JumpID != nil {
+		jumpID = *a.JumpID
+	}
+	a.JumpID = jumpIDPointer(jumpID)
+	record := storedAccount{ID: a.ID, Label: a.Label, Host: a.Host, Port: a.Port, Username: a.Username, EncryptedPassword: encrypted, HostKeyFingerprint: a.HostKeyFingerprint, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, Tags: append([]string(nil), a.Tags...), JumpID: jumpID}
+	items := append([]storedAccount(nil), t.Accounts...)
+	if index < 0 {
+		items = append(items, record)
+	} else {
+		items[index] = record
+	}
+	if err := validateAccountJumps(items); err != nil {
+		return Account{}, err
+	}
 	err = s.transactionalLocked(func() error {
 		if len(record.Tags) > 0 {
 			s.doc.Version = max(s.doc.Version, 4)
 		}
-		items := append([]storedAccount(nil), t.Accounts...)
-		if index < 0 {
-			items = append(items, record)
-		} else {
-			items[index] = record
+		if record.JumpID != "" {
+			s.doc.Version = max(s.doc.Version, 6)
 		}
 		t.Accounts = items
 		s.doc.Teams[id] = t
@@ -347,6 +371,9 @@ func (s *Store) deleteTeamAccountIfVersion(user, id, accountID, expected string)
 	}
 	if index < 0 {
 		return errAccountNotFound
+	}
+	if accountJumpReferenced(t.Accounts, accountID) {
+		return errAccountJumpInUse
 	}
 	return s.transactionalLocked(func() error {
 		items := append([]storedAccount(nil), t.Accounts[:index]...)

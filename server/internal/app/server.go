@@ -33,6 +33,7 @@ type Account struct {
 	UpdatedAt          string   `json:"updatedAt,omitempty"`
 	ExpectedUpdatedAt  string   `json:"expectedUpdatedAt,omitempty"`
 	Tags               []string `json:"tags,omitempty"`
+	JumpID             *string  `json:"jumpId,omitempty"`
 }
 
 type Server struct {
@@ -89,7 +90,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version, "capabilities": []string{"conditional-account-update", "conditional-account-delete", "cloud-groups-v1", "cloud-workspaces-v1", "cloud-workspaces-16", "cloud-workspace-tab-names-v1", "account-tags-v1"}})
+		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version, "capabilities": []string{"conditional-account-update", "conditional-account-delete", "cloud-groups-v1", "cloud-workspaces-v1", "cloud-workspaces-16", "cloud-workspace-tab-names-v1", "account-tags-v1", "account-jumps-v1"}})
 	case r.URL.Path == "/api/v1/register" && r.Method == http.MethodPost:
 		s.register(w, r)
 	case r.URL.Path == "/api/v1/login" && r.Method == http.MethodPost:
@@ -230,10 +231,14 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) listAccounts(w http.ResponseWriter, _ *http.Request, username string) {
+func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request, username string) {
 	accounts, err := s.store.listAccounts(username)
 	if err != nil {
 		s.error(w, http.StatusInternalServerError, "storage_failed", "读取账号失败")
+		return
+	}
+	if !jumpClientSupported(r) && accountJumpsPresent(accounts) {
+		s.error(w, http.StatusConflict, "client_upgrade_required", "此空间包含跳板连接，请升级客户端")
 		return
 	}
 	s.json(w, http.StatusOK, accounts)
@@ -248,7 +253,7 @@ func (s *Server) saveAccount(w http.ResponseWriter, r *http.Request, username st
 		s.error(w, http.StatusBadRequest, "invalid_account", "SSH 账号参数无效")
 		return
 	}
-	saved, err := s.store.upsertAccount(username, account)
+	saved, err := s.store.upsertAccountForClient(username, account, jumpClientSupported(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, errAccountConflict):
@@ -257,6 +262,10 @@ func (s *Server) saveAccount(w http.ResponseWriter, r *http.Request, username st
 			s.error(w, http.StatusConflict, "account_limit", "每个账号最多保存 1000 条 SSH 凭据")
 		case errors.Is(err, errAccountNotFound):
 			s.error(w, http.StatusNotFound, "account_not_found", "SSH 账号不存在")
+		case errors.Is(err, errInvalidAccountJump):
+			s.error(w, http.StatusBadRequest, "invalid_jump", "跳板不存在、循环或超过跳数限制")
+		case errors.Is(err, errJumpClientUpgrade):
+			s.error(w, http.StatusConflict, "client_upgrade_required", "此连接包含跳板，请升级客户端")
 		default:
 			s.error(w, http.StatusInternalServerError, "storage_failed", "保存 SSH 账号失败")
 		}
@@ -276,6 +285,10 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, username 
 		return
 	}
 	if err := s.store.deleteAccountIfVersion(username, id, expected); err != nil {
+		if errors.Is(err, errAccountJumpInUse) {
+			s.error(w, http.StatusConflict, "jump_in_use", "其他连接正在使用此跳板，请先修改这些连接")
+			return
+		}
 		if errors.Is(err, errAccountConflict) {
 			s.error(w, http.StatusConflict, "account_conflict", "连接已被其他设备修改，请刷新后重试")
 			return
@@ -356,7 +369,7 @@ func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.cfg.AllowedOrigins[origin]; ok {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Neko-Jump-Support")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 	}
 }

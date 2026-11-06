@@ -400,7 +400,7 @@ func (d *desktop) inspect() {
 	}
 	settings := d.settings
 	if via == nil {
-		settings, err = d.resolveSavedRoute(settings)
+		settings, err = d.resolveConnectionRoute(settings)
 		if err != nil {
 			d.status = err.Error()
 			return
@@ -429,7 +429,7 @@ func (d *desktop) finishHostInspection(settings connectionSettings, fp string, e
 		d.status = fmt.Sprintf("获取指纹失败：%v", err)
 		return
 	}
-	if d.settings.Host != settings.Host || d.settings.Port != settings.Port || d.settings.User != settings.User || d.settings.JumpID != settings.JumpID {
+	if d.settings.Host != settings.Host || d.settings.Port != settings.Port || d.settings.User != settings.User || d.settings.JumpID != settings.JumpID || d.settings.cloudJumpID != settings.cloudJumpID || d.settings.cloudRouteURL != settings.cloudRouteURL || d.settings.cloudRouteUser != settings.cloudRouteUser || d.settings.cloudRouteTeam != settings.cloudRouteTeam {
 		d.status = "连接信息已改变，请重新获取指纹。"
 		return
 	}
@@ -469,7 +469,7 @@ func (d *desktop) connect() {
 	}
 	settings := d.settings
 	if via == nil {
-		settings, err = d.resolveSavedRoute(settings)
+		settings, err = d.resolveConnectionRoute(settings)
 		if err != nil {
 			d.status = err.Error()
 			return

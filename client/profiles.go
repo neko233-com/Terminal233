@@ -40,6 +40,9 @@ type profile struct {
 }
 
 func (d *desktop) addProfile() error {
+	if d.settings.cloudJumpID != "" {
+		return fmt.Errorf("云端跳板无法保存到本机连接，请先选择本机跳板")
+	}
 	if _, err := d.settings.address(); err != nil {
 		return err
 	}

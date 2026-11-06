@@ -34,6 +34,11 @@ func (d *desktop) connectionJump(id int) (*workspaceSession, error) {
 		if !present || seen[current] || current.shell == nil || !current.fileAvailable() || !strings.HasPrefix(current.active.Fingerprint, "SHA256:") || (current.jumpParent != nil && current.jumpParent.active.Fingerprint != current.jumpFingerprint) {
 			return nil, errors.New("跳板会话已关闭或信任已撤销，请重新选择")
 		}
+		if current.jumpParent == nil {
+			if err := d.validateSessionSavedRoute(current.active); err != nil {
+				return nil, err
+			}
+		}
 		seen[current] = true
 	}
 	if selected == nil {
@@ -67,6 +72,18 @@ func (d *desktop) connectionJumpPicker(c *ui.Context, markMetadataChanged func()
 			}
 		}
 	}
+	if d.settings.cloudJumpID != "" {
+		label = "云端跳板不可用"
+		for _, account := range d.accounts {
+			if account.ID == d.settings.cloudJumpID {
+				label = account.Label
+				if label == "" {
+					label = account.Username + "@" + account.Host
+				}
+				break
+			}
+		}
+	}
 	if d.connectionJumpID != 0 {
 		label = "跳板已断开"
 		if jump, err := d.connectionJump(d.connectionJumpID); err == nil {
@@ -84,7 +101,11 @@ func (d *desktop) connectionJumpPicker(c *ui.Context, markMetadataChanged func()
 			panel.AttachTo(button, ui.AnchorBottomStart, ui.AnchorTopStart).Margin(4, 0, 0, 0).Children(func() {
 				ui.Column(c).Width(280).Padding(6).Gap(2).Background(c.Theme().SurfaceHover).Radius(8).Children(func() {
 					if ui.Button(c.Key("connection-jump-direct"), "直连").Label("不使用跳板").FillWidth().BorderWidth(0).Justify(ui.Start).Clicked() {
-						d.setSavedConnectionJump("", markMetadataChanged)
+						if d.settingsFromCloud && d.cloud != nil && d.cloud.cloudJumps {
+							d.setCloudJump("", markMetadataChanged)
+						} else {
+							d.setSavedConnectionJump("", markMetadataChanged)
+						}
 					}
 					ui.Scroll(c.Key("connection-jump-list")).Label("可用跳板会话").Height(180).FillWidth().Children(func() {
 						if !d.settingsFromCloud {
@@ -104,6 +125,20 @@ func (d *desktop) connectionJumpPicker(c *ui.Context, markMetadataChanged func()
 									} else {
 										d.setSavedConnectionJump(id, markMetadataChanged)
 									}
+								}
+							}
+						} else if d.cloud != nil && d.cloud.cloudJumps {
+							for _, entry := range d.accounts {
+								a := entry
+								if a.ID == d.selectedCloudProfile {
+									continue
+								}
+								name := a.Label
+								if name == "" {
+									name = a.Username + "@" + a.Host
+								}
+								if ui.Button(c.Key("connection-cloud-jump-"+a.ID), "云主机 · "+name).Label("选择云端跳板：" + name).Tooltip(a.Host).FillWidth().BorderWidth(0).Justify(ui.Start).Clicked() {
+									d.setCloudJump(a.ID, markMetadataChanged)
 								}
 							}
 						}
@@ -128,8 +163,9 @@ func (d *desktop) setSavedConnectionJump(id string, markMetadataChanged func()) 
 		d.status = "无法选择跳板：" + err.Error()
 		return
 	}
-	changed := d.settings.JumpID != id
-	d.settings.JumpID, d.settings.route = id, nil
+	changed := d.settings.JumpID != id || d.settings.cloudJumpID != ""
+	d.settings.JumpID, d.settings.cloudJumpID, d.settings.route = id, "", nil
+	d.settings.cloudRouteURL, d.settings.cloudRouteUser, d.settings.cloudRouteTeam = "", "", ""
 	d.setConnectionJump(0)
 	if changed && markMetadataChanged != nil {
 		markMetadataChanged()

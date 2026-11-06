@@ -149,6 +149,10 @@ func (s *Server) teamResource(w http.ResponseWriter, r *http.Request, user strin
 			s.error(w, http.StatusNotFound, "not_found", "团队不存在或无权访问")
 			return
 		}
+		if !jumpClientSupported(r) && accountJumpsPresent(accounts) {
+			s.error(w, http.StatusConflict, "client_upgrade_required", "此空间包含跳板连接，请升级客户端")
+			return
+		}
 		s.json(w, http.StatusOK, accounts)
 	case len(parts) == 2 && parts[1] == "accounts" && r.Method == http.MethodPost:
 		var a Account
@@ -159,8 +163,16 @@ func (s *Server) teamResource(w http.ResponseWriter, r *http.Request, user strin
 			s.error(w, http.StatusBadRequest, "invalid_account", "SSH 账号参数无效")
 			return
 		}
-		result, err := s.store.saveTeamAccount(user, id, a)
+		result, err := s.store.saveTeamAccountForClient(user, id, a, jumpClientSupported(r))
 		if err != nil {
+			if errors.Is(err, errInvalidAccountJump) {
+				s.error(w, http.StatusBadRequest, "invalid_jump", "跳板不存在、循环或超过跳数限制")
+				return
+			}
+			if errors.Is(err, errJumpClientUpgrade) {
+				s.error(w, http.StatusConflict, "client_upgrade_required", "此连接包含跳板，请升级客户端")
+				return
+			}
 			if errors.Is(err, errAccountConflict) {
 				s.error(w, http.StatusConflict, "account_conflict", "连接已被其他设备修改，请刷新后重试")
 				return
@@ -175,6 +187,10 @@ func (s *Server) teamResource(w http.ResponseWriter, r *http.Request, user strin
 			return
 		}
 		if err := s.store.deleteTeamAccountIfVersion(user, id, parts[2], expected); err != nil {
+			if errors.Is(err, errAccountJumpInUse) {
+				s.error(w, http.StatusConflict, "jump_in_use", "其他连接正在使用此跳板，请先修改这些连接")
+				return
+			}
 			if errors.Is(err, errAccountConflict) {
 				s.error(w, http.StatusConflict, "account_conflict", "连接已被其他设备修改，请刷新后重试")
 				return

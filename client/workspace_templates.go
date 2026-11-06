@@ -106,7 +106,7 @@ func validateSavedWorkspace(w savedWorkspace) error {
 		}
 		if e.JumpRoute != "" {
 			decoded, err := hex.DecodeString(e.JumpRoute)
-			if e.Kind != "profile" || err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != e.JumpRoute {
+			if (e.Kind != "profile" && e.Kind != "cloud") || err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != e.JumpRoute {
 				return errors.New("工作区跳板路径标识无效")
 			}
 		}
@@ -183,6 +183,9 @@ func readWorkspaceTemplates(filename string) (workspaceTemplatesFile, error) {
 	for i, w := range saved.Items {
 		if saved.Version < 7 {
 			for _, entry := range w.Entries {
+				if entry.Kind == "cloud" && entry.JumpRoute != "" {
+					return workspaceTemplatesFile{}, errors.New("工作区版本与云端跳板路径不符")
+				}
 				if entry.Serial != nil && entry.Serial.Flow != "" {
 					return workspaceTemplatesFile{}, errors.New("工作区版本与串口流控不符")
 				}
@@ -263,6 +266,9 @@ func updateWorkspaceTemplates(filename string, update func(*workspaceTemplatesFi
 			saved.Version = 2
 		}
 		for _, entry := range w.Entries {
+			if entry.Kind == "cloud" && entry.JumpRoute != "" && saved.Version < 7 {
+				saved.Version = 7
+			}
 			if entry.Serial != nil && entry.Serial.Flow != "" && saved.Version < 7 {
 				saved.Version = 7
 			}
@@ -363,6 +369,7 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 			}
 		} else if s.cloudOriginID != "" {
 			e.Kind = "cloud"
+			e.JumpRoute = s.active.savedRouteSignature()
 			e.Label = s.label
 			e.Host, e.Port, e.User, e.Fingerprint = s.active.Host, s.active.Port, s.active.User, s.active.Fingerprint
 			e.CloudURL, e.CloudUser, e.CloudTeam, e.CloudID = s.cloudOriginURL, s.cloudOriginUser, s.cloudOriginTeam, s.cloudOriginID

@@ -24,7 +24,34 @@ type archiveImportResult struct {
 // Every entry is created with a fresh ID. A failed request may have committed,
 // so stop immediately and require the user to inspect the cloud list.
 func importCloudAccounts(ctx context.Context, c *cloudClient, items []cloudAccount) archiveImportResult {
+	return importCloudAccountsWithJumps(ctx, c, items, nil)
+}
+
+func importCloudAccountsWithJumps(ctx context.Context, c *cloudClient, items []cloudAccount, parents []int) archiveImportResult {
 	result := archiveImportResult{}
+	order := make([]int, len(items))
+	for i := range order {
+		order[i] = i
+	}
+	if parents != nil {
+		if !c.cloudJumps {
+			result.preflightErr = fmt.Errorf("目标服务不支持备份中的云端跳板")
+			return result
+		}
+		var err error
+		order, err = archiveJumpOrder(parents, len(items))
+		if err != nil {
+			result.preflightErr = err
+			return result
+		}
+	} else {
+		for _, item := range items {
+			if cloudJumpReference(item) != "" {
+				result.preflightErr = fmt.Errorf("备份跳板未映射，已阻止导入")
+				return result
+			}
+		}
+	}
 	if ctx.Err() != nil {
 		result.cancelled = true
 		return result
@@ -47,17 +74,30 @@ func importCloudAccounts(ctx context.Context, c *cloudClient, items []cloudAccou
 		}
 	}
 	result.preflightDone = true
+	if parents != nil {
+		result.createdIDs = make([]string, len(items))
+	}
 	seen := make(map[string]bool, len(existing))
 	for _, a := range existing {
 		seen[a.ID] = true
 	}
-	for _, item := range items {
+	for _, index := range order {
+		item := items[index]
 		if ctx.Err() != nil {
 			result.cancelled = true
 			break
 		}
 		item.ID = ""
 		item.ExpectedUpdatedAt = ""
+		item.JumpID = nil
+		if parents != nil && parents[index] >= 0 {
+			id := result.createdIDs[parents[index]]
+			if id == "" {
+				result.mutationErr = fmt.Errorf("跳板尚未导入，已停止")
+				break
+			}
+			item.JumpID = &id
+		}
 		id, err := c.saveReturningID(item)
 		if err != nil {
 			result.mutationErr = err
@@ -68,7 +108,11 @@ func importCloudAccounts(ctx context.Context, c *cloudClient, items []cloudAccou
 			break
 		}
 		seen[id] = true
-		result.createdIDs = append(result.createdIDs, id)
+		if parents != nil {
+			result.createdIDs[index] = id
+		} else {
+			result.createdIDs = append(result.createdIDs, id)
+		}
 		result.imported++
 	}
 	result.accounts, result.refreshErr = c.list()
@@ -109,7 +153,7 @@ func importCloudArchiveExpected(ctx context.Context, c *cloudClient, doc cloudAr
 	if len(knownGroups) > 1000 {
 		return archiveImportResult{groupsIncluded: true, preflightErr: fmt.Errorf("合并后的分组数量超过上限")}
 	}
-	result := importCloudAccounts(ctx, c, doc.Accounts)
+	result := importCloudAccountsWithJumps(ctx, c, doc.Accounts, doc.JumpIndices)
 	result.groupsIncluded = true
 	if result.cancelled || result.preflightErr != nil || result.mutationErr != nil || result.refreshErr != nil {
 		result.groupErr = fmt.Errorf("云端分组未恢复")

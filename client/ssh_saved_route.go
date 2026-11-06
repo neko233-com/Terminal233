@@ -10,9 +10,10 @@ import (
 // A route is built from the latest in-memory profile revision. It is never
 // serialized: the referenced hosts retain their own protected credentials.
 type savedSSHRoute struct {
-	hops      []connectionSettings
-	signature [32]byte
-	jumpID    string
+	hops                           []connectionSettings
+	signature                      [32]byte
+	jumpID                         string
+	cloudURL, cloudUser, cloudTeam string
 }
 
 func (d *desktop) validateSavedJumpChoice(jumpID string) error {
@@ -37,6 +38,9 @@ func (d *desktop) validateSavedJumpChoice(jumpID string) error {
 
 func (d *desktop) resolveSavedRoute(target connectionSettings) (connectionSettings, error) {
 	target.route = nil
+	if target.cloudJumpID != "" {
+		return connectionSettings{}, errors.New("云端跳板需要在所属云空间中解析")
+	}
 	if target.JumpID == "" {
 		return target, nil
 	}
@@ -93,6 +97,16 @@ func (s connectionSettings) savedRouteSignature() string {
 }
 
 func (d *desktop) validateSessionSavedRoute(settings connectionSettings) error {
+	if settings.cloudJumpID != "" {
+		if settings.route == nil || settings.route.jumpID != settings.cloudJumpID {
+			return errors.New("云端跳板路径不可用")
+		}
+		current, err := d.resolveCloudRoute(settings)
+		if err != nil || current.route.signature != settings.route.signature {
+			return errors.New("云端跳板路径或信任已变化，请重新建立连接")
+		}
+		return nil
+	}
 	if settings.JumpID == "" {
 		return nil
 	}
