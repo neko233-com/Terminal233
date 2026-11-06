@@ -126,9 +126,13 @@ func (d *desktop) newTabResults(query string) []newTabResult {
 }
 
 func (d *desktop) activateNewTabResult(key string) {
-	for _, result := range d.newTabResults(d.newTabQuery) {
+	for _, result := range d.visibleNewTabResults(d.newTabQuery) {
 		if result.key != key || !result.enabled {
 			continue
+		}
+		if d.showWorkspaceHostSelection {
+			d.toggleWorkspaceResult(result)
+			return
 		}
 		switch result.kind {
 		case "quick":
@@ -175,6 +179,20 @@ func (d *desktop) activateNewTabResult(key string) {
 	}
 }
 
+func (d *desktop) visibleNewTabResults(query string) []newTabResult {
+	results := d.newTabResults(query)
+	if !d.showWorkspaceHostSelection {
+		return results
+	}
+	filtered := results[:0]
+	for _, result := range results {
+		if d.workspaceResultKey(result) != "" {
+			filtered = append(filtered, result)
+		}
+	}
+	return filtered
+}
+
 func (d *desktop) newTabSyncSelection(query string) {
 	if d.newTabSelectionQuery != query {
 		d.newTabSelectionQuery, d.newTabSelected, d.newTabStatus = query, "", ""
@@ -189,7 +207,7 @@ func (d *desktop) newTabTextKey(k ui.TextKey) bool {
 	d.newTabQuery = query
 	d.newTabSyncSelection(query)
 	var eligible []newTabResult
-	for _, result := range d.newTabResults(query) {
+	for _, result := range d.visibleNewTabResults(query) {
 		if result.enabled {
 			eligible = append(eligible, result)
 		}
@@ -227,6 +245,10 @@ func (d *desktop) newTabTextKey(k ui.TextKey) bool {
 		if query != "" {
 			k.SetText("")
 			d.newTabSelected, d.newTabSelectionQuery, d.newTabStatus = "", "", ""
+		} else if d.showWorkspaceHostSelection {
+			d.showWorkspaceHostSelection = false
+			d.workspaceHostSelected = nil
+			d.workspaceTemplatesStatus = ""
 		} else {
 			d.closeNewTab()
 		}
@@ -237,7 +259,7 @@ func (d *desktop) newTabTextKey(k ui.TextKey) bool {
 
 func (d *desktop) newTabView(c *ui.Context) {
 	d.newTabSyncSelection(d.newTabQuery)
-	results := d.newTabResults(d.newTabQuery)
+	results := d.visibleNewTabResults(d.newTabQuery)
 	highlight := d.newTabSelected
 	if highlight != "" {
 		found := false
@@ -267,7 +289,9 @@ func (d *desktop) newTabView(c *ui.Context) {
 	ui.Row(c).FillWidth().Padding(40, 24).Justify(ui.Center).Children(func() {
 		ui.Column(c).Width(contentWidth).Gap(16).Children(func() {
 			ui.TextInput(c.Key("new-tab-search"), &d.newTabQuery).Label("搜索主机或会话").Placeholder("搜索主机、会话或 SSH 地址").FillWidth().AutoFocus().OnTextKey(d.newTabTextKey)
-			d.workspaceTemplatesView(c)
+			if !d.showWorkspaceHostSelection || d.workspaceRestore != nil {
+				d.workspaceTemplatesView(c)
+			}
 			if d.newTabStatus != "" {
 				ui.Text(c, d.newTabStatus).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 			}
@@ -277,40 +301,64 @@ func (d *desktop) newTabView(c *ui.Context) {
 			if len(results) == 0 && strings.TrimSpace(d.newTabQuery) != "" {
 				ui.Text(c, "没有匹配的主机或会话").FontSize(12).TextColor(c.Theme().TextMuted)
 			}
-			if len(results) > 0 {
-				ui.Column(c).FillWidth().Padding(12).Gap(4).Background(c.Theme().Surface).Radius(12).Children(func() {
-					if strings.TrimSpace(d.newTabQuery) == "" {
-						ui.Text(c, "会话与主机").Bold().FontSize(13).Padding(4, 8)
-					}
-					for _, result := range results {
-						r := result
-						button := ui.Button(c.Key(r.key), "").Label(r.accessible).FillWidth().Padding(10, 12).Gap(12).BorderWidth(0).Radius(8).Justify(ui.Start).Disabled(!r.enabled)
-						if highlight == r.key {
-							button = button.Selected(true).Background(c.Theme().SurfacePressed).TextColor(c.Theme().Text)
-						}
-						button.Children(func() {
-							icon := serverIcon
-							if r.kind == "local" || r.kind == "session" {
-								icon = terminalIcon
-							} else if r.kind == "cloud" {
-								icon = cloudIcon
-							} else if r.kind == "quick" {
-								icon = searchIcon
-							}
-							ui.Icon(c, icon).Width(18).Height(18).TextColor(c.Theme().TextMuted)
-							ui.Column(c).Grow(1).Gap(2).Children(func() {
-								ui.Text(c, r.label).Wrap()
-								if r.detail != "" {
-									ui.Text(c, r.detail).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-								}
-							})
-						})
-						if button.Clicked() {
-							d.activateNewTabResult(r.key)
-						}
-					}
-				})
+			if d.workspaceTemplatesStatus != "" && d.showWorkspaceHostSelection && d.workspaceRestore == nil {
+				ui.Text(c, d.workspaceTemplatesStatus).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 			}
+			if d.showWorkspaceHostSelection {
+				ui.TextInput(c.Key("workspace-template-name"), &d.workspaceTemplateName).Label("新工作区名称").Placeholder("工作区名称（可选）").FillWidth()
+			}
+			ui.Column(c).FillWidth().Padding(12).Gap(4).Background(c.Theme().Surface).Radius(12).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(6).Padding(4, 8).Wrap().Children(func() {
+					title := "会话与主机"
+					if d.showWorkspaceHostSelection {
+						title = fmt.Sprintf("选择主机 · %d", len(d.workspaceHostSelected))
+					}
+					ui.Text(c, title).Bold().FontSize(13)
+					ui.Box(c).Grow(1)
+					d.workspaceHostSelectionControls(c)
+				})
+				for _, result := range results {
+					r := result
+					label := r.accessible
+					if d.showWorkspaceHostSelection {
+						label = "选择工作区主机：" + r.label
+						if r.kind == "profile" {
+							label += " · 本机 · " + r.id
+						}
+						if r.kind == "cloud" {
+							label += " · 云端 · " + r.id
+						}
+					}
+					button := ui.Button(c.Key(r.key), "").Label(label).FillWidth().Padding(10, 12).Gap(12).BorderWidth(0).Background(c.Theme().Surface).Radius(8).Justify(ui.Start).Disabled(!r.enabled)
+					selected := d.showWorkspaceHostSelection && d.workspaceHostSelected[d.workspaceResultKey(r)]
+					if selected || (!d.showWorkspaceHostSelection && highlight == r.key) {
+						button = button.Selected(true).Background(c.Theme().SurfacePressed).TextColor(c.Theme().Text)
+					} else if d.showWorkspaceHostSelection && highlight == r.key {
+						button = button.Background(c.Theme().SurfaceHover).TextColor(c.Theme().Text)
+					}
+					button.Children(func() {
+						icon := serverIcon
+						if r.kind == "local" || r.kind == "session" {
+							icon = terminalIcon
+						} else if r.kind == "cloud" {
+							icon = cloudIcon
+						} else if r.kind == "quick" {
+							icon = searchIcon
+						}
+						ui.Icon(c, icon).Width(18).Height(18).TextColor(c.Theme().TextMuted)
+						ui.Text(c, r.label).Grow(1).SingleLine()
+						if r.detail != "" && width >= 700 {
+							ui.Text(c, r.detail).FontSize(12).TextColor(c.Theme().TextMuted).MaxWidth(260).SingleLine().Tooltip(r.detail)
+						}
+						if selected {
+							ui.Text(c, "✓").TextColor(c.Theme().Accent)
+						}
+					})
+					if button.Clicked() {
+						d.activateNewTabResult(r.key)
+					}
+				}
+			})
 		})
 	})
 }

@@ -709,9 +709,12 @@ func TestDesktopRemotePanes(t *testing.T) {
 	press("local-terminal")
 	setPath("workspace-template-name", "主机工作区")
 	press("workspace-hosts-toggle")
-	press("workspace-host-local")
-	press("workspace-host-profile:1")
-	press("workspace-host-profile:2")
+	press("new-tab-local")
+	press("new-tab-profile-1")
+	press("new-tab-profile-2")
+	waitSelected("new-tab-local")
+	waitSelected("new-tab-profile-1")
+	waitSelected("new-tab-profile-2")
 	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_HOSTS"); capturePath != "" {
 		result := call("capture", nil)["result"].(map[string]any)
 		png, decodeErr := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))
@@ -729,5 +732,20 @@ func TestDesktopRemotePanes(t *testing.T) {
 	waitKey("group-focus-17")
 	if !strings.Contains(fmt.Sprint(call("tree", nil)), "已创建工作区") {
 		t.Fatal("workspace was not created from selected hosts")
+	}
+	press("local-terminal")
+	waitKey("workspace-open-" + id)
+	if strings.Contains(fmt.Sprint(call("tree", nil)), "workspace-delete-"+id) {
+		t.Fatal("workspace delete action should be hidden until management is opened")
+	}
+	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_TEMPLATES"); capturePath != "" {
+		result := call("capture", nil)["result"].(map[string]any)
+		png, decodeErr := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if writeErr := os.WriteFile(capturePath, png, 0600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
 	}
 }

@@ -69,3 +69,74 @@ func TestNewWorkspaceSelectsSavedHosts(t *testing.T) {
 		t.Fatal("accepted deleted profile")
 	}
 }
+
+func TestWorkspaceSelectionSearchKeyboardAndLimit(t *testing.T) {
+	d := &desktop{workspace: "connections", profiles: []profile{
+		{ID: "one", Label: "开发", Settings: connectionSettings{Host: "dev.test", Port: "22", User: "alice"}},
+		{ID: "two", Label: "生产", Settings: connectionSettings{Host: "prod.test", Port: "22", User: "alice"}},
+	}}
+	d.openNewTab()
+	view := ui.NewTester(d.view, 1280, 900)
+	if err := view.Click("从主机创建工作区"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.Click("选择工作区主机：本机终端"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.Click("搜索主机或会话"); err != nil {
+		t.Fatal(err)
+	}
+	view.Type("生产")
+	view.Key(0, ui.KeyEnter)
+	if !d.workspaceHostSelected["local"] || !d.workspaceHostSelected["profile:two"] || d.workspaceHostSelected["profile:one"] {
+		t.Fatal("search or Enter lost the selection")
+	}
+	view.Key(0, ui.KeyEscape)
+	if d.newTabQuery != "" || !d.showWorkspaceHostSelection || len(d.workspaceHostSelected) != 2 {
+		t.Fatal("clearing search lost the workspace selection")
+	}
+	view.Key(0, ui.KeyEscape)
+	if d.showWorkspaceHostSelection || len(d.workspaceHostSelected) != 0 || !d.newTabOpen {
+		t.Fatal("Escape did not cancel selection")
+	}
+	d.showWorkspaceHostSelection = true
+	d.sessions = make([]*workspaceSession, maxWorkspaceSessions-1)
+	d.toggleWorkspaceResult(newTabResult{kind: "local"})
+	d.toggleWorkspaceResult(newTabResult{kind: "profile", id: "one"})
+	if len(d.workspaceHostSelected) != 1 || d.workspaceTemplatesStatus == "" {
+		t.Fatal("selection exceeded the session limit")
+	}
+}
+
+func TestNewTabShowsSavedWorkspacesWithoutOpeningManagement(t *testing.T) {
+	w := sampleWorkspace("00000000000000000000000000000001", "运维")
+	d := &desktop{workspace: "new-tab", newTabOpen: true, workspaceTemplates: []savedWorkspace{w}}
+	view := ui.NewTester(d.view, 1200, 900)
+	if _, ok := view.Find("打开工作区：运维"); !ok {
+		t.Fatal("saved workspace was hidden")
+	}
+	if _, ok := view.Find("删除工作区：运维"); ok {
+		t.Fatal("delete action was shown outside management")
+	}
+	if err := view.Click("工作区"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := view.Find("删除工作区：运维"); !ok {
+		t.Fatal("workspace management did not show delete")
+	}
+}
+
+func TestWorkspaceSelectionControlsFitMinimumWindow(t *testing.T) {
+	d := &desktop{workspace: "connections"}
+	d.openNewTab()
+	view := ui.NewTester(d.view, 640, 480)
+	if err := view.Click("从主机创建工作区"); err != nil {
+		t.Fatal(err)
+	}
+	for _, label := range []string{"搜索主机或会话", "新工作区名称", "选择工作区主机：本机终端", "取消", "打开工作区"} {
+		r, ok := view.Find(label)
+		if !ok || r.X < 0 || r.X+r.W > 640 || r.Y < 0 || r.Y+r.H > 480 {
+			t.Fatalf("%s unavailable at minimum size: %+v", label, r)
+		}
+	}
+}

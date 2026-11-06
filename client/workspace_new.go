@@ -102,55 +102,18 @@ func (d *desktop) workspaceFromSelection() (savedWorkspace, error) {
 	return w, nil
 }
 
-func (d *desktop) workspaceHostSelection(c *ui.Context) {
+func (d *desktop) workspaceHostSelectionControls(c *ui.Context) {
 	label := "从主机创建工作区"
 	if d.showWorkspaceHostSelection {
-		label = "收起主机选择"
+		label = "取消"
 	}
-	ui.Row(c).FillWidth().Children(func() {
-		if ui.Button(c.Key("workspace-hosts-toggle"), label).Disabled(d.busy).Clicked() {
-			d.showWorkspaceHostSelection = !d.showWorkspaceHostSelection
-			d.workspaceHostSelected = nil
-			d.workspaceTemplatesStatus = ""
-		}
-	})
-	if !d.showWorkspaceHostSelection {
-		return
+	if ui.Button(c.Key("workspace-hosts-toggle"), label).Disabled(d.busy).Clicked() {
+		d.showWorkspaceHostSelection = !d.showWorkspaceHostSelection
+		d.showWorkspaceTemplates = false
+		d.workspaceHostSelected = nil
+		d.workspaceTemplatesStatus = ""
 	}
-	check := func(key, text, accessible string) {
-		selected := d.workspaceHostSelected[key]
-		if ui.Checkbox(c.Key("workspace-host-"+key), &selected, text).Label(accessible).Disabled(d.busy).Changed() {
-			if d.workspaceHostSelected == nil {
-				d.workspaceHostSelected = make(map[string]bool)
-			}
-			if selected {
-				d.workspaceHostSelected[key] = true
-			} else {
-				delete(d.workspaceHostSelected, key)
-			}
-		}
-	}
-	count := 1 + len(d.profiles) + len(d.accounts)
-	ui.Scroll(c.Key("workspace-hosts-list")).Label("选择工作区主机").Height(min(float32(160), float32(count*25))).FillWidth().Children(func() {
-		check("local", "本机终端", "选择工作区主机：本机终端")
-		for _, p := range d.profiles {
-			name := p.Label
-			if name == "" {
-				name = p.Settings.User + "@" + p.Settings.Host
-			}
-			check("profile:"+string(p.ID), name+" · 本机", "选择工作区主机："+name+" · 本机 · "+string(p.ID))
-		}
-		if d.cloud != nil && d.cloud.base != nil {
-			for _, a := range d.accounts {
-				name := a.Label
-				if name == "" {
-					name = a.Username + "@" + a.Host
-				}
-				check(workspaceCloudSelectionKey(d.cloud, d.cloudUser, a.ID), name+" · 云端", "选择工作区主机："+name+" · 云端 · "+a.ID)
-			}
-		}
-	})
-	ui.Row(c).FillWidth().Children(func() {
+	if d.showWorkspaceHostSelection {
 		if ui.PrimaryButton(c.Key("workspace-hosts-open"), "打开工作区").Disabled(d.busy || len(d.workspaceHostSelected) == 0).Clicked() {
 			w, err := d.workspaceFromSelection()
 			if err != nil {
@@ -159,5 +122,35 @@ func (d *desktop) workspaceHostSelection(c *ui.Context) {
 				d.startWorkspace(w, false)
 			}
 		}
-	})
+	}
+}
+
+func (d *desktop) workspaceResultKey(r newTabResult) string {
+	switch r.kind {
+	case "local":
+		return "local"
+	case "profile":
+		return "profile:" + r.id
+	case "cloud":
+		return workspaceCloudSelectionKey(d.cloud, d.cloudUser, r.id)
+	}
+	return ""
+}
+
+func (d *desktop) toggleWorkspaceResult(r newTabResult) {
+	key := d.workspaceResultKey(r)
+	if key == "" {
+		return
+	}
+	if d.workspaceHostSelected[key] {
+		delete(d.workspaceHostSelected, key)
+	} else if len(d.sessions)+len(d.workspaceHostSelected) >= maxWorkspaceSessions {
+		d.workspaceTemplatesStatus = fmt.Sprintf("最多同时打开 %d 个终端", maxWorkspaceSessions)
+	} else {
+		if d.workspaceHostSelected == nil {
+			d.workspaceHostSelected = make(map[string]bool)
+		}
+		d.workspaceHostSelected[key] = true
+		d.workspaceTemplatesStatus = ""
+	}
 }

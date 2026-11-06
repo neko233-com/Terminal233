@@ -434,12 +434,14 @@ func (d *desktop) closeWorkspaceRestore() {
 }
 
 func (d *desktop) workspaceTemplatesView(c *ui.Context) {
-	title := "工作区"
-	if len(d.workspaceTemplates) > 0 {
-		title = fmt.Sprintf("工作区 · %d", len(d.workspaceTemplates))
-	}
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(6).Children(func() {
-		if ui.Button(c.Key("workspace-templates-toggle"), title).Clicked() {
+		ui.Text(c, "工作区模板").FontSize(13).Bold()
+		ui.Box(c).Grow(1)
+		label := "管理"
+		if d.showWorkspaceTemplates {
+			label = "收起"
+		}
+		if ui.Button(c.Key("workspace-templates-toggle"), label).Label("工作区").Clicked() {
 			d.showWorkspaceTemplates = !d.showWorkspaceTemplates
 			d.confirmWorkspaceRemove = ""
 		}
@@ -454,6 +456,33 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 			}
 		}
 	})
+	if len(d.workspaceTemplates) > 0 {
+		ui.Scroll(c.Key("workspace-templates-list")).Label("已保存的工作区").Height(min(float32(160), float32(len(d.workspaceTemplates)*44+12))).FillWidth().Padding(6).Gap(2).Background(c.Theme().Surface).Radius(10).Children(func() {
+			for _, entry := range d.workspaceTemplates {
+				w := entry
+				ui.Row(c.Key("workspace-template-" + w.ID)).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+					button := ui.Button(c.Key("workspace-open-"+w.ID), "").Label("打开工作区："+w.Name).Grow(1).BorderWidth(0).Background(c.Theme().Surface).Padding(8, 10).Justify(ui.Start).Disabled(d.busy)
+					button.Children(func() {
+						ui.Icon(c, splitIcon).Width(16).Height(16).TextColor(c.Theme().TextMuted)
+						ui.Text(c, w.Name).Grow(1).SingleLine()
+						ui.Text(c, fmt.Sprintf("%d 个连接", len(w.Entries))).FontSize(12).TextColor(c.Theme().TextMuted)
+					})
+					if button.Clicked() {
+						d.restoreWorkspaceTemplate(w)
+					}
+					if d.showWorkspaceTemplates {
+						label := "删除"
+						if d.confirmWorkspaceRemove == w.ID {
+							label = "确认删除"
+						}
+						if ui.Button(c.Key("workspace-delete-"+w.ID), label).Label(label + "工作区：" + w.Name).Disabled(d.busy).Clicked() {
+							d.removeWorkspaceTemplate(w.ID)
+						}
+					}
+				})
+			}
+		})
+	}
 	if !d.showWorkspaceTemplates && d.workspaceRestore == nil {
 		return
 	}
@@ -475,7 +504,6 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 			d.createGroupFromCurrentSessions()
 		}
 	})
-	d.workspaceHostSelection(c)
 	selectionLabel := "选择终端"
 	if d.showTerminalGroupSelection {
 		selectionLabel = "使用全部终端"
@@ -515,24 +543,4 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 			}
 		})
 	}
-	if len(d.workspaceTemplates) == 0 {
-		return
-	}
-	ui.Scroll(c.Key("workspace-templates-list")).Label("已保存的工作区").Height(min(float32(160), float32(len(d.workspaceTemplates)*44))).FillWidth().Children(func() {
-		for _, entry := range d.workspaceTemplates {
-			w := entry
-			ui.Row(c.Key("workspace-template-" + w.ID)).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-				if ui.Button(c.Key("workspace-open-"+w.ID), w.Name).Label("打开工作区：" + w.Name).Grow(1).Justify(ui.Start).Disabled(d.busy).Clicked() {
-					d.restoreWorkspaceTemplate(w)
-				}
-				label := "删除"
-				if d.confirmWorkspaceRemove == w.ID {
-					label = "确认删除"
-				}
-				if ui.Button(c.Key("workspace-delete-"+w.ID), label).Label(label + "工作区：" + w.Name).Disabled(d.busy).Clicked() {
-					d.removeWorkspaceTemplate(w.ID)
-				}
-			})
-		}
-	})
 }
