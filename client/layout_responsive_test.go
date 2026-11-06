@@ -24,6 +24,18 @@ func TestCompactConnectionListKeepsFirstConnectionVisible(t *testing.T) {
 	}
 }
 
+func TestHostSearchPrecedesToolbarAtDesktopAndNarrowSizes(t *testing.T) {
+	for _, size := range [][2]int{{1280, 800}, {640, 480}} {
+		d := &desktop{workspace: "connections"}
+		view := ui.NewTester(d.view, size[0], size[1])
+		search, searchOK := view.Find("连接列表：搜索连接或快速连接")
+		create, createOK := view.Find("+ 新建连接")
+		if !searchOK || !createOK || search.Y+search.H > create.Y || create.Y+create.H > float32(size[1]) {
+			t.Errorf("search or toolbar inaccessible at %dx%d: search=%+v create=%+v", size[0], size[1], search, create)
+		}
+	}
+}
+
 func TestTerminalRemainsVisibleWithPanelsAtMinimumWindow(t *testing.T) {
 	left, right := net.Pipe()
 	defer right.Close()

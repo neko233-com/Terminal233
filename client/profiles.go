@@ -135,7 +135,7 @@ func (d *desktop) openProfileConnection(p profile) {
 		return
 	}
 	if d.trustedProfileFingerprint() != "" {
-		d.status = "请输入密码或私钥口令，然后使用已信任指纹连接。"
+		d.status = "请输入密码或私钥口令，然后点击连接。"
 	}
 }
 
@@ -167,16 +167,21 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		})
 	}
-	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-		title := "连接列表"
-		if d.profileRecent {
-			title = "最近连接"
-		} else if d.profileFavorites {
-			title = "收藏的连接"
-		} else if d.profileFilter != "" {
-			title = "分组 / " + d.profileFilter
+	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
+		ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("连接列表：搜索连接或快速连接").Placeholder("搜索连接，或输入 ssh 用户@主机 -p 端口").Grow(1).OnSubmit(func() {
+			if d.hasUnsavedConnection() {
+				d.status = "请先保存或关闭当前主机详情。"
+				return
+			}
+			d.submitConnectionSearch()
+		})
+		if looksLikeQuickConnection(d.profileSearch) {
+			if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy || draftBlocked).Clicked() {
+				d.submitConnectionSearch()
+			}
 		}
-		ui.Text(c, title).FontSize(22).Bold().Grow(1)
+	})
+	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
 		if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Disabled(draftBlocked).Clicked() {
 			d.settings = connectionSettings{Port: "22"}
 			d.settingsFromCloud = false
@@ -194,7 +199,34 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.editConnection = true
 			d.captureConnectionDraft()
 		}
+		if ui.Button(c.Key("profile-open-local"), "本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+			d.openLocalTerminal()
+		}
+		label := "分组管理"
+		if d.showGroupControls {
+			label = "收起分组管理"
+		}
+		if ui.Button(c.Key("group-controls-toggle"), label).Clicked() {
+			d.showGroupControls = !d.showGroupControls
+			d.confirmGroupDelete = false
+		}
+		label, accessible := "更多操作", "更多连接操作"
+		if d.showCompactProfileTools {
+			label, accessible = "收起操作", "收起连接操作"
+		} else if d.profileSource == "local" {
+			label = "本地 · 更多"
+		} else if d.profileSource == "cloud" {
+			label = "云端 · 更多"
+		}
+		if ui.Button(c.Key("profile-tools-toggle"), label).Label(accessible).Clicked() {
+			d.showCompactProfileTools = !d.showCompactProfileTools
+		}
 	})
+	if d.profileRecent {
+		ui.Text(c, "最近连接").FontSize(13).TextColor(c.Theme().TextMuted)
+	} else if d.profileFavorites {
+		ui.Text(c, "收藏的连接").FontSize(13).TextColor(c.Theme().TextMuted)
+	}
 	if d.profileFilter != "" {
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 			if ui.Button(c.Key("profile-group-parent"), "‹").Label("返回上级分组").Tooltip("返回上级分组").Width(36).Disabled(draftBlocked).Clicked() {
@@ -209,7 +241,7 @@ func (d *desktop) profileView(c *ui.Context) {
 				d.confirmGroupDelete, d.showProfileInspector = false, false
 				d.profileInspectorAt = time.Time{}
 			}
-			ui.Text(c, d.profileFilter).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+			ui.Text(c, "分组 / "+d.profileFilter).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		})
 	}
 	if d.profileSort != "" && !d.profileRecent {
@@ -240,28 +272,6 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		}
 	}
-	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
-		ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接或快速连接").Placeholder("搜索连接，或输入 ssh 用户@主机 -p 端口").Grow(1).OnSubmit(func() {
-			if d.hasUnsavedConnection() {
-				d.status = "请先保存或关闭当前主机详情。"
-				return
-			}
-			d.submitConnectionSearch()
-		})
-		label := "分组管理"
-		if d.showGroupControls {
-			label = "收起分组管理"
-		}
-		if ui.Button(c.Key("group-controls-toggle"), label).Clicked() {
-			d.showGroupControls = !d.showGroupControls
-			d.confirmGroupDelete = false
-		}
-		if looksLikeQuickConnection(d.profileSearch) {
-			if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy || draftBlocked).Clicked() {
-				d.submitConnectionSearch()
-			}
-		}
-	})
 	if d.showGroupControls {
 		ui.Column(c).FillWidth().Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
 			if d.profileSource == "cloud" {
@@ -271,32 +281,27 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		})
 	}
-	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-		if workspaceButton(c, "profile-source-all", "全部来源", d.profileSource == "").Clicked() {
-			if d.profileSource == "cloud" {
-				d.profileFilter = ""
+	if d.showCompactProfileTools {
+		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+			if workspaceButton(c, "profile-source-all", "全部来源", d.profileSource == "").Clicked() {
+				if d.profileSource == "cloud" {
+					d.profileFilter = ""
+				}
+				d.profileSource = ""
 			}
-			d.profileSource = ""
-		}
-		if workspaceButton(c, "profile-source-local", "本地仓库", d.profileSource == "local").Clicked() {
-			if d.profileSource == "cloud" {
-				d.profileFilter = ""
+			if workspaceButton(c, "profile-source-local", "本地仓库", d.profileSource == "local").Clicked() {
+				if d.profileSource == "cloud" {
+					d.profileFilter = ""
+				}
+				d.profileSource = "local"
 			}
-			d.profileSource = "local"
-		}
-		if workspaceButton(c, "profile-source-cloud", "云端仓库", d.profileSource == "cloud").Disabled(d.cloud == nil).Clicked() {
-			d.profileSource = "cloud"
-			d.profileFilter = ""
-			d.profileFavorites, d.profileRecent = false, false
-		}
-		label, accessible := "更多操作", "更多连接操作"
-		if d.showCompactProfileTools {
-			label, accessible = "收起操作", "收起连接操作"
-		}
-		if ui.Button(c.Key("profile-tools-toggle"), label).Label(accessible).Clicked() {
-			d.showCompactProfileTools = !d.showCompactProfileTools
-		}
-	})
+			if workspaceButton(c, "profile-source-cloud", "云端仓库", d.profileSource == "cloud").Disabled(d.cloud == nil).Clicked() {
+				d.profileSource = "cloud"
+				d.profileFilter = ""
+				d.profileFavorites, d.profileRecent = false, false
+			}
+		})
+	}
 	if d.showCompactProfileTools {
 		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 			for _, column := range []struct{ key, label string }{{"name", "名称排序"}, {"host", "地址排序"}} {

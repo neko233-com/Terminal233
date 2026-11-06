@@ -889,9 +889,6 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	} else if d.fingerprint != "" {
 		ui.Text(c, "请核对指纹："+d.fingerprint).FontSize(11).Wrap()
 	}
-	if d.trustedProfileFingerprint() != "" {
-		ui.Button(c.Key("connect-trusted"), "使用已信任指纹连接").Disabled(d.busy || d.changedFingerprint != "" || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.connectTrustedProfile)
-	}
 	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 		if ui.Button(c.Key("profile-add"), "保存").Label("保存到连接列表").Tooltip("保存到连接列表").Disabled(d.busy).Clicked() {
 			if err := d.addProfile(); err != nil {
@@ -904,14 +901,28 @@ func (d *desktop) connectionActions(c *ui.Context) {
 			}
 		}
 		ui.Button(c.Key("inspect"), "获取指纹").Label("获取主机指纹").Tooltip("获取主机指纹").Disabled(d.busy).OnClick(d.inspect)
-		ui.PrimaryButton(c.Key("connect"), "确认并连接").Label("确认指纹并连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions || d.fingerprint == "").OnClick(d.connect)
+		label, accessible := "连接", "连接并核验主机指纹"
+		if d.fingerprint != "" {
+			label, accessible = "确认并连接", "确认指纹并连接"
+		} else if d.trustedProfileFingerprint() != "" {
+			accessible = "使用已信任指纹连接"
+		}
+		if ui.PrimaryButton(c.Key("connect"), label).Label(accessible).Disabled(d.busy || d.changedFingerprint != "" || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+			if d.fingerprint != "" {
+				d.connect()
+			} else if d.trustedProfileFingerprint() != "" {
+				d.connectTrustedProfile()
+			} else {
+				d.inspect()
+			}
+		}
 	})
 	if d.status != "" {
 		ui.Text(c, d.status).FontSize(12).Wrap()
 	}
 }
 
-const version = "0.3.69"
+const version = "0.3.70"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

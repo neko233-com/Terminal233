@@ -188,6 +188,12 @@ func TestChangedHostKeyRequiresExplicitVerification(t *testing.T) {
 	if !view.HasText("原指纹：SHA256:old") || !view.HasText("新指纹：SHA256:new") {
 		t.Fatal("both fingerprints must be visible for comparison")
 	}
+	if err := view.Click("连接并核验主机指纹"); err != nil {
+		t.Fatal(err)
+	}
+	if d.busy || d.fingerprint != "" || d.changedFingerprint != "SHA256:new" {
+		t.Fatal("primary connection action must remain disabled until the changed host key is confirmed")
+	}
 	if err := view.Click("已核实，使用新指纹"); err != nil {
 		t.Fatal(err)
 	}
@@ -214,11 +220,23 @@ func TestConnectionFormNamesCloudSyncDestination(t *testing.T) {
 func TestConnectionSourcesFilterLocalAndCloud(t *testing.T) {
 	d := &desktop{cloud: &cloudClient{}, profiles: []profile{{ID: "local", Label: "本地测试机", Settings: connectionSettings{Host: "local.example", Port: "22", User: "a"}}}, accounts: []cloudAccount{{ID: "cloud", Label: "云端测试机", Host: "cloud.example", Port: 22, Username: "b"}}}
 	view := ui.NewTester(d.view, 1200, 2200)
+	if err := view.Click("更多连接操作"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("本地仓库"); err != nil {
 		t.Fatal(err)
 	}
 	if !view.HasText("本地测试机") || view.HasText("云端测试机 · b@cloud.example") {
 		t.Fatal("local source did not restrict the visible connections")
+	}
+	if err := view.Click("收起连接操作"); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasText("本地 · 更多") || view.HasText("云端测试机 · b@cloud.example") {
+		t.Fatal("collapsed tools should indicate and preserve the selected source")
+	}
+	if err := view.Click("更多连接操作"); err != nil {
+		t.Fatal(err)
 	}
 	if err := view.Click("云端仓库"); err != nil {
 		t.Fatal(err)

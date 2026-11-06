@@ -22,7 +22,7 @@ func TestHostInspectorKeepsListVisibleAndEditsInPlace(t *testing.T) {
 	if !d.editConnection || d.settings.Host != "one.test" || !view.HasText("主机详情面板") || !view.HasText("主机地址") || !view.HasText("连接列表") {
 		t.Fatal("a selected host should open its editable details beside the list")
 	}
-	button, ok := view.Find("确认指纹并连接")
+	button, ok := view.Find("连接并核验主机指纹")
 	if !ok || button.Y+button.H > 900 {
 		t.Fatalf("connection action must remain visible below the scrolling form: %+v", button)
 	}

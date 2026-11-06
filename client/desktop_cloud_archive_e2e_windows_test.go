@@ -160,7 +160,8 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	}
 	call("act", map[string]any{"key": "profile-cloud-" + stored[0].ID, "action": "press"})
 	waitText("已载入连接，请重新获取并核对主机指纹")
-	if strings.Contains(fmt.Sprint(call("tree")), "connect-trusted") {
+	cloudHostTree := fmt.Sprint(call("tree"))
+	if strings.Contains(cloudHostTree, "使用已信任指纹连接") || !strings.Contains(cloudHostTree, "连接并核验主机指纹") {
 		t.Fatal("cloud fingerprint was silently trusted")
 	}
 	call("act", map[string]any{"key": "nav-cloud", "action": "press"})

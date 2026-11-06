@@ -51,7 +51,7 @@ func TestQuickConnectionButtonOpensForm(t *testing.T) {
 func TestSearchEnterOpensQuickConnection(t *testing.T) {
 	d := &desktop{workspace: "connections"}
 	view := ui.NewTester(d.view, 1200, 1600)
-	if err := view.Click("搜索连接或快速连接"); err != nil {
+	if err := view.Click("连接列表：搜索连接或快速连接"); err != nil {
 		t.Fatal(err)
 	}
 	view.Type("ssh alice@example.test -p 2222")
