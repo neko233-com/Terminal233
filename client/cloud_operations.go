@@ -20,6 +20,8 @@ type cloudInitialState struct {
 	accountErr, teamErr, memberErr error
 	groups                         cloudGroupSnapshot
 	groupErr                       error
+	workspaces                     cloudWorkspaceSnapshot
+	workspaceErr                   error
 }
 
 type cloudScopeState struct {
@@ -50,6 +52,9 @@ func loadCloudScope(client *cloudClient, id string) cloudScopeState {
 func loadCloudInitialState(c *cloudClient, selectSoleTeam bool) cloudInitialState {
 	var state cloudInitialState
 	c.discoverCapabilities()
+	if c.cloudWorkspaces {
+		state.workspaces, state.workspaceErr = c.listCloudWorkspaces()
+	}
 	state.teams, state.teamErr = c.teams()
 	if selectSoleTeam && state.teamErr == nil && len(state.teams) == 1 {
 		c.teamID = state.teams[0].ID

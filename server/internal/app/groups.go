@@ -204,7 +204,7 @@ func (s *Store) replaceCloudGroups(user, team string, input cloudGroupMutation) 
 			t.Groups = &next
 			s.doc.Teams[team] = t
 		}
-		s.doc.Version = 2
+		s.doc.Version = max(s.doc.Version, 2)
 		return nil
 	})
 	if err != nil {

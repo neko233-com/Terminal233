@@ -59,6 +59,7 @@ func (d *desktop) cloudLogin(register bool) {
 			}
 			d.cloud, d.accounts, d.teams = client, loaded.accounts, loaded.teams
 			d.setCloudGroupState(loaded.groups, loaded.groupErr)
+			d.setCloudWorkspaceState(loaded.workspaces, loaded.workspaceErr)
 			d.teamListStale = loaded.teamErr != nil
 			d.cloudListStale = loaded.accountErr != nil
 			d.cloudStatus = "同步服务已登录"
@@ -84,13 +85,19 @@ func (d *desktop) cloudRefresh() {
 		accounts, err := client.list()
 		var groups cloudGroupSnapshot
 		var groupErr error
+		var workspaces cloudWorkspaceSnapshot
+		var workspaceErr error
+		if probe.cloudWorkspaces {
+			workspaces, workspaceErr = probe.listCloudWorkspaces()
+		}
 		if err == nil && probe.cloudGroups {
 			groups, groupErr = probe.listCloudGroups()
 		}
 		d.win.Update(func() {
 			d.busy = false
 			if d.cloud == client {
-				client.conditionalUpdates, client.conditionalDeletes, client.cloudGroups, client.capabilityUnknown = probe.conditionalUpdates, probe.conditionalDeletes, probe.cloudGroups, probe.capabilityUnknown
+				client.conditionalUpdates, client.conditionalDeletes, client.cloudGroups, client.cloudWorkspaces, client.capabilityUnknown = probe.conditionalUpdates, probe.conditionalDeletes, probe.cloudGroups, probe.cloudWorkspaces, probe.capabilityUnknown
+				d.setCloudWorkspaceState(workspaces, workspaceErr)
 			}
 			d.finishCloudRefresh(accounts, err)
 			if err == nil && d.cloud == client {
@@ -629,6 +636,7 @@ func (d *desktop) cloudLogout() {
 func (d *desktop) clearCloudState() {
 	d.clearCloudBatch()
 	d.cloudGroupSnapshot, d.cloudGroupsStale = cloudGroupSnapshot{}, false
+	d.cloudWorkspaceSnapshot, d.cloudWorkspacesStale, d.confirmCloudWorkspaceRemove = cloudWorkspaceSnapshot{}, false, ""
 	if d.cloud != nil {
 		d.cloud.token, d.cloud.adminTOTP = "", ""
 	}

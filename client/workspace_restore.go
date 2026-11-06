@@ -164,6 +164,9 @@ func (d *desktop) saveWorkspaceTemplate() {
 			break
 		}
 	}
+	if d.cloud != nil && d.cloud.cloudWorkspaces {
+		d.uploadWorkspaceTemplate(w)
+	}
 }
 
 func (d *desktop) removeWorkspaceTemplate(id string) {
@@ -452,6 +455,9 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 					d.workspaceTemplatesStatus = "读取失败：" + err.Error()
 				} else {
 					d.workspaceTemplates, d.workspaceTemplatesStatus = saved.Items, "已刷新"
+					if d.cloud != nil && d.cloud.cloudWorkspaces {
+						d.cloudRefresh()
+					}
 				}
 			}
 		}
@@ -471,12 +477,50 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 						d.restoreWorkspaceTemplate(w)
 					}
 					if d.showWorkspaceTemplates {
+						if d.cloud != nil && d.cloud.cloudWorkspaces {
+							if ui.Button(c.Key("workspace-upload-"+w.ID), "同步").Label("同步工作区：" + w.Name).Disabled(d.busy || d.cloudWorkspacesStale).Clicked() {
+								d.uploadWorkspaceTemplate(w)
+							}
+						}
 						label := "删除"
 						if d.confirmWorkspaceRemove == w.ID {
 							label = "确认删除"
 						}
 						if ui.Button(c.Key("workspace-delete-"+w.ID), label).Label(label + "工作区：" + w.Name).Disabled(d.busy).Clicked() {
 							d.removeWorkspaceTemplate(w.ID)
+						}
+					}
+				})
+			}
+		})
+	}
+	if d.cloud != nil && d.cloud.cloudWorkspaces && !d.cloudWorkspacesStale && len(d.cloudWorkspaceSnapshot.Items) > 0 {
+		ui.Scroll(c.Key("cloud-workspaces-list")).Label("云端工作区").Height(min(float32(160), float32(len(d.cloudWorkspaceSnapshot.Items)*44+12))).FillWidth().Padding(6).Gap(2).Background(c.Theme().Surface).Radius(10).Children(func() {
+			for _, entry := range d.cloudWorkspaceSnapshot.Items {
+				w := entry
+				ui.Row(c.Key("cloud-workspace-" + w.ID)).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+					button := ui.Button(c.Key("cloud-workspace-open-"+w.ID), "").Label("打开云工作区："+w.Name).Grow(1).BorderWidth(0).Background(c.Theme().Surface).Padding(8, 10).Justify(ui.Start).Disabled(d.busy)
+					button.Children(func() {
+						ui.Icon(c, splitIcon).Width(16).Height(16).TextColor(c.Theme().TextMuted)
+						ui.Text(c, w.Name).Grow(1).SingleLine()
+						ui.Text(c, "云端").FontSize(12).TextColor(c.Theme().TextMuted)
+					})
+					if button.Clicked() {
+						local, err := cloudWorkspaceLocal(w, d.cloud, d.cloudUser, d.trustedWorkspaceCloudFingerprint)
+						if err != nil {
+							d.workspaceTemplatesStatus = err.Error()
+							d.showWorkspaceTemplates = true
+						} else {
+							d.startWorkspace(local, false)
+						}
+					}
+					if d.showWorkspaceTemplates {
+						label := "删除"
+						if d.confirmCloudWorkspaceRemove == w.ID {
+							label = "确认删除"
+						}
+						if ui.Button(c.Key("cloud-workspace-delete-"+w.ID), label).Label(label + "云工作区：" + w.Name).Disabled(d.busy).Clicked() {
+							d.removeCloudWorkspace(w.ID)
 						}
 					}
 				})

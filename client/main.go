@@ -154,6 +154,9 @@ type desktop struct {
 	settingsFromCloud                                                                       bool
 	workspaceTemplatesPath, workspaceTemplateName, workspaceTemplatesStatus                 string
 	workspaceTemplates                                                                      []savedWorkspace
+	cloudWorkspaceSnapshot                                                                  cloudWorkspaceSnapshot
+	cloudWorkspacesStale                                                                    bool
+	confirmCloudWorkspaceRemove                                                             string
 	showWorkspaceTemplates                                                                  bool
 	confirmWorkspaceRemove                                                                  string
 	workspaceRestore                                                                        *workspaceRestore
@@ -1093,7 +1096,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.104"
+const version = "0.3.105"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

@@ -88,7 +88,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version, "capabilities": []string{"conditional-account-update", "conditional-account-delete", "cloud-groups-v1"}})
+		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version, "capabilities": []string{"conditional-account-update", "conditional-account-delete", "cloud-groups-v1", "cloud-workspaces-v1"}})
 	case r.URL.Path == "/api/v1/register" && r.Method == http.MethodPost:
 		s.register(w, r)
 	case r.URL.Path == "/api/v1/login" && r.Method == http.MethodPost:
@@ -103,6 +103,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.withUser(w, r, s.teamJoin)
 	case r.URL.Path == "/api/v1/groups":
 		s.withUser(w, r, func(w http.ResponseWriter, r *http.Request, user string) { s.groupResource(w, r, user, "") })
+	case r.URL.Path == "/api/v1/workspaces":
+		s.withUser(w, r, s.workspaceResource)
 	case strings.HasPrefix(r.URL.Path, "/api/v1/teams/"):
 		s.withUser(w, r, s.teamResource)
 	case r.URL.Path == "/api/v1/accounts" && r.Method == http.MethodGet:

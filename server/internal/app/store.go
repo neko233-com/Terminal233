@@ -26,12 +26,13 @@ import (
 const maxAccountsPerUser = 1000
 
 type storeDocument struct {
-	Version     int                        `json:"version"`
-	Users       map[string]userRecord      `json:"users"`
-	Accounts    map[string][]storedAccount `json:"accounts"`
-	Teams       map[string]teamRecord      `json:"teams,omitempty"`
-	Invitations map[string]teamInvitation  `json:"invitations,omitempty"`
-	Groups      map[string]cloudGroupState `json:"groups,omitempty"`
+	Version     int                            `json:"version"`
+	Users       map[string]userRecord          `json:"users"`
+	Accounts    map[string][]storedAccount     `json:"accounts"`
+	Teams       map[string]teamRecord          `json:"teams,omitempty"`
+	Invitations map[string]teamInvitation      `json:"invitations,omitempty"`
+	Groups      map[string]cloudGroupState     `json:"groups,omitempty"`
+	Workspaces  map[string]cloudWorkspaceState `json:"workspaces,omitempty"`
 }
 
 type userRecord struct {
@@ -188,7 +189,7 @@ func openStore(path, masterKey string) (result *Store, err error) {
 	return s, nil
 }
 func (s *Store) validateDocument() error {
-	if (s.doc.Version != 1 && s.doc.Version != 2) || s.doc.Users == nil || s.doc.Accounts == nil {
+	if (s.doc.Version < 1 || s.doc.Version > 3) || s.doc.Users == nil || s.doc.Accounts == nil {
 		return errors.New("数据文件版本不受支持")
 	}
 	if s.doc.Teams == nil {
@@ -197,7 +198,10 @@ func (s *Store) validateDocument() error {
 	if s.doc.Invitations == nil {
 		s.doc.Invitations = map[string]teamInvitation{}
 	}
-	return validateCloudGroupDocument(s.doc)
+	if err := validateCloudGroupDocument(s.doc); err != nil {
+		return err
+	}
+	return validateCloudWorkspaceDocument(s.doc)
 }
 func openSQLite(path string) (*sql.DB, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)

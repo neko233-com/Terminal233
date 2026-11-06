@@ -505,6 +505,7 @@ func (d *desktop) registerWithInvite() {
 			}
 			d.cloud, d.teams, d.accounts, d.members = c, loaded.teams, loaded.accounts, loaded.members
 			d.setCloudGroupState(loaded.groups, loaded.groupErr)
+			d.setCloudWorkspaceState(loaded.workspaces, loaded.workspaceErr)
 			d.teamListStale = loaded.teamErr != nil
 			d.cloudListStale = loaded.accountErr != nil
 			d.teamStatus = "已注册并加入团队"

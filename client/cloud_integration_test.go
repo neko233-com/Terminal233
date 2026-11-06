@@ -76,7 +76,7 @@ func TestCloudAgainstGoServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.discoverCapabilities()
-	if !client.conditionalUpdates || !client.conditionalDeletes || !client.cloudGroups {
+	if !client.conditionalUpdates || !client.conditionalDeletes || !client.cloudGroups || !client.cloudWorkspaces {
 		t.Fatal("server conditional-update capability missing")
 	}
 	account := cloudAccount{Label: "sample", Host: "example.test", Port: 22, Username: "me", Password: "ssh-password", HostKeyFingerprint: "SHA256:verified"}
@@ -86,6 +86,19 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	accounts, err := client.list()
 	if err != nil || len(accounts) != 1 || accounts[0].Password != "ssh-password" {
 		t.Fatalf("list=%v err=%v", accounts, err)
+	}
+	workspaceState, err := client.listCloudWorkspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleWorkspaces := workspaceState
+	workspaceState.Items = []cloudWorkspace{{ID: "0123456789abcdef0123456789abcdef", Name: "example", Entries: []cloudWorkspaceEntry{{Kind: "cloud", Host: "example.test", Port: "22", User: "me", AccountID: accounts[0].ID}}, SplitFirst: -1, SplitSecond: -1}}
+	workspaceState, err = client.replaceCloudWorkspaces(workspaceState)
+	if err != nil || len(workspaceState.Items) != 1 {
+		t.Fatal("cloud workspace save failed", err)
+	}
+	if _, err = client.replaceCloudWorkspaces(staleWorkspaces); err == nil {
+		t.Fatal("stale workspace update accepted")
 	}
 	groupState, err := client.listCloudGroups()
 	if err != nil {
