@@ -15,7 +15,10 @@ type completionTerminal interface {
 	NekoPromptLine() (string, int, int, int, int, bool)
 	NekoCaretOffset() (float32, float32, float32, bool)
 }
-type completionItem struct{ value, label string }
+type completionItem struct {
+	value, label string
+	replace      bool
+}
 type terminalCompletion struct {
 	prefix, dismissed  string
 	items              []completionItem
@@ -70,21 +73,37 @@ func completionCandidates(prefix string, snippets []quickCommand) []completionIt
 	}
 	result := make([]completionItem, 0, 5)
 	seen := make(map[string]bool)
-	add := func(value, label string) {
-		if len(result) >= 5 || len(value) > 512 || !utf8.ValidString(value) || strings.ContainsAny(value, "\r\n\t") || strings.IndexFunc(value, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) >= 0 || !strings.HasPrefix(value, prefix) || value == prefix || seen[value] {
+	// Replacing a search term uses the remote shell's Backspace binding. Avoid
+	// splitting combining-character sequences whose editing behavior is ambiguous.
+	canReplace := strings.IndexFunc(prefix, func(r rune) bool { return unicode.Is(unicode.M, r) }) < 0
+	add := func(value, label string, replace bool) {
+		if len(result) >= 5 || strings.TrimSpace(value) == "" || len(value) > 512 || !utf8.ValidString(value) || strings.ContainsAny(value, "\r\n\t") || strings.IndexFunc(value, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) >= 0 || value == prefix || seen[value] || (replace && !canReplace) {
 			return
 		}
 		seen[value] = true
-		result = append(result, completionItem{value: value, label: label})
+		result = append(result, completionItem{value: value, label: label, replace: replace})
 	}
+	query := strings.ToLower(prefix)
 	for _, snippet := range snippets {
-		add(snippet.Command, snippet.Name)
+		if !utf8.ValidString(snippet.Name) || strings.IndexFunc(snippet.Name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) >= 0 {
+			continue
+		}
+		if strings.HasPrefix(snippet.Command, prefix) {
+			add(snippet.Command, snippet.Name, false)
+			continue
+		}
+		if strings.Contains(strings.ToLower(snippet.Name), query) || strings.Contains(strings.ToLower(snippet.Command), query) {
+			add(snippet.Command, snippet.Name, true)
+		}
 	}
 	for _, command := range shellCompletionCommands {
-		add(command, "")
+		if strings.HasPrefix(command, prefix) {
+			add(command, "", false)
+		}
 	}
 	return result
 }
+
 func (d *desktop) completionAllowed(s *workspaceSession) bool {
 	if d.autocompleteDisabled || d.workspace != "terminal" || s == nil || s.id != d.currentSession || s.shell == nil || s.term == nil || terminalEnded(s.term) {
 		return false
@@ -229,13 +248,22 @@ func (d *desktop) acceptCompletion(s *workspaceSession, index int) bool {
 		return false
 	}
 	item := s.completion.items[index]
-	if !strings.HasPrefix(item.value, prefix) || len(item.value) <= len(prefix) {
-		return false
+	var input string
+	if item.replace {
+		if strings.IndexFunc(prefix, func(r rune) bool { return unicode.Is(unicode.M, r) }) >= 0 {
+			return false
+		}
+		input = strings.Repeat("\x7f", utf8.RuneCountInString(prefix)) + item.value
+	} else {
+		if !strings.HasPrefix(item.value, prefix) || len(item.value) <= len(prefix) {
+			return false
+		}
+		input = item.value[len(prefix):]
 	}
 	s.completion.visible = false
 	s.completion.dismissed = prefix
 	s.completion.pending, s.completion.expectedHashes = true, completionHashes(item.value)
-	s.term.Send([]byte(item.value[len(prefix):]))
+	s.term.Send([]byte(input))
 	d.pendingTerminalFocus = s.id
 	return true
 }

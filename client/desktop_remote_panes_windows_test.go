@@ -903,6 +903,19 @@ func TestDesktopRemotePanes(t *testing.T) {
 	waitKey("terminal-search-next")
 	press("terminal-search-close")
 	waitGone("terminal-search-input")
+	// Search a saved snippet by its Chinese name in the native suggestion popup.
+	call("act", map[string]any{"id": integrationTerminal, "action": "focus"})
+	call("input", map[string]any{"events": []any{map[string]any{"type": "text", "text": "\r\n$ \x1b]633;B\x07多终端"}}})
+	suggestion := waitKey("terminal-completion-17-0")
+	if !strings.Contains(fmt.Sprint(suggestion), "多终端验证") {
+		t.Fatalf("snippet-name suggestion missing: %v", suggestion)
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "key", "key": "Tab"}}})
+	press("terminal-search-toggle")
+	setPath("terminal-search-input", "echo NEKO_MULTI_TEST")
+	waitKey("terminal-search-next")
+	press("terminal-search-close")
+	waitGone("terminal-search-input")
 	// Real-time input in focus mode is sent to the other workspace terminals.
 	press("toggle-broadcast")
 	until = time.Now().Add(5 * time.Second)

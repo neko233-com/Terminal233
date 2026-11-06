@@ -374,3 +374,122 @@ func TestCompletionDoesNotRetainUnacknowledgedPlaintext(t *testing.T) {
 		t.Fatal("invalidated echo guard retained state")
 	}
 }
+
+func TestCompletionMatchesSnippetNameAndContent(t *testing.T) {
+	snippets := []quickCommand{
+		{Name: "部署生产", Command: "kubectl apply -f app.yaml"},
+		{Name: "Deploy", Command: "echo ready"},
+		{Name: "unsafe", Command: "echo one\necho two"},
+		{Name: "empty", Command: ""},
+	}
+	for _, tc := range []struct{ query, value string }{
+		{"部署", "kubectl apply -f app.yaml"}, {"DEP", "echo ready"}, {"apply", "kubectl apply -f app.yaml"},
+	} {
+		got := completionCandidates(tc.query, snippets)
+		if len(got) == 0 || got[0].value != tc.value || !got[0].replace {
+			t.Fatalf("%q: %#v", tc.query, got)
+		}
+	}
+	if got := completionCandidates("empty", snippets); len(got) != 0 {
+		t.Fatal("empty snippet accepted", got)
+	}
+	if got := completionCandidates("unsafe", snippets); len(got) != 0 {
+		t.Fatal("multiline script must not be inserted", got)
+	}
+	if got := completionCandidates("e\u0301", []quickCommand{{Name: "e\u0301", Command: "echo no"}}); len(got) != 0 {
+		t.Fatal("ambiguous combining sequence accepted", got)
+	}
+}
+
+func TestCompletionReplacesSnippetSearchWithoutExecuting(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	shell := &remoteShell{in: left, out: left}
+	term, err := terminal.New(terminal.Options{Conn: completionTestConn{shell}, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	if _, ok := any(term).(completionTerminal); !ok {
+		t.Skip("requires MyGo overlay")
+	}
+	s := &workspaceSession{id: 1, label: "remote", term: term, shell: shell}
+	d := &desktop{workspace: "terminal", currentSession: 1, term: term, shell: shell, sessions: []*workspaceSession{s}, quickCommands: []quickCommand{{Name: "Deploy", Command: "echo ready"}}}
+	d.bindTerminalBroadcast(s)
+	if err = d.createTerminalGroup("project", []int{1}, 1, false); err != nil {
+		t.Fatal(err)
+	}
+	view := ui.NewTester(d.view, 1000, 700)
+	if err = view.Click("终端：remote"); err != nil {
+		t.Fatal(err)
+	}
+	input := make(chan string, 5)
+	go func() {
+		b := make([]byte, 1024)
+		for {
+			n, e := right.Read(b)
+			if n > 0 {
+				input <- string(b[:n])
+			}
+			if e != nil {
+				return
+			}
+		}
+	}()
+	output := func(v string) {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { _, e := right.Write([]byte(v)); done <- e }()
+		select {
+		case e := <-done:
+			if e != nil {
+				t.Fatal(e)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("output stalled")
+		}
+	}
+	output("$ \x1b]633;B\x07dep")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		view.Frame()
+		if _, ok := view.Find("补全：Deploy  ·  echo ready"); ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, ok := view.Find("补全：Deploy  ·  echo ready"); !ok {
+		t.Fatal("snippet name suggestion missing")
+	}
+	view.Key(0, ui.KeyTab)
+	var got string
+	timeout := time.After(5 * time.Second)
+	for len(got) < len("\x7f\x7f\x7fecho ready") {
+		select {
+		case part := <-input:
+			got += part
+		case <-timeout:
+			t.Fatal("replacement was not sent")
+		}
+	}
+	if got != "\x7f\x7f\x7fecho ready" {
+		t.Fatalf("unexpected replacement bytes: %q", got)
+	}
+	// Simulate readline echoing the three deletions and the inserted command.
+	output("\b \b\b \b\b \becho ready")
+	hook := any(term).(completionTerminal)
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		view.Frame()
+		if line, _, _, _, _, ok := hook.NekoPromptLine(); ok && line == "echo ready" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if line, _, _, _, _, ok := hook.NekoPromptLine(); !ok || line != "echo ready" {
+		t.Fatalf("replacement echo: %q %v", line, ok)
+	}
+	if s.completion.pending {
+		t.Fatal("replacement echo did not clear the pending guard")
+	}
+}
