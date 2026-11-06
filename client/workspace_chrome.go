@@ -122,6 +122,33 @@ func (d *desktop) toggleAppearance() {
 	d.savePreference("light", d.lightTheme)
 }
 
+// Closing a file tool which borrows a terminal must not terminate that shell.
+// An independent SFTP tab owns its transport and can close it normally.
+func (d *desktop) closeActiveWorkspaceTab() {
+	if d.busy {
+		d.status = "请等待当前操作完成后关闭标签页"
+		return
+	}
+	switch d.workspace {
+	case "new-tab":
+		d.closeNewTab()
+	case "terminal":
+		if group := d.terminalGroupFor(d.currentSession); group != nil {
+			d.closeTerminalGroup(group.id)
+		} else {
+			d.closeCurrentSession()
+		}
+	case "files":
+		if d.currentSFTPSession() != nil {
+			d.closeCurrentSession()
+		} else if d.term != nil {
+			d.selectSession(d.currentSession)
+		} else {
+			d.workspace = "connections"
+		}
+	}
+}
+
 func workspaceTabClose(c *ui.Context, key, label string, disabled bool) ui.Element {
 	button := ui.Button(c.Key(key), "").Label(label).Tooltip(label).Width(26).Height(28).Padding(6).BorderWidth(0).Radius(5).Background(ui.Transparent).Disabled(disabled)
 	color := c.Theme().TextMuted

@@ -98,7 +98,7 @@ func (d *desktop) settingsView(c *ui.Context, height float32) {
 				d.showShortcutHelp = !d.showShortcutHelp
 			}
 			if d.showShortcutHelp {
-				ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+T 新建标签页\nCtrl+W 关闭当前标签页\nCtrl+Shift+T 打开本机终端\nCtrl+Shift+F 查找终端输出\nCtrl+Tab / Ctrl+Shift+Tab 切换会话\nCtrl+S 保存终端工作区\nCtrl+Alt+M 切换工作区布局\nCtrl+Alt+B 切换工作区广播").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+				ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+T 新建标签页\nCtrl+Shift+W 关闭当前标签页\nCtrl+Shift+T 打开本机终端\nCtrl+Shift+F 查找终端输出\nCtrl+Tab / Ctrl+Shift+Tab 切换会话\nCtrl+S 保存终端工作区\nCtrl+Alt+M 切换工作区布局\nCtrl+Alt+B 切换工作区广播").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 			}
 			d.updateView(c)
 		})

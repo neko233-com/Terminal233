@@ -82,15 +82,19 @@ func TestUnifiedTabsCloseShortcutRespectsBusyStateAndHostDraft(t *testing.T) {
 	term := groupTestTerminals(t, 1)[0]
 	d := &desktop{workspace: "terminal", currentSession: 1, term: term, sessions: []*workspaceSession{{id: 1, label: "Production", term: term}}}
 	view := ui.NewTester(d.view, 900, 600)
-	d.busy = true
 	view.Key(ui.Cmd, ui.KeyW)
+	if len(d.sessions) != 1 {
+		t.Fatal("shell Ctrl+W was stolen by the close-tab action")
+	}
+	d.busy = true
+	view.Key(ui.Cmd|ui.Shift, ui.KeyW)
 	if len(d.sessions) != 1 {
 		t.Fatal("close shortcut interrupted an operation")
 	}
 	d.busy = false
 	d.openNewTab()
 	view.Frame()
-	view.Key(ui.Cmd, ui.KeyW)
+	view.Key(ui.Cmd|ui.Shift, ui.KeyW)
 	if d.newTabOpen || d.workspace != "terminal" || len(d.sessions) != 1 || !view.Focused("Terminal") {
 		t.Fatal("closing the launcher did not restore its terminal")
 	}
@@ -98,13 +102,13 @@ func TestUnifiedTabsCloseShortcutRespectsBusyStateAndHostDraft(t *testing.T) {
 	d.captureConnectionDraft()
 	d.settings.Host = "unsaved.test"
 	view.Frame()
-	view.Key(ui.Cmd, ui.KeyW)
+	view.Key(ui.Cmd|ui.Shift, ui.KeyW)
 	if !d.hasUnsavedConnection() || len(d.sessions) != 1 {
 		t.Fatal("close shortcut changed the host inspector or background session")
 	}
 	d.workspace = "terminal"
 	view.Frame()
-	view.Key(ui.Cmd, ui.KeyW)
+	view.Key(ui.Cmd|ui.Shift, ui.KeyW)
 	if len(d.sessions) != 0 || d.term != nil || !d.hasUnsavedConnection() {
 		t.Fatal("closing a terminal changed the saved host draft")
 	}
@@ -133,11 +137,11 @@ func TestUnifiedGroupTabKeepsCloseConfirmationReachable(t *testing.T) {
 	if err := view.Click("取消关闭工作区：" + name); err != nil || len(d.sessions) != 2 || d.confirmTerminalGroupClose != 0 {
 		t.Fatalf("group close cancellation changed sessions: %v", err)
 	}
-	view.Key(ui.Cmd, ui.KeyW)
+	view.Key(ui.Cmd|ui.Shift, ui.KeyW)
 	if len(d.sessions) != 2 || d.confirmTerminalGroupClose == 0 {
 		t.Fatal("closing a group tab with the keyboard bypassed confirmation")
 	}
-	view.Key(ui.Cmd, ui.KeyW)
+	view.Key(ui.Cmd|ui.Shift, ui.KeyW)
 	if len(d.sessions) != 0 || len(d.terminalGroups) != 0 {
 		t.Fatal("confirmed keyboard close did not close the entire group tab")
 	}
@@ -168,5 +172,23 @@ func TestUnifiedChromeRespectsSystemCaptionAndDisplayScaling(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestUnifiedFilesCloseShortcutPreservesSharedTerminal(t *testing.T) {
+	term := groupTestTerminals(t, 1)[0]
+	d := &desktop{workspace: "files", currentSession: 1, term: term, fileDir: "/keep", selectedFile: "keep.txt", sessions: []*workspaceSession{{id: 1, label: "Production", term: term}}}
+	view := ui.NewTester(d.view, 1000, 760)
+	view.Key(ui.Cmd|ui.Shift, ui.KeyW)
+	if d.workspace != "terminal" || len(d.sessions) != 1 || d.term != term || d.fileDir != "/keep" || d.selectedFile != "keep.txt" || !view.Focused("Terminal") {
+		t.Fatal("closing the SFTP tool ended its borrowed terminal or changed file state")
+	}
+	d.workspace = "files"
+	d.currentSession, d.term = 2, nil
+	d.sessions = append(d.sessions, &workspaceSession{id: 2, label: "SFTP", fileOnly: true})
+	view.Frame()
+	view.Key(ui.Cmd|ui.Shift, ui.KeyW)
+	if len(d.sessions) != 1 || d.sessions[0].id != 1 || d.workspace != "files" {
+		t.Fatal("closing an independent SFTP tab changed unrelated sessions")
 	}
 }

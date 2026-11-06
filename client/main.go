@@ -318,14 +318,8 @@ func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	mods := ui.Cmd | ui.Shift
 	group := d.terminalGroupFor(d.currentSession)
 	switch {
-	case (d.workspace == "terminal" || d.workspace == "files" || d.workspace == "new-tab") && !d.busy && c.Shortcut(ui.Cmd, ui.KeyW):
-		if d.workspace == "new-tab" {
-			d.closeNewTab()
-		} else if d.workspace == "terminal" && group != nil {
-			d.closeTerminalGroup(group.id)
-		} else {
-			d.closeCurrentSession()
-		}
+	case (d.workspace == "terminal" || d.workspace == "files" || d.workspace == "new-tab") && c.Shortcut(mods, ui.KeyW):
+		d.closeActiveWorkspaceTab()
 	case (d.workspace == "terminal" || d.workspace == "files") && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(ui.Cmd, ui.KeyTab):
 		d.selectAdjacentSession(1)
 	case (d.workspace == "terminal" || d.workspace == "files") && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(mods, ui.KeyTab):
