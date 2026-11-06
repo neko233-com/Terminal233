@@ -20,6 +20,7 @@ type desktop struct {
 	newTabQuery, newTabReturn, newTabStatus                                                 string
 	newTabSelected, newTabSelectionQuery                                                    string
 	editConnection                                                                          bool
+	connectionFocusPending                                                                  bool
 	showKeyOptions                                                                          bool
 	lightTheme                                                                              bool
 	terminalFontSize                                                                        int
@@ -841,31 +842,38 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 	resetFingerprint := func() { d.fingerprint, d.expectedFingerprint, d.changedFingerprint = "", "", ""; markDraftChanged() }
 	ui.Column(c).FillWidth().Padding(sectionPadding).Gap(sectionGap).Background(sectionColor).Radius(10).Children(func() {
 		ui.Text(c, "地址").FontSize(15).Bold()
-		ui.Row(c).FillWidth().Gap(10).Children(func() {
-			ui.Column(c).Grow(1).Gap(6).Children(func() {
-				ui.Text(c, "主机地址").FontSize(12).TextColor(c.Theme().TextMuted)
-				ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机地址").OnChange(resetFingerprint).FillWidth()
-			})
-			ui.Column(c).Width(100).Gap(6).Children(func() {
-				ui.Text(c, "端口").FontSize(12).TextColor(c.Theme().TextMuted)
-				ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("端口").OnChange(resetFingerprint).FillWidth()
-			})
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			host := ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机名或 IP").OnChange(resetFingerprint).Grow(1)
+			if d.connectionFocusPending {
+				host.Focus()
+				d.connectionFocusPending = false
+			}
+			ui.Text(c, "端口").FontSize(12).TextColor(c.Theme().TextMuted)
+			ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("22").OnChange(resetFingerprint).Width(78)
 		})
 	})
 	ui.Column(c).FillWidth().Padding(sectionPadding).Gap(sectionGap).Background(sectionColor).Radius(10).Children(func() {
 		ui.Text(c, "通用").FontSize(15).Bold()
-		ui.Text(c, "连接名称（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
-		ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("连接名称（可选）").OnChange(markDraftChanged).FillWidth()
-		ui.Text(c, "连接分组（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
-		ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("分组（可选）").OnChange(markDraftChanged).FillWidth()
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "名称").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
+			ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("可选").OnChange(markDraftChanged).Grow(1)
+		})
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "分组").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
+			ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("可选").OnChange(markDraftChanged).Grow(1)
+		})
 	})
 	ui.Column(c).FillWidth().Padding(sectionPadding).Gap(sectionGap).Background(sectionColor).Radius(10).Children(func() {
 		ui.Text(c, "SSH").FontSize(15).Bold()
-		ui.Text(c, "用户名").FontSize(12).TextColor(c.Theme().TextMuted)
-		ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint).FillWidth()
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "用户").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
+			ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint).Grow(1)
+		})
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "密码").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
+			ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().OnChange(markDraftChanged).Grow(1)
+		})
 		ui.Text(c, "本机连接列表不保存密码。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-		ui.Text(c, "SSH 密码").FontSize(12).TextColor(c.Theme().TextMuted)
-		ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().OnChange(markDraftChanged).FillWidth()
 		keyExpanded := d.showKeyOptions || d.settings.KeyPath != "" || d.settings.Passphrase != ""
 		if !keyExpanded {
 			if ui.Button(c.Key("key-options-toggle"), "使用私钥…").Clicked() {
@@ -889,17 +897,22 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 			}
 		}
 	})
-	ui.Text(c, "主机验证").FontSize(16).Bold()
+	if d.trustedProfileFingerprint() != "" || d.changedFingerprint != "" || (d.fingerprint != "" && !stickyActions) {
+		ui.Text(c, "主机验证").FontSize(16).Bold()
+	}
 	if trusted := d.trustedProfileFingerprint(); trusted != "" {
 		ui.Text(c, "本机已信任指纹："+trusted).FontSize(12).Wrap()
 		ui.Text(c, "重连时仍会验证服务器指纹；若指纹变化，将在发送凭据前阻止连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
-	if d.changedFingerprint != "" {
+	if d.changedFingerprint != "" && !stickyActions {
 		ui.Text(c, "原指纹："+d.expectedFingerprint).FontSize(12).Wrap()
 		ui.Text(c, "新指纹："+d.changedFingerprint).FontSize(12).Wrap()
 		ui.Text(c, "请先通过可信渠道核实新指纹；确认前不会发送认证信息。").FontSize(12).Wrap()
 	}
-	if d.fingerprint != "" {
+	if d.changedFingerprint != "" && stickyActions {
+		ui.Text(c, "请先通过可信渠道核实新指纹；确认前不会发送认证信息。").FontSize(12).Wrap()
+	}
+	if d.fingerprint != "" && !stickyActions {
 		ui.Text(c, d.fingerprint).FontSize(12)
 	}
 	if d.cloud != nil {
@@ -927,6 +940,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	if d.changedFingerprint != "" {
 		ui.Text(c, "原指纹："+d.expectedFingerprint).FontSize(11).Wrap()
 		ui.Text(c, "新指纹："+d.changedFingerprint).FontSize(11).Wrap()
+		ui.Text(c, "请先通过可信渠道核实新指纹。").FontSize(11).Wrap()
 		ui.Button(c.Key("accept-changed-fingerprint"), "已核实，使用新指纹").Disabled(d.busy).OnClick(d.acceptChangedFingerprint)
 	} else if d.fingerprint != "" {
 		ui.Text(c, "请核对指纹："+d.fingerprint).FontSize(11).Wrap()
@@ -967,7 +981,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.84"
+const version = "0.3.85"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

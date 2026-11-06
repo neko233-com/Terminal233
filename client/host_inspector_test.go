@@ -55,6 +55,31 @@ func TestHostInspectorKeepsListVisibleAndEditsInPlace(t *testing.T) {
 	}
 }
 
+func TestNewHostFocusesAddressAndShowsAuthenticationWithoutScrolling(t *testing.T) {
+	d := &desktop{workspace: "connections"}
+	view := ui.NewTester(d.view, 1200, 760)
+	if err := view.Click("+ 新建连接"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.editConnection || !view.Focused("主机地址") {
+		t.Fatal("new host did not focus the address field")
+	}
+	scroll, ok := view.Find("主机详情内容")
+	if !ok {
+		t.Fatal("host details scroll panel missing")
+	}
+	for _, label := range []string{"主机地址", "端口", "用户名", "SSH 密码", "使用私钥…"} {
+		r, ok := view.Find(label)
+		if !ok || r.Y < scroll.Y || r.Y+r.H > scroll.Y+scroll.H {
+			t.Errorf("%s not visible without scrolling: %+v", label, r)
+		}
+	}
+	view.Type("example.test")
+	if d.settings.Host != "example.test" || !d.hasUnsavedConnection() {
+		t.Fatal("typing the focused address did not update the protected draft")
+	}
+}
+
 func TestHostInspectorPreservesUnsavedDraft(t *testing.T) {
 	first := profile{ID: "1", Label: "one", Settings: connectionSettings{Host: "one.test", Port: "22", User: "alice"}}
 	second := profile{ID: "2", Label: "two", Settings: connectionSettings{Host: "two.test", Port: "22", User: "bob"}}
@@ -118,6 +143,16 @@ func TestHostInspectorKeepsHeaderAndCloudActionVisible(t *testing.T) {
 	after, ok := view.Find("返回连接列表")
 	if !ok || after.Y != header.Y {
 		t.Fatal("host details header moved when the form scrolled")
+	}
+}
+
+func TestChangedHostKeyGuidanceStaysWithConfirmation(t *testing.T) {
+	d := &desktop{workspace: "connections", editConnection: true, settings: connectionSettings{Host: "example.test", Port: "22", User: "alice"}, expectedFingerprint: "SHA256:old", changedFingerprint: "SHA256:new"}
+	view := ui.NewTester(d.view, 1200, 600)
+	warning, warningOK := view.Find("请先通过可信渠道核实新指纹。")
+	confirm, confirmOK := view.Find("已核实，使用新指纹")
+	if !warningOK || !confirmOK || warning.Y+warning.H > confirm.Y || confirm.Y+confirm.H > 600 {
+		t.Fatalf("verification guidance or confirmation is not visible: warning=%+v confirm=%+v", warning, confirm)
 	}
 }
 

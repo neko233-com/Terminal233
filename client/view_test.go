@@ -188,8 +188,8 @@ func TestChangedHostKeyRequiresExplicitVerification(t *testing.T) {
 		t.Fatal("changed host key was accepted without verification")
 	}
 	view := ui.NewTester(d.view, 1200, 1800)
-	if !view.HasText("原指纹：SHA256:old") || !view.HasText("新指纹：SHA256:new") {
-		t.Fatal("both fingerprints must be visible for comparison")
+	if !view.HasText("原指纹：SHA256:old") || !view.HasText("新指纹：SHA256:new") || !view.HasText("请先通过可信渠道核实新指纹；确认前不会发送认证信息。") {
+		t.Fatal("both fingerprints and verification guidance must be visible")
 	}
 	if err := view.Click("连接并核验主机指纹"); err != nil {
 		t.Fatal(err)

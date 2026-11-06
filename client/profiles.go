@@ -85,6 +85,7 @@ func (d *desktop) moveProfile(from, to profileID) {
 func (d *desktop) loadProfile(p profile) {
 	d.workspace = "connections"
 	d.editConnection = true
+	d.connectionFocusPending = false
 	d.showKeyOptions = false
 	d.showProfileInspector = false
 	d.profileInspectorAt = time.Time{}
@@ -200,6 +201,7 @@ func (d *desktop) profileView(c *ui.Context) {
 				d.showProfileInspector = false
 				d.profileInspectorAt = time.Time{}
 				d.editConnection = true
+				d.connectionFocusPending = true
 				d.captureConnectionDraft()
 			}
 			local := ui.Button(c.Key("profile-open-local"), "").Label("本机终端").Tooltip("打开本机终端").Gap(8).Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions)

@@ -371,6 +371,25 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "主机地址") || !strings.Contains(tree, "SSH 密码") {
 		t.Fatalf("missing connection fields: %s", tree)
 	}
+	focusedHost := false
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == "host" && node["id"] == result["focus"] {
+				focusedHost = true
+				break
+			}
+		}
+		if focusedHost {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !focusedHost {
+		t.Fatal("new host address did not receive native focus")
+	}
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)

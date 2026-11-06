@@ -45,6 +45,7 @@ func (d *desktop) closeConnectionEditor() bool {
 		return false
 	}
 	d.editConnection = false
+	d.connectionFocusPending = false
 	d.showKeyOptions = false
 	d.fileReturnAfterConnect = false
 	d.connectionDraft, d.connectionDraftSet, d.confirmDiscardConnection = connectionDraft{}, false, false
