@@ -37,6 +37,7 @@ type cloudClient struct {
 	conditionalDeletes bool
 	cloudGroups        bool
 	cloudWorkspaces    bool
+	cloudWorkspaces16  bool
 	cloudTags          bool
 	capabilityUnknown  bool
 }
@@ -61,6 +62,7 @@ func (c *cloudClient) discoverCapabilities() {
 	c.conditionalDeletes = false
 	c.cloudGroups = false
 	c.cloudWorkspaces = false
+	c.cloudWorkspaces16 = false
 	c.cloudTags = false
 	c.capabilityUnknown = true
 	if c.request(http.MethodGet, "/healthz", nil, &health) != nil || health.Status != "ok" {
@@ -79,6 +81,9 @@ func (c *cloudClient) discoverCapabilities() {
 		}
 		if capability == "cloud-workspaces-v1" {
 			c.cloudWorkspaces = true
+		}
+		if capability == "cloud-workspaces-16" {
+			c.cloudWorkspaces16 = true
 		}
 		if capability == "account-tags-v1" {
 			c.cloudTags = true

@@ -8,7 +8,28 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-const maxWorkspaceSessions = 12
+const maxWorkspaceSessions = 16
+const maxFileSessions = 16
+const legacyWorkspaceSessions = 12
+
+// File-only SFTP transports do not consume terminal slots.
+func (d *desktop) sessionCount(fileOnly bool) int {
+	count := 0
+	for _, s := range d.sessions {
+		if (s != nil && s.fileOnly) == fileOnly {
+			count++
+		}
+	}
+	return count
+}
+func (d *desktop) terminalLimitReached() bool { return d.sessionCount(false) >= maxWorkspaceSessions }
+func (d *desktop) fileLimitReached() bool     { return d.sessionCount(true) >= maxFileSessions }
+func (d *desktop) connectionLimitReached() bool {
+	if d.fileReturnAfterConnect {
+		return d.fileLimitReached()
+	}
+	return d.terminalLimitReached()
+}
 
 type sessionDragID int
 

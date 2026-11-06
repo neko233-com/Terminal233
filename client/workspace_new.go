@@ -144,7 +144,7 @@ func (d *desktop) toggleWorkspaceResult(r newTabResult) {
 	}
 	if d.workspaceHostSelected[key] {
 		delete(d.workspaceHostSelected, key)
-	} else if len(d.sessions)+len(d.workspaceHostSelected) >= maxWorkspaceSessions {
+	} else if d.sessionCount(false)+len(d.workspaceHostSelected) >= maxWorkspaceSessions {
 		d.workspaceTemplatesStatus = fmt.Sprintf("最多同时打开 %d 个终端", maxWorkspaceSessions)
 	} else {
 		if d.workspaceHostSelected == nil {

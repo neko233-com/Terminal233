@@ -84,7 +84,7 @@ func (d *desktop) leftPaneToolbar(c *ui.Context) {
 		*show = !*show
 	}
 	if s := d.secondarySession(); s != nil && s.fileOnly {
-		if terminalActionButton(c, "left-pane-open-terminal", "打开左侧主机终端", terminalIcon, false, d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+		if terminalActionButton(c, "left-pane-open-terminal", "打开左侧主机终端", terminalIcon, false, d.busy || d.terminalLimitReached()).Clicked() {
 			d.openTerminalFromSFTP(s)
 		}
 	}

@@ -46,7 +46,7 @@ func newLocalTerminal(options terminal.Options) (*terminal.Terminal, error) {
 }
 
 func (d *desktop) openLocalTerminal() {
-	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
+	if d.busy || d.terminalLimitReached() {
 		return
 	}
 	t, err := newLocalTerminal(d.terminalOptions())

@@ -51,7 +51,7 @@ func (d *desktop) groupQuickTargets(group string, cloud bool) ([]workspaceRestor
 	if count == 0 {
 		return nil, nil, errors.New("此分组没有主机")
 	}
-	if len(d.sessions)+count > maxWorkspaceSessions {
+	if d.sessionCount(false)+count > maxWorkspaceSessions {
 		return nil, nil, fmt.Errorf("分组包含 %d 个主机，最多同时打开 %d 个终端", count, maxWorkspaceSessions)
 	}
 	if cloud {

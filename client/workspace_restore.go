@@ -37,7 +37,7 @@ func (d *desktop) resolveWorkspace(w savedWorkspace) ([]workspaceRestoreTarget, 
 	if err := validateSavedWorkspace(w); err != nil {
 		return nil, err
 	}
-	if len(d.sessions)+len(w.Entries) > maxWorkspaceSessions {
+	if d.sessionCount(false)+len(w.Entries) > maxWorkspaceSessions {
 		return nil, fmt.Errorf("会话数量超过上限 %d", maxWorkspaceSessions)
 	}
 	targets := make([]workspaceRestoreTarget, 0, len(w.Entries))
@@ -588,10 +588,10 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 	}
 	ui.Row(c).FillWidth().Gap(6).Children(func() {
 		ui.TextInput(c.Key("workspace-template-name"), &d.workspaceTemplateName).Label("新工作区名称").Placeholder("工作区名称").Grow(1)
-		if ui.Button(c.Key("workspace-template-save"), "保存当前会话").Disabled(d.busy || len(d.sessions) == 0).Clicked() {
+		if ui.Button(c.Key("workspace-template-save"), "保存当前会话").Disabled(d.busy || d.sessionCount(false) == 0).Clicked() {
 			d.saveWorkspaceTemplate()
 		}
-		if ui.Button(c.Key("workspace-group-create"), "组成工作区").Disabled(d.busy || len(d.sessions) < 2 || d.terminalGroupFor(d.currentSession) != nil).Clicked() {
+		if ui.Button(c.Key("workspace-group-create"), "组成工作区").Disabled(d.busy || d.sessionCount(false) < 2 || d.terminalGroupFor(d.currentSession) != nil).Clicked() {
 			d.createGroupFromCurrentSessions()
 		}
 	})
@@ -600,7 +600,7 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 		selectionLabel = "使用全部终端"
 	}
 	ui.Row(c).FillWidth().Children(func() {
-		if ui.Button(c.Key("workspace-group-select"), selectionLabel).Disabled(d.busy || len(d.sessions) < 2 || d.terminalGroupFor(d.currentSession) != nil).Clicked() {
+		if ui.Button(c.Key("workspace-group-select"), selectionLabel).Disabled(d.busy || d.sessionCount(false) < 2 || d.terminalGroupFor(d.currentSession) != nil).Clicked() {
 			d.showTerminalGroupSelection = !d.showTerminalGroupSelection
 			d.terminalGroupSelected = nil
 			if d.showTerminalGroupSelection {

@@ -100,7 +100,7 @@ func (d *desktop) reconnectSFTP(s *workspaceSession) {
 // Switching to a terminal creates a separate SSH session, preserving the file
 // connection and rechecking the host key before credentials are sent.
 func (d *desktop) openTerminalFromSFTP(s *workspaceSession) {
-	if d.busy || d.win == nil || s == nil || !s.fileOnly || !s.fileAvailable() || len(d.sessions) >= maxWorkspaceSessions {
+	if d.busy || d.win == nil || s == nil || !s.fileOnly || !s.fileAvailable() || d.terminalLimitReached() {
 		return
 	}
 	if s.active.Fingerprint == "" {

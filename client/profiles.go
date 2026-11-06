@@ -146,7 +146,7 @@ func (d *desktop) trustedProfileFingerprint() string {
 }
 
 func (d *desktop) connectTrustedProfile() {
-	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
+	if d.busy || d.connectionLimitReached() {
 		return
 	}
 	if fingerprint := d.trustedProfileFingerprint(); fingerprint != "" {
@@ -156,7 +156,7 @@ func (d *desktop) connectTrustedProfile() {
 }
 
 func (d *desktop) openProfileConnection(p profile) {
-	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
+	if d.busy || d.connectionLimitReached() {
 		return
 	}
 	d.loadProfile(p)
@@ -246,7 +246,7 @@ func (d *desktop) profileView(c *ui.Context) {
 				d.connectionFocusPending = true
 				d.captureConnectionDraft()
 			}
-			local := ui.Button(c.Key("profile-open-local"), "").Label("本机终端").Tooltip("打开本机终端").Gap(8).Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions)
+			local := ui.Button(c.Key("profile-open-local"), "").Label("本机终端").Tooltip("打开本机终端").Gap(8).Disabled(d.busy || d.terminalLimitReached())
 			local.Children(func() {
 				ui.Icon(c, terminalIcon).Width(16).Height(16).TextColor(c.Theme().TextMuted)
 				ui.Text(c, "本机终端")
@@ -482,7 +482,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 	shown := 0
 	ui.Row(c).FillWidth().Wrap().Gap(10).AlignItems(ui.Start).Children(func() {
 		if showLocal {
-			button := ui.Button(c.Key("profile-local-terminal"), "").Label("打开本机终端").Tooltip("打开本机终端").Width(cardWidth).Height(66).Padding(14).Gap(12).Justify(ui.Start).Background(c.Theme().Surface).BorderWidth(0).Radius(10).Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions)
+			button := ui.Button(c.Key("profile-local-terminal"), "").Label("打开本机终端").Tooltip("打开本机终端").Width(cardWidth).Height(66).Padding(14).Gap(12).Justify(ui.Start).Background(c.Theme().Surface).BorderWidth(0).Radius(10).Disabled(d.busy || d.terminalLimitReached())
 			button.Children(func() {
 				ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() { ui.Icon(c, terminalIcon).Width(19).Height(19).TextColor(c.Theme().AccentText) })
 				ui.Column(c).Grow(1).Gap(3).Children(func() {
@@ -559,7 +559,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				}
 				blockedByEditor := draftBlocked
 				row.ContextMenu(func(menu *ui.Menu) {
-					if menu.Item("连接").Disabled(d.busy || blockedByEditor || len(d.sessions) >= maxWorkspaceSessions).Chosen() {
+					if menu.Item("连接").Disabled(d.busy || blockedByEditor || d.connectionLimitReached()).Chosen() {
 						if d.prepareConnectionNavigation() {
 							if current, ok := d.currentProfile(p.ID); ok {
 								d.openProfileConnection(current)
@@ -667,7 +667,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 							d.toggleProfileFavorite(p.ID)
 						}
 						ui.Box(c).Grow(1)
-						if ui.Button(c.Key("profile-connect-"+string(p.ID)), "↗").Label("连接：" + p.Label).Tooltip("连接").Width(36).Disabled(d.busy || blockedByEditor || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+						if ui.Button(c.Key("profile-connect-"+string(p.ID)), "↗").Label("连接：" + p.Label).Tooltip("连接").Width(36).Disabled(d.busy || blockedByEditor || d.connectionLimitReached()).Clicked() {
 							if d.prepareConnectionNavigation() {
 								if current, ok := d.currentProfile(p.ID); ok {
 									d.openProfileConnection(current)

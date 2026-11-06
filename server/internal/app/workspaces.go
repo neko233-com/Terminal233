@@ -68,7 +68,7 @@ func validateCloudWorkspaces(items []cloudWorkspace) error {
 	ids := map[string]bool{}
 	for i, w := range items {
 		id, err := hex.DecodeString(w.ID)
-		if err != nil || len(id) != 16 || hex.EncodeToString(id) != w.ID || ids[w.ID] || w.Name == "" || w.Name != strings.TrimSpace(w.Name) || !workspaceText(w.Name, 120) || len(w.Entries) == 0 || len(w.Entries) > 12 || w.Active < 0 || w.Active >= len(w.Entries) {
+		if err != nil || len(id) != 16 || hex.EncodeToString(id) != w.ID || ids[w.ID] || w.Name == "" || w.Name != strings.TrimSpace(w.Name) || !workspaceText(w.Name, 120) || len(w.Entries) == 0 || len(w.Entries) > 16 || w.Active < 0 || w.Active >= len(w.Entries) {
 			return errInvalidWorkspace
 		}
 		ids[w.ID] = true
@@ -91,7 +91,7 @@ func validateCloudWorkspaces(items []cloudWorkspace) error {
 			return errInvalidWorkspace
 		}
 		for _, values := range [][]float32{w.RowPerc, w.ColumnPerc} {
-			if len(values) != 0 && (len(values) != 12 || w.ViewMode == "") {
+			if len(values) != 0 && ((len(values) != 12 && len(values) != 16) || w.ViewMode == "") {
 				return errInvalidWorkspace
 			}
 			for _, v := range values {

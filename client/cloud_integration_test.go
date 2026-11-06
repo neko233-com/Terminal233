@@ -76,7 +76,7 @@ func TestCloudAgainstGoServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.discoverCapabilities()
-	if !client.conditionalUpdates || !client.conditionalDeletes || !client.cloudGroups || !client.cloudWorkspaces || !client.cloudTags {
+	if !client.conditionalUpdates || !client.conditionalDeletes || !client.cloudGroups || !client.cloudWorkspaces || !client.cloudWorkspaces16 || !client.cloudTags {
 		t.Fatal("server conditional-update capability missing")
 	}
 	account := cloudAccount{Label: "sample", Host: "example.test", Port: 22, Username: "me", Password: "ssh-password", HostKeyFingerprint: "SHA256:verified", Tags: []string{"production", "database"}}
@@ -133,6 +133,24 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	}
 	if _, err = client.replaceCloudWorkspaces(change); err == nil {
 		t.Fatal("replayed cloud update ignored revision")
+	}
+	// Round-trip the largest workspace through the real TLS-backed server.
+	large := cloneCloudWorkspace(workspaceState.Items[0])
+	large.Entries = make([]cloudWorkspaceEntry, 16)
+	for i := range large.Entries {
+		large.Entries[i] = cloudWorkspaceEntry{Kind: "local", Label: "local"}
+	}
+	large.ViewMode = "grid"
+	large.RowPerc, large.ColumnPerc = make([]float32, 16), make([]float32, 16)
+	large.ColumnPerc[14] = 42
+	workspaceState.Items[0] = large
+	workspaceState, err = client.replaceCloudWorkspaces(workspaceState)
+	if err != nil || len(workspaceState.Items[0].Entries) != 16 || workspaceState.Items[0].ColumnPerc[14] != 42 {
+		t.Fatal("16-terminal workspace save failed", err)
+	}
+	workspaceState, err = client.listCloudWorkspaces()
+	if err != nil || len(workspaceState.Items[0].Entries) != 16 || workspaceState.Items[0].ColumnPerc[14] != 42 {
+		t.Fatal("16-terminal workspace read failed", err)
 	}
 	groupState, err := client.listCloudGroups()
 	if err != nil {

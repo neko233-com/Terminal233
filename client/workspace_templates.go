@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,11 +67,11 @@ func validateSavedWorkspace(w savedWorkspace) error {
 		return errors.New("工作区视图无效")
 	}
 	for _, values := range [][]float32{w.RowPerc, w.ColumnPerc} {
-		if len(values) != 0 && len(values) != 12 {
+		if len(values) != 0 && len(values) != legacyWorkspaceSessions && len(values) != maxWorkspaceSessions {
 			return errors.New("工作区分屏尺寸无效")
 		}
 		for _, value := range values {
-			if value < 0 || value > 100 {
+			if math.IsNaN(float64(value)) || value < 0 || value > 100 {
 				return errors.New("工作区分屏尺寸无效")
 			}
 		}
@@ -153,11 +154,14 @@ func readWorkspaceTemplates(filename string) (workspaceTemplatesFile, error) {
 	if err = dec.Decode(&struct{}{}); err != io.EOF {
 		return workspaceTemplatesFile{}, errors.New("工作区文件格式无效")
 	}
-	if (saved.Version != 1 && saved.Version != 2 && saved.Version != 3) || len(saved.Items) > maxWorkspaceTemplates {
+	if (saved.Version != 1 && saved.Version != 2 && saved.Version != 3 && saved.Version != 4) || len(saved.Items) > maxWorkspaceTemplates {
 		return workspaceTemplatesFile{}, errors.New("工作区版本或数量无效")
 	}
 	seen := map[string]bool{}
 	for i, w := range saved.Items {
+		if saved.Version < 4 && (len(w.Entries) > legacyWorkspaceSessions || len(w.RowPerc) > legacyWorkspaceSessions || len(w.ColumnPerc) > legacyWorkspaceSessions) {
+			return workspaceTemplatesFile{}, errors.New("工作区版本与会话数量不符")
+		}
 		if saved.Version == 1 && (w.ViewMode != "" || len(w.RowPerc) != 0 || len(w.ColumnPerc) != 0) {
 			return workspaceTemplatesFile{}, errors.New("工作区版本与内容不符")
 		}
@@ -209,11 +213,14 @@ func updateWorkspaceTemplates(filename string, update func(*workspaceTemplatesFi
 		return workspaceTemplatesFile{}, errors.New("工作区数量已达上限")
 	}
 	for _, w := range saved.Items {
+		if (len(w.Entries) > legacyWorkspaceSessions || len(w.RowPerc) > legacyWorkspaceSessions || len(w.ColumnPerc) > legacyWorkspaceSessions) && saved.Version < 4 {
+			saved.Version = 4
+		}
 		if w.ViewMode != "" && saved.Version < 2 {
 			saved.Version = 2
 		}
 		for _, entry := range w.Entries {
-			if entry.TerminalDir != "" {
+			if entry.TerminalDir != "" && saved.Version < 3 {
 				saved.Version = 3
 			}
 		}
@@ -268,8 +275,12 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 	group := d.terminalGroupFor(d.currentSession)
 	if group != nil {
 		sessions = d.terminalGroupSessions(group)
-		w.RowPerc = append([]float32(nil), group.rowPerc[:]...)
-		w.ColumnPerc = append([]float32(nil), group.columnPerc[:]...)
+		size := legacyWorkspaceSessions
+		if len(sessions) > legacyWorkspaceSessions {
+			size = maxWorkspaceSessions
+		}
+		w.RowPerc = append([]float32(nil), group.rowPerc[:size]...)
+		w.ColumnPerc = append([]float32(nil), group.columnPerc[:size]...)
 		w.ViewMode = "focus"
 		if group.grid {
 			w.ViewMode = "grid"

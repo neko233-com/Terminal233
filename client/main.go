@@ -380,7 +380,7 @@ func (d *desktop) acceptChangedFingerprint() {
 }
 
 func (d *desktop) connect() {
-	if d.busy || len(d.sessions) >= maxWorkspaceSessions || d.fingerprint == "" {
+	if d.busy || d.connectionLimitReached() || d.fingerprint == "" {
 		return
 	}
 	if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
@@ -858,7 +858,7 @@ func (d *desktop) view(c *ui.Context) {
 							}
 						}
 						splitLabel, splitActive := "分屏查看", d.splitSession != 0
-						splitDisabled := !d.canSwitchSession() || (d.splitSession == 0 && len(d.sessions) < 2)
+						splitDisabled := !d.canSwitchSession() || (d.splitSession == 0 && d.sessionCount(false) < 2)
 						if group := d.terminalGroupFor(d.currentSession); group != nil {
 							splitActive = group.grid
 							splitDisabled = !d.canSwitchSession() || len(group.members) < 2
@@ -906,7 +906,7 @@ func (d *desktop) view(c *ui.Context) {
 							ui.Text(c, "开始使用终端").FontSize(20).Bold()
 							ui.Text(c, "打开本机终端，或选择 SSH 连接开始远程会话。").TextColor(t.TextMuted).Wrap()
 							ui.Row(c).Wrap().Gap(8).Children(func() {
-								if ui.PrimaryButton(c.Key("terminal-empty-local"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+								if ui.PrimaryButton(c.Key("terminal-empty-local"), "打开本机终端").Disabled(d.busy || d.terminalLimitReached()).Clicked() {
 									d.openLocalTerminal()
 								}
 								if ui.Button(c.Key("terminal-empty-connections"), "选择 SSH 连接").Clicked() {
@@ -1206,7 +1206,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 		} else if d.trustedProfileFingerprint() != "" {
 			accessible = "使用已信任指纹连接"
 		}
-		if ui.PrimaryButton(c.Key("connect"), label).Label(accessible).Grow(1).Disabled(d.busy || d.changedFingerprint != "" || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+		if ui.PrimaryButton(c.Key("connect"), label).Label(accessible).Grow(1).Disabled(d.busy || d.changedFingerprint != "" || d.connectionLimitReached()).Clicked() {
 			if d.fingerprint != "" {
 				d.connect()
 			} else if d.trustedProfileFingerprint() != "" {
@@ -1221,7 +1221,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.122"
+const version = "0.3.123"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

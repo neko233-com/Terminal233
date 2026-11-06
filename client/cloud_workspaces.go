@@ -44,6 +44,9 @@ func portableWorkspace(w savedWorkspace, c *cloudClient, user string) (cloudWork
 	if c == nil || c.base == nil || validateSavedWorkspace(w) != nil {
 		return cloudWorkspace{}, errors.New("工作区内容无效")
 	}
+	if !c.cloudWorkspaces16 && (len(w.Entries) > legacyWorkspaceSessions || len(w.RowPerc) > legacyWorkspaceSessions || len(w.ColumnPerc) > legacyWorkspaceSessions) {
+		return cloudWorkspace{}, errors.New("同步服务需要升级才能保存超过 12 个终端的工作区")
+	}
 	out := cloudWorkspace{ID: w.ID, Name: w.Name, Active: w.Active, SplitFirst: w.SplitFirst, SplitSecond: w.SplitSecond, SplitLayout: w.SplitLayout, ViewMode: w.ViewMode, RowPerc: append([]float32(nil), w.RowPerc...), ColumnPerc: append([]float32(nil), w.ColumnPerc...)}
 	for _, e := range w.Entries {
 		switch e.Kind {
@@ -135,6 +138,13 @@ func (c *cloudClient) replaceCloudWorkspaces(s cloudWorkspaceSnapshot) (cloudWor
 	var out cloudWorkspaceSnapshot
 	if !c.cloudWorkspaces || c.token == "" || !validCloudWorkspaceSnapshot(s, c) {
 		return out, errors.New("云工作区状态无效")
+	}
+	if !c.cloudWorkspaces16 {
+		for _, w := range s.Items {
+			if len(w.Entries) > legacyWorkspaceSessions || len(w.RowPerc) > legacyWorkspaceSessions || len(w.ColumnPerc) > legacyWorkspaceSessions {
+				return out, errors.New("同步服务需要升级才能保存超过 12 个终端的工作区")
+			}
+		}
 	}
 	if err := c.request(http.MethodPut, "/api/v1/workspaces", map[string]any{"items": s.Items, "expectedRevision": s.Revision}, &out); err != nil {
 		return out, err

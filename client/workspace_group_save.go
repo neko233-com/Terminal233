@@ -35,7 +35,7 @@ func (d *desktop) workspaceGroupSignature(g *terminalGroup) [32]byte {
 		Focus             int
 		Grid              bool
 		Members           []member
-		Rows, Columns     [12]float32
+		Rows, Columns     [maxWorkspaceSessions]float32
 	}
 	value := state{Name: g.name, SplitLayout: d.splitLayout, Focus: g.focused, Grid: g.grid, Rows: g.rowPerc, Columns: g.columnPerc}
 	sessions := d.terminalGroupSessions(g)
@@ -224,6 +224,8 @@ func (d *desktop) saveActiveWorkspaceGroup(g *terminalGroup) {
 			d.status = "已保存到本机；原云账号不可用"
 			return
 		}
+		// Build the pending value offline; the actual service capability is checked before the write.
+		origin.cloudWorkspaces16 = true
 		portable, e := portableWorkspace(state, origin, g.pendingCloud.user)
 		if e != nil {
 			g.pendingCloud.next = cloudWorkspace{}

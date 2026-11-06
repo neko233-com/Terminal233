@@ -39,7 +39,7 @@ func (d *desktop) closeNewTab() {
 }
 
 func (d *desktop) newTabQuickConnect() {
-	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
+	if d.busy || d.terminalLimitReached() {
 		return
 	}
 	if !d.prepareConnectionNavigation() {
@@ -75,8 +75,8 @@ func newTabMatches(query, text string) bool {
 
 func (d *desktop) newTabResults(query string) []newTabResult {
 	query = strings.TrimSpace(query)
-	openDisabled := d.busy || d.connectionNavigationBlocked() || len(d.sessions) >= maxWorkspaceSessions
-	localDisabled := d.busy || len(d.sessions) >= maxWorkspaceSessions
+	openDisabled := d.busy || d.connectionNavigationBlocked() || d.terminalLimitReached()
+	localDisabled := d.busy || d.terminalLimitReached()
 	quick := newTabResult{key: "new-tab-quick-connect", label: "填写 SSH 连接信息", accessible: "填写 SSH 连接信息", kind: "quick", enabled: !openDisabled}
 	results := make([]newTabResult, 0, 1+len(d.sessions)+len(d.profiles)+len(d.accounts))
 	explicitSSH := strings.HasPrefix(query, "ssh ")

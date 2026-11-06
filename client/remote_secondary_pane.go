@@ -42,7 +42,7 @@ func (d *desktop) clearSecondaryConnectIntent() {
 }
 
 func (d *desktop) beginSecondaryConnection() bool {
-	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
+	if d.busy || d.fileLimitReached() {
 		return false
 	}
 	if !d.prepareConnectionNavigation() {
@@ -153,7 +153,7 @@ func (d *desktop) secondaryFilePicker(c *ui.Context) {
 							d.selectSecondarySession(s.id)
 						}
 					}
-					blocked := d.connectionNavigationBlocked() || len(d.sessions) >= maxWorkspaceSessions
+					blocked := d.connectionNavigationBlocked() || d.fileLimitReached()
 					for _, profile := range d.profiles {
 						p := profile
 						name := p.Label

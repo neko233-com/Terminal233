@@ -72,7 +72,7 @@ func (d *desktop) fileSessionPicker(c *ui.Context) {
 						continue
 					}
 					shown++
-					if ui.Button(c.Key("file-picker-profile-"+string(p.ID)), name+" · 本机").Label("文件主机：" + name + " · 本机").FillWidth().Justify(ui.Start).Disabled(d.busy || draftBlocked || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+					if ui.Button(c.Key("file-picker-profile-"+string(p.ID)), name+" · 本机").Label("文件主机：" + name + " · 本机").FillWidth().Justify(ui.Start).Disabled(d.busy || draftBlocked || d.fileLimitReached()).Clicked() {
 						if !d.prepareConnectionNavigation() {
 							d.fileStatus = d.status
 							return
@@ -96,7 +96,7 @@ func (d *desktop) fileSessionPicker(c *ui.Context) {
 							continue
 						}
 						shown++
-						if ui.Button(c.Key("file-picker-cloud-"+a.ID), name+" · 云端").Label("文件主机：" + name + " · 云端").FillWidth().Justify(ui.Start).Disabled(d.busy || draftBlocked || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+						if ui.Button(c.Key("file-picker-cloud-"+a.ID), name+" · 云端").Label("文件主机：" + name + " · 云端").FillWidth().Justify(ui.Start).Disabled(d.busy || draftBlocked || d.fileLimitReached()).Clicked() {
 							if !d.prepareConnectionNavigation() {
 								d.fileStatus = d.status
 								return

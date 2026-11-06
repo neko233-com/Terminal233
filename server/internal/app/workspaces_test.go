@@ -125,3 +125,23 @@ func TestCloudWorkspacesHTTPRejectsSecretsAndInvalidData(t *testing.T) {
 		t.Fatal("capability missing")
 	}
 }
+
+func TestCloudWorkspaceCapacity(t *testing.T) {
+	w := cloudWorkspace{ID: "0123456789abcdef0123456789abcdef", Name: "sixteen", SplitFirst: -1, SplitSecond: -1, ViewMode: "grid", Entries: make([]cloudWorkspaceEntry, 16), RowPerc: make([]float32, 16), ColumnPerc: make([]float32, 16)}
+	for i := range w.Entries {
+		w.Entries[i].Kind = "local"
+	}
+	w.ColumnPerc[14] = 42
+	if err := validateCloudWorkspaces([]cloudWorkspace{w}); err != nil {
+		t.Fatal("16-terminal workspace rejected", err)
+	}
+	w.Entries = append(w.Entries, cloudWorkspaceEntry{Kind: "local"})
+	if validateCloudWorkspaces([]cloudWorkspace{w}) == nil {
+		t.Fatal("accepted more than 16 terminals")
+	}
+	w.Entries = w.Entries[:16]
+	w.ColumnPerc = make([]float32, 15)
+	if validateCloudWorkspaces([]cloudWorkspace{w}) == nil {
+		t.Fatal("accepted malformed split layout")
+	}
+}

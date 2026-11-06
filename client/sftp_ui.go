@@ -587,7 +587,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			if !s.fileAvailable() && ui.Button(c.Key("file-reconnect"), "重新连接").Disabled(d.busy).Clicked() {
 				d.reconnectSFTP(s)
 			}
-			if terminalActionButton(c, "file-open-terminal", "打开此主机的终端", terminalIcon, false, d.busy || !s.fileAvailable() || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+			if terminalActionButton(c, "file-open-terminal", "打开此主机的终端", terminalIcon, false, d.busy || !s.fileAvailable() || d.terminalLimitReached()).Clicked() {
 				d.openTerminalFromSFTP(s)
 			}
 		}
@@ -623,7 +623,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			ui.Text(c, "选择主机").FontSize(17).Bold()
 			ui.Text(c, "连接后浏览和传输文件。").FontSize(13).TextColor(c.Theme().TextMuted).Wrap()
 			ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-				if ui.Button(c.Key("files-open-local"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+				if ui.Button(c.Key("files-open-local"), "打开本机终端").Disabled(d.busy || d.terminalLimitReached()).Clicked() {
 					d.openLocalTerminal()
 				}
 				if ui.PrimaryButton(c.Key("files-open-connections"), "选择 SSH 连接").Clicked() {

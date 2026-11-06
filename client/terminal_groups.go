@@ -20,8 +20,8 @@ type terminalGroup struct {
 	showAdd                   bool
 	renameOpen                bool
 	renameDraft, renameStatus string
-	rowPerc                   [12]float32
-	columnPerc                [12]float32
+	rowPerc                   [maxWorkspaceSessions]float32
+	columnPerc                [maxWorkspaceSessions]float32
 	savedLocal                *savedWorkspace
 	savedCloud                *cloudWorkspace
 	savedCloudURL, savedUser  string
@@ -285,7 +285,7 @@ func (d *desktop) groupAddButton(c *ui.Context, group *terminalGroup) {
 	ui.PopoverBase(c, button, &group.showAdd, func(panel ui.Element) {
 		panel.AttachTo(button, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() {
 			ui.Column(c).Width(270).Padding(8).Gap(4).Background(c.Theme().SurfaceHover).Radius(8).Children(func() {
-				if ui.Button(c.Key(fmt.Sprintf("group-add-local-%d", group.id)), "新建本机终端").FillWidth().Justify(ui.Start).Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+				if ui.Button(c.Key(fmt.Sprintf("group-add-local-%d", group.id)), "新建本机终端").FillWidth().Justify(ui.Start).Disabled(d.busy || d.terminalLimitReached()).Clicked() {
 					before := d.nextSession
 					d.openLocalTerminal()
 					if d.nextSession != before {
