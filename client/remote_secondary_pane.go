@@ -121,7 +121,8 @@ func (d *desktop) secondaryFilePicker(c *ui.Context) {
 			label = s.label
 		}
 	}
-	button := ui.Button(c.Key("secondary-picker"), label+" ▾").Label("选择左侧文件主机").Tooltip("选择左侧文件主机").Disabled(d.busy)
+	button := ui.Button(c.Key("secondary-picker"), "").Label("选择左侧文件主机").Tooltip(label + " · 选择左侧文件主机").Gap(6).Disabled(d.busy)
+	button.Children(func() { ui.Text(c, label).MaxWidth(d.filePickerLabelWidth(c, true)).SingleLine(); ui.Text(c, "▾") })
 	if button.Clicked() {
 		d.showSecondaryFilePicker = !d.showSecondaryFilePicker
 		if d.showSecondaryFilePicker {
@@ -286,16 +287,13 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 			p.paneSelection = paneSelection{}
 		})
 	}
-	d.leftPaneActionView(c)
 	if p.status != "" {
 		ui.Text(c, p.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
-	ui.Row(c).FillWidth().Padding(6, 8).Children(func() {
-		ui.Text(c, "名称").Grow(1).FontSize(12).TextColor(c.Theme().TextMuted)
-		ui.Text(c, "大小").Width(70).FontSize(12).TextColor(c.Theme().TextMuted)
-	})
+	d.fileColumnHeader(c, true)
+
 	visible := displayedFiles(p.files, p.filter, p.sortOrder, p.sortDescending, p.hideDotfiles)
-	ui.Scroll(c.Key("secondary-list")).Label("左侧远程文件列表").Height(listHeight).FillWidth().Children(func() {
+	fileListRegion(c, "secondary-list", "左侧远程文件列表", listHeight).Children(func() {
 		for _, entry := range visible {
 			f := entry
 			label := f.Name
@@ -303,7 +301,7 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 				label = "📁 " + label
 			}
 			ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-				row := ui.Button(c.Key("secondary-file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Disabled(d.busy || p.loading || p.input != p.directory)
+				row := ui.Button(c.Key("secondary-file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Background(ui.Transparent).Disabled(d.busy || p.loading || p.input != p.directory)
 				if p.selected == f.Name || p.paneSelection.names[f.Name] {
 					row = row.Selected(true).Background(c.Theme().SurfacePressed)
 				}
@@ -313,7 +311,8 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 						icon, color = fileIcon, c.Theme().AccentHover
 					}
 					ui.Icon(c, icon).Width(16).Height(16).Shrink(0).TextColor(color)
-					ui.Text(c, f.Name)
+					ui.Text(c, f.Name).Grow(1).SingleLine().Tooltip(f.Name)
+					d.fileMetadata(c, f, true)
 				})
 				item := d.leftPaneDragForFile(f)
 				if eligiblePaneItem(f) {
@@ -345,7 +344,7 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 						p.selected = selected
 					}
 				}
-				ui.Text(c, fileSizeLabel(f)).Width(70).FontSize(12).TextColor(c.Theme().TextMuted)
+
 			})
 		}
 	})

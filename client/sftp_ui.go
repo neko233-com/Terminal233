@@ -559,9 +559,12 @@ func (d *desktop) openSessionDirectory(f remoteFile, local bool) {
 	d.refreshFiles()
 }
 
-func (d *desktop) fileView(c *ui.Context, compact bool) {
+func (d *desktop) fileView(c *ui.Context, compact bool) { d.filePaneView(c, compact, false) }
+
+func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 	d.syncCheckedDirectory()
 	local := d.term != nil && d.shell == nil
+	var optionsButton ui.Element
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
 		sessionLabel := "选择主机"
 		for _, session := range d.sessions {
@@ -575,7 +578,10 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			tip += " · 本机文件"
 		}
 		picker := ui.Button(c.Key("file-session-picker-toggle"), "").Label("选择文件会话").Tooltip(tip).Gap(6).Disabled(!d.canSwitchSession())
-		picker.Children(func() { ui.Text(c, sessionLabel).SingleLine(); ui.Text(c, "▾") })
+		picker.Children(func() {
+			ui.Text(c, sessionLabel).SingleLine().MaxWidth(d.filePickerLabelWidth(c, false))
+			ui.Text(c, "▾")
+		})
 		if picker.Clicked() {
 			d.showFileSessionPicker = !d.showFileSessionPicker
 		}
@@ -614,12 +620,19 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		if d.showFileOptions {
 			optionsLabel = "收起排序与显示"
 		}
-		if terminalActionButton(c, "file-options-toggle", optionsLabel, moreIcon, d.showFileOptions, false).Clicked() {
+		optionsButton = terminalActionButton(c, "file-options-toggle", optionsLabel, moreIcon, d.showFileOptions, false)
+		if optionsButton.Clicked() {
 			d.showFileOptions = !d.showFileOptions
 		}
 	})
 	if d.fileSessionUnavailable() && d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0 {
-		ui.Column(c).FillWidth().Padding(24).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
+		empty := ui.Column(c).FillWidth().Padding(24).Gap(10)
+		if fill {
+			empty = empty.Grow(1).Justify(ui.Center).AlignItems(ui.Center)
+		} else {
+			empty = empty.Background(c.Theme().Surface).Radius(8)
+		}
+		empty.Children(func() {
 			ui.Text(c, "选择主机").FontSize(17).Bold()
 			ui.Text(c, "连接后浏览和传输文件。").FontSize(13).TextColor(c.Theme().TextMuted).Wrap()
 			ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
@@ -678,31 +691,51 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		ui.Text(c, "当前会话已结束，文件操作不可用；请重新连接或打开终端。").TextColor(c.Theme().TextMuted).Wrap()
 	}
 	if d.fileStatus != "" {
-		ui.Text(c, d.fileStatus).FontSize(12).Wrap()
+		status := ui.Text(c, d.fileStatus).FontSize(12).Tooltip(d.fileStatus)
+		if fill {
+			status.SingleLine()
+		} else {
+			status.Wrap()
+		}
 	}
 	if len(d.fileBatchErrors) > 0 {
 		label := fmt.Sprintf("查看最近批量传输失败详情（%d）", len(d.fileBatchErrors))
 		if d.fileBatchDetails {
 			label = "收起批量传输失败详情"
 		}
-		if ui.Button(c.Key("batch-failures-toggle"), label).Clicked() {
+		display := label
+		if fill {
+			display = fmt.Sprintf("传输失败 %d", len(d.fileBatchErrors))
+		}
+		button := ui.Button(c.Key("batch-failures-toggle"), display).Label(label)
+		if button.Clicked() {
 			d.fileBatchDetails = !d.fileBatchDetails
 		}
-		if d.fileBatchDetails {
+		details := func() {
 			ui.Scroll(c.Key("batch-failures-list")).Height(120).FillWidth().Children(func() {
 				for _, failure := range d.fileBatchErrors {
 					ui.Text(c, failure).FontSize(12).Wrap()
 				}
 			})
 		}
+		if fill {
+			ui.PopoverBase(c, button, &d.fileBatchDetails, func(panel ui.Element) {
+				panel.AttachTo(button, ui.AnchorBottomStart, ui.AnchorTopStart).Margin(4, 0, 0, 0).Children(func() {
+					ui.Column(c).Width(min(float32(400), d.filePaneWidth(c, false))).Padding(10).Background(c.Theme().Surface).Radius(8).Children(details)
+				})
+			})
+		} else if d.fileBatchDetails {
+			details()
+		}
 	}
+
 	if d.showFileFilter {
 		ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录").OnChange(func() {
 			d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""
 			d.filePaneSelection = paneSelection{}
 		})
 	}
-	if d.showFileOptions {
+	options := func() {
 		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 			for _, column := range []struct{ key, label string }{{"name", "按名称"}, {"size", "按大小"}, {"time", "按修改时间"}} {
 				label := column.label
@@ -737,7 +770,19 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			}
 		})
 	}
-	if len(d.files) > 0 {
+	if fill {
+		ui.PopoverBase(c, optionsButton, &d.showFileOptions, func(panel ui.Element) {
+			panel.AttachTo(optionsButton, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() {
+				ui.Column(c).Width(240).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(8).Children(options)
+			})
+		})
+	} else if d.showFileOptions {
+		options()
+	}
+
+	if fill {
+		d.fileColumnHeader(c, false)
+	} else if len(d.files) > 0 {
 		ui.Row(c).FillWidth().Gap(12).Padding(8, 12).Background(c.Theme().Surface).Children(func() {
 			ui.Text(c, "名称").Grow(1).TextColor(c.Theme().TextMuted)
 			if !compact {
@@ -750,7 +795,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		})
 	}
 	visible := displayedFiles(d.files, d.fileFilter, d.fileSort, d.fileSortDescending, d.fileHideDotfiles)
-	if len(visible) > 0 {
+	if fill || len(visible) > 0 {
 		height := float32(len(visible) * 44)
 		maxHeight := float32(320)
 		if d.workspace == "files" {
@@ -769,14 +814,24 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		if height > maxHeight {
 			height = maxHeight
 		}
-		ui.Scroll(c.Key("file-list")).Label("会话文件列表").Height(height).FillWidth().Children(func() {
+		if fill {
+			height = -1
+		}
+		fileListRegion(c, "file-list", "会话文件列表", height).Children(func() {
+			if fill && len(visible) == 0 {
+				message := "此目录为空"
+				if len(d.files) > 0 {
+					message = "没有匹配的文件"
+				}
+				ui.Text(c, message).FontSize(12).TextColor(c.Theme().TextMuted).Padding(16, 8)
+			}
 			for _, entry := range visible {
 				f := entry
 				label := f.Name
 				if f.IsDir {
 					label = "📁 " + label
 				}
-				ui.Row(c).FillWidth().Padding(3, 8).Gap(12).AlignItems(ui.Center).Background(c.Theme().Surface).Radius(6).Children(func() {
+				ui.Row(c).FillWidth().Gap(0).AlignItems(ui.Center).Children(func() {
 					checked := d.fileChecked[f.Name]
 					if (d.showFileTools || len(d.fileChecked) > 0) && ui.Checkbox(c.Key("file-check-"+f.Name), &checked, "").Label("多选文件："+f.Name).Disabled(d.busy || d.fileSessionUnavailable() || !eligibleBatchFile(f)).Changed() {
 						d.showFileTools = true
@@ -791,20 +846,37 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							delete(d.fileChecked, f.Name)
 						}
 					}
-					row := ui.Button(c.Key("file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Disabled(d.busy || d.fileSessionUnavailable())
+					row := ui.Button(c.Key("file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Background(ui.Transparent).Disabled(d.busy || d.fileSessionUnavailable())
 					row.Children(func() {
 						icon, color := documentIcon, c.Theme().TextMuted
 						if f.IsDir {
 							icon, color = fileIcon, c.Theme().AccentHover
 						}
 						ui.Icon(c, icon).Width(16).Height(16).Shrink(0).TextColor(color)
-						ui.Text(c, f.Name)
+						ui.Text(c, f.Name).Grow(1).SingleLine().Tooltip(f.Name)
+						if fill {
+							d.fileMetadata(c, f, false)
+						} else {
+							if !compact {
+								kind := "文件"
+								if f.IsDir {
+									kind = "目录"
+								} else if f.IsLink {
+									kind = "链接"
+								}
+								ui.Text(c, kind).Width(60).TextColor(c.Theme().TextMuted)
+							}
+							ui.Text(c, fileSizeLabel(f)).Width(90).TextColor(c.Theme().TextMuted)
+							if !compact {
+								ui.Text(c, fileModifiedLabel(f)).Width(150).TextColor(c.Theme().TextMuted)
+							}
+						}
 					})
 					if d.workspace == "files" && eligiblePaneItem(f) {
 						row = row.Drag(d.rightPaneDragForFile(f))
 					}
 					if d.selectedFile == f.Name || d.filePaneSelection.names[f.Name] {
-						row = row.Selected(true).Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
+						row = row.Selected(true).Background(c.Theme().SurfacePressed)
 					}
 					row.ContextMenu(func(menu *ui.Menu) {
 						if f.IsDir && menu.Item("打开目录").Chosen() {
@@ -876,23 +948,19 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							d.selectedFile, d.fileRename = selected, selected
 						}
 					}
-					kind := "文件"
-					if f.IsDir {
-						kind = "目录"
-					} else if f.IsLink {
-						kind = "链接"
-					}
-					if !compact {
-						ui.Text(c, kind).Width(60).TextColor(c.Theme().TextMuted)
-					}
-					ui.Text(c, fileSizeLabel(f)).Width(90).TextColor(c.Theme().TextMuted)
-					if !compact {
-						ui.Text(c, fileModifiedLabel(f)).Width(150).TextColor(c.Theme().TextMuted)
-					}
+
 				})
 			}
 		})
 	}
+	if fill {
+		ui.Column(c.Key("file-pane-footer")).FillWidth().Gap(6).Shrink(0).Children(func() { d.filePaneFooter(c, local, compact, visible, true) })
+	} else {
+		d.filePaneFooter(c, local, compact, visible, false)
+	}
+}
+
+func (d *desktop) filePaneFooter(c *ui.Context, local, compact bool, visible []remoteFile, fill bool) {
 	if len(d.filePaneSelection.names) > 1 && d.workspace == "files" {
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, fmt.Sprintf("已选择 %d 项", len(d.filePaneSelection.names))).FontSize(12).TextColor(c.Theme().TextMuted)
@@ -903,7 +971,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 		})
 	}
 
-	if len(d.files) > 0 && len(visible) == 0 {
+	if !fill && len(d.files) > 0 && len(visible) == 0 {
 		ui.Text(c, "没有匹配的文件").TextColor(c.Theme().TextMuted)
 	}
 	if d.workspace != "files" || !compact {
@@ -930,33 +998,42 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if !toolsOpen {
 		return
 	}
-	ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, fmt.Sprintf("多选 %d/%d", len(d.fileChecked), maxBatchFiles)).FontSize(12)
-		if ui.Button(c.Key("file-select-visible"), "选择可见文件").Disabled(d.busy || d.fileSessionUnavailable() || len(visible) == 0).Clicked() {
-			d.selectVisibleBatchFiles(visible)
+	controls := func() {
+		ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, fmt.Sprintf("多选 %d/%d", len(d.fileChecked), maxBatchFiles)).FontSize(12)
+			if ui.Button(c.Key("file-select-visible"), "选择可见文件").Disabled(d.busy || d.fileSessionUnavailable() || len(visible) == 0).Clicked() {
+				d.selectVisibleBatchFiles(visible)
+			}
+			if ui.Button(c.Key("file-clear-checked"), "清除多选").Disabled(d.busy || len(d.fileChecked) == 0).Clicked() {
+				d.fileChecked = nil
+			}
+		})
+		if len(d.fileChecked) > 0 {
+			ui.Text(c, "多选仅用于批量下载或复制普通文件；删除和重命名只作用于单击选中的文件。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 		}
-		if ui.Button(c.Key("file-clear-checked"), "清除多选").Disabled(d.busy || len(d.fileChecked) == 0).Clicked() {
-			d.fileChecked = nil
+		d.fileActionsView(c, local, compact)
+		ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
+			ui.TextInput(c.Key("new-directory-name"), &d.fileNewDirectory).Label("新目录名称").Placeholder("输入目录名称").Grow(1)
+			if ui.Button(c.Key("new-directory-create"), "创建目录").Disabled(d.busy || d.fileSessionUnavailable() || d.fileNewDirectory == "").Clicked() {
+				d.createDirectory()
+			}
+		})
+		ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
+			ui.TextInput(c.Key("rename-name"), &d.fileRename).Label("新名称").Placeholder("输入选中文件的新名称").Grow(1)
+			if ui.Button(c.Key("rename-selected"), "重命名").Disabled(d.busy || d.fileSessionUnavailable() || d.selectedFile == "" || d.fileRename == "").Clicked() {
+				d.renameSelected()
+			}
+		})
+		if d.shell != nil {
+			ui.Text(c, "远程重命名前会检查目标；并发写入时能否防覆盖取决于服务器。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 		}
-	})
-	if len(d.fileChecked) > 0 {
-		ui.Text(c, "多选仅用于批量下载或复制普通文件；删除和重命名只作用于单击选中的文件。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 	}
-	d.fileActionsView(c, local, compact)
-	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
-		ui.TextInput(c.Key("new-directory-name"), &d.fileNewDirectory).Label("新目录名称").Placeholder("输入目录名称").Grow(1)
-		if ui.Button(c.Key("new-directory-create"), "创建目录").Disabled(d.busy || d.fileSessionUnavailable() || d.fileNewDirectory == "").Clicked() {
-			d.createDirectory()
-		}
-	})
-	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
-		ui.TextInput(c.Key("rename-name"), &d.fileRename).Label("新名称").Placeholder("输入选中文件的新名称").Grow(1)
-		if ui.Button(c.Key("rename-selected"), "重命名").Disabled(d.busy || d.fileSessionUnavailable() || d.selectedFile == "" || d.fileRename == "").Clicked() {
-			d.renameSelected()
-		}
-	})
-	if d.shell != nil {
-		ui.Text(c, "远程重命名前会检查目标；并发写入时能否防覆盖取决于服务器。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+	if fill {
+		ui.Scroll(c.Key("file-tools-scroll")).Label("会话文件操作面板").FillWidth().Height(d.fileToolsHeight(c)).Shrink(0).Children(func() {
+			ui.Column(c).FillWidth().Gap(8).Children(controls)
+		})
+	} else {
+		controls()
 	}
 }
 

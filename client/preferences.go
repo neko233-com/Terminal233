@@ -24,6 +24,7 @@ type workspacePreferences struct {
 	ExternalEditor         string  `json:"external_editor,omitempty"`
 	SplitLayout            string  `json:"split_layout,omitempty"`
 	TerminalFilePercent    float32 `json:"terminal_file_percent,omitempty"`
+	FileWorkspacePercent   float32 `json:"file_workspace_percent,omitempty"`
 	SplitHorizontalPercent float32 `json:"split_horizontal_percent,omitempty"`
 	SplitVerticalPercent   float32 `json:"split_vertical_percent,omitempty"`
 }
@@ -59,7 +60,7 @@ func readPreferences(path string) (workspacePreferences, error) {
 	if p.SplitLayout != "" && p.SplitLayout != "side" && p.SplitLayout != "stacked" {
 		return p, errors.New("分屏布局无效")
 	}
-	for _, value := range []float32{p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent} {
+	for _, value := range []float32{p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent, p.FileWorkspacePercent} {
 		if value < 0 || value > 100 {
 			return p, errors.New("面板尺寸无效")
 		}
@@ -81,6 +82,7 @@ func (d *desktop) loadPreferences(path string) error {
 	d.autocompleteDisabled = p.AutocompleteDisabled
 	d.splitLayout = p.SplitLayout
 	d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent
+	d.fileWorkspacePercent = p.FileWorkspacePercent
 	light, dark, err := terminalThemePair(p.TerminalTheme)
 	if err != nil {
 		return err
@@ -97,12 +99,13 @@ func (d *desktop) savePanelSizes() {
 		return
 	}
 	err := updatePreferences(d.preferencesPath, func(p *workspacePreferences) error {
-		for _, value := range []float32{d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent} {
+		for _, value := range []float32{d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent, d.fileWorkspacePercent} {
 			if value < 0 || value > 100 {
 				return errors.New("面板尺寸无效")
 			}
 		}
 		p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent = d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent
+		p.FileWorkspacePercent = d.fileWorkspacePercent
 		return nil
 	})
 	if err != nil {

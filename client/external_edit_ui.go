@@ -326,12 +326,19 @@ func (d *desktop) externalEditJobsView(c *ui.Context) {
 	if len(d.externalEdits) == 0 {
 		return
 	}
-	if ui.Button(c.Key("external-edits-toggle"), fmt.Sprintf("编辑任务 %d", len(d.externalEdits))).Clicked() {
+	button := ui.Button(c.Key("external-edits-toggle"), fmt.Sprintf("编辑任务 %d", len(d.externalEdits)))
+	if button.Clicked() {
 		d.showExternalEdits = !d.showExternalEdits
 	}
-	if !d.showExternalEdits {
-		return
-	}
+	ui.PopoverBase(c, button, &d.showExternalEdits, func(panel ui.Element) {
+		panel.AttachTo(button, ui.AnchorBottomStart, ui.AnchorTopStart).Margin(4, 0, 0, 0).Children(func() {
+			width, _ := c.Size()
+			ui.Column(c).Width(min(float32(440), width-40)).Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() { d.externalEditJobsContent(c) })
+		})
+	})
+}
+
+func (d *desktop) externalEditJobsContent(c *ui.Context) {
 	ui.Text(c, "自动替换可能改变 ACL 或扩展属性；并发修改仍可能发生。 ").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 	ui.Scroll(c.Key("external-edits-list")).Label("外部编辑任务").Height(155).FillWidth().Children(func() {
 		ui.Column(c).FillWidth().Gap(8).Children(func() {

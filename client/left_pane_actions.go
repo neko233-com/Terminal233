@@ -89,14 +89,32 @@ func (d *desktop) leftPaneToolbar(c *ui.Context) {
 		}
 	}
 	d.leftPaneOptions(c)
-	if terminalActionButton(c, "left-pane-mkdir", "在左侧新建目录", plusIcon, false, d.busy || !ready).Clicked() {
+	mkdir := terminalActionButton(c, "left-pane-mkdir", "在左侧新建目录", plusIcon, false, d.busy || !ready)
+	if mkdir.Clicked() {
 		d.beginLeftAction("mkdir", "")
 	}
-	if terminalActionButton(c, "left-pane-rename", "重命名左侧所选项", editIcon, false, d.busy || !ready || selected == "" || count > 1).Clicked() {
+	rename := terminalActionButton(c, "left-pane-rename", "重命名左侧所选项", editIcon, false, d.busy || !ready || selected == "" || count > 1)
+	if rename.Clicked() {
 		d.beginLeftAction("rename", selected)
 	}
-	if terminalActionButton(c, "left-pane-delete", "删除左侧所选项", trashIcon, false, d.busy || !ready || selected == "" || count > 1).Clicked() {
+	remove := terminalActionButton(c, "left-pane-delete", "删除左侧所选项", trashIcon, false, d.busy || !ready || selected == "" || count > 1)
+	if remove.Clicked() {
 		d.beginLeftAction("delete", selected)
+	}
+	anchor := mkdir
+	if d.leftPaneAction.kind == "rename" {
+		anchor = rename
+	} else if d.leftPaneAction.kind == "delete" {
+		anchor = remove
+	}
+	open := d.leftPaneAction.kind != ""
+	ui.PopoverBase(c, anchor, &open, func(panel ui.Element) {
+		panel.AttachTo(anchor, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() {
+			ui.Column(c).Width(270).Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() { d.leftPaneActionView(c) })
+		})
+	})
+	if !open {
+		d.leftPaneAction = leftPaneAction{}
 	}
 }
 

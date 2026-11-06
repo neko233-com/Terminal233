@@ -36,6 +36,7 @@ type desktop struct {
 	splitLayout                                                                             string
 	splitHorizontalPercent, splitVerticalPercent                                            float32
 	terminalFilePercent                                                                     float32
+	fileWorkspacePercent                                                                    float32
 	monitorCancel                                                                           context.CancelFunc
 	monitorGeneration, monitorSession                                                       int
 	monitorStatus                                                                           string
@@ -996,12 +997,13 @@ func (d *desktop) view(c *ui.Context) {
 					})
 					return
 				}
+				if d.workspace == "files" {
+					ui.Column(c.Key("file-workspace")).Label("SFTP 工作区").Grow(1).FillWidth().Children(func() { d.fileWorkspace(c, workspaceWidth) })
+					return
+				}
 				ui.Scroll(c).Grow(1).FillWidth().Children(func() {
 					ui.Column(c).Padding(24).Gap(10).Children(func() {
 						switch d.workspace {
-						case "files":
-							ui.Text(c, "SFTP").FontSize(16).Bold()
-							d.fileWorkspace(c, width, height)
 						case "forward":
 							d.forwardView(c)
 						case "snippets":

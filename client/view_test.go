@@ -858,8 +858,8 @@ func TestFileListPrecedesControlsAndRemainsBounded(t *testing.T) {
 	if !ok || !hasControls || first.Y >= controls.Y {
 		t.Fatal("file list must precede transfer controls")
 	}
-	if controls.Y-first.Y > 700 {
-		t.Fatalf("large directory pushed controls too far away: %v", controls.Y-first.Y)
+	if controls.Y+controls.H > 1500 {
+		t.Fatalf("large directory pushed controls out of the window: %v", controls.Y+controls.H)
 	}
 }
 

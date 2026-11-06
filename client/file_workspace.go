@@ -58,70 +58,22 @@ func sameLocalDirectory(a, b string) bool {
 	return a == b
 }
 
-func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
-	d.externalEditJobsView(c)
-	if !d.sidebarCollapsed {
-		width -= d.sidebarWidth(width)
+func (d *desktop) fileWorkspace(c *ui.Context, width float32) {
+	if len(d.externalEdits) > 0 {
+		ui.Column(c).FillWidth().Padding(6, 12).Shrink(0).Children(func() { d.externalEditJobsView(c) })
 	}
-	if width < 860 {
-		if d.narrowFilePane == "" {
-			if d.fileSessionUnavailable() && len(d.files) == 0 {
-				d.narrowFilePane = "local"
-			} else {
-				d.narrowFilePane = "session"
-			}
-		}
-		ui.Row(c).FillWidth().Gap(8).Children(func() {
-			leftLabel := "本机文件"
-			if d.secondaryPane.sessionID != 0 {
-				leftLabel = "左侧文件"
-			}
-			if workspaceButton(c, "narrow-file-local", leftLabel, d.narrowFilePane == "local").Clicked() {
-				d.narrowFilePane = "local"
-			}
-			if workspaceButton(c, "narrow-file-session", "会话文件", d.narrowFilePane == "session").Clicked() {
-				d.narrowFilePane = "session"
-			}
-		})
-		if d.narrowFilePane == "local" {
-			listHeight := height - 280
-			if listHeight < 160 {
-				listHeight = 160
-			}
-			if listHeight > 520 {
-				listHeight = 520
-			}
-			ui.Column(c).FillWidth().Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
-				if d.secondaryPane.sessionID == 0 {
-					d.localFilePaneView(c, listHeight)
-				} else {
-					d.secondaryFilePaneView(c, listHeight)
-				}
-			})
-		} else {
-			d.fileView(c, false)
-		}
-		return
-	}
-	paneWidth := (width - 48 - 12) / 2
-	listHeight := height - 400
-	if listHeight < 180 {
-		listHeight = 180
-	}
-	if listHeight > 520 {
-		listHeight = 520
-	}
-	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Start).Children(func() {
-		leftLabel := "本机文件面板"
+
+	left := func() {
+		label := "本机文件面板"
 		if d.secondaryPane.sessionID != 0 {
-			leftLabel = "第二会话文件面板"
+			label = "第二会话文件面板"
 		}
-		local := ui.Column(c.Key("local-file-pane")).Label(leftLabel).Width(paneWidth).MinHeight(listHeight + 210).Shrink(0).Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8)
+		local := ui.Column(c.Key("local-file-pane")).Label(label).Fill().Padding(10, 12).Gap(4)
 		local.Children(func() {
 			if d.secondaryPane.sessionID == 0 {
-				d.localFilePaneView(c, listHeight)
+				d.localFilePaneView(c, -1)
 			} else {
-				d.secondaryFilePaneView(c, listHeight)
+				d.secondaryFilePaneView(c, -1)
 			}
 		})
 		if item, ok := ui.Drop[remotePaneDrag](local); ok {
@@ -137,8 +89,10 @@ func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
 				d.copyRightToSecondary(item)
 			}
 		}
-		remote := ui.Column(c.Key("session-file-pane")).Label("会话文件面板").Width(paneWidth).MinHeight(listHeight + 210).Shrink(0).Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8)
-		remote.Children(func() { d.fileView(c, true) })
+	}
+	right := func() {
+		remote := ui.Column(c.Key("session-file-pane")).Label("会话文件面板").Fill().Padding(10, 12).Gap(4)
+		remote.Children(func() { d.filePaneView(c, true, true) })
 		if files := remote.DroppedFiles(); len(files) > 0 {
 			d.handleFileDrop(files)
 		}
@@ -153,7 +107,42 @@ func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
 				d.copySecondaryToRight(item)
 			}
 		}
-	})
+	}
+	if width < 860 {
+		if d.narrowFilePane == "" {
+			if d.fileSessionUnavailable() && len(d.files) == 0 {
+				d.narrowFilePane = "local"
+			} else {
+				d.narrowFilePane = "session"
+			}
+		}
+		ui.Row(c.Key("file-pane-navigation")).FillWidth().Height(44).Shrink(0).Padding(6, 12).Gap(8).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Children(func() {
+			leftLabel := "本机文件"
+			if d.secondaryPane.sessionID != 0 {
+				leftLabel = "左侧文件"
+			}
+			if workspaceButton(c, "narrow-file-local", leftLabel, d.narrowFilePane == "local").Clicked() {
+				d.narrowFilePane = "local"
+			}
+			if workspaceButton(c, "narrow-file-session", "会话文件", d.narrowFilePane == "session").Clicked() {
+				d.narrowFilePane = "session"
+			}
+		})
+		ui.Column(c).Grow(1).FillWidth().Children(func() {
+			if d.narrowFilePane == "local" {
+				left()
+			} else {
+				right()
+			}
+		})
+		return
+	}
+	d.clampFileWorkspaceSplit(width)
+	split := ui.SplitPercent(c.Key("file-workspace-split"), &d.fileWorkspacePercent, left, right).Grow(1).FillWidth()
+	if split.Changed() {
+		d.clampFileWorkspaceSplit(width)
+		c.Invalidate()
+	}
 }
 
 func (d *desktop) initializeLocalPane() {
@@ -257,16 +246,13 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 			d.localPane.paneSelection = paneSelection{}
 		})
 	}
-	d.leftPaneActionView(c)
 	if d.localPane.status != "" {
 		ui.Text(c, d.localPane.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
-	ui.Row(c).FillWidth().Padding(6, 8).Children(func() {
-		ui.Text(c, "名称").Grow(1).FontSize(12).TextColor(c.Theme().TextMuted)
-		ui.Text(c, "大小").Width(70).FontSize(12).TextColor(c.Theme().TextMuted)
-	})
+	d.fileColumnHeader(c, true)
+
 	visible := displayedFiles(d.localPane.files, d.localPane.filter, d.localPane.sortOrder, d.localPane.sortDescending, d.localPane.hideDotfiles)
-	ui.Scroll(c.Key("local-pane-list")).Label("本机文件列表").Height(listHeight).FillWidth().Children(func() {
+	fileListRegion(c, "local-pane-list", "本机文件列表", listHeight).Children(func() {
 		for _, entry := range visible {
 			f := entry
 			label := f.Name
@@ -274,7 +260,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 				label = "📁 " + label
 			}
 			ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-				row := ui.Button(c.Key("local-pane-file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8)
+				row := ui.Button(c.Key("local-pane-file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Background(ui.Transparent)
 				if d.localPane.selected == f.Name || d.localPane.paneSelection.names[f.Name] {
 					row = row.Selected(true).Background(c.Theme().SurfacePressed)
 				}
@@ -284,7 +270,8 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 						icon, color = fileIcon, c.Theme().AccentHover
 					}
 					ui.Icon(c, icon).Width(16).Height(16).Shrink(0).TextColor(color)
-					ui.Text(c, f.Name)
+					ui.Text(c, f.Name).Grow(1).SingleLine().Tooltip(f.Name)
+					d.fileMetadata(c, f, true)
 				})
 				item := d.localPaneDragForFile(f)
 				if eligiblePaneItem(f) {
@@ -322,7 +309,6 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 						d.localPane.selected = selected
 					}
 				}
-				ui.Text(c, fileSizeLabel(f)).Width(70).FontSize(12).TextColor(c.Theme().TextMuted)
 			})
 		}
 	})
