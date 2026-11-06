@@ -56,6 +56,7 @@ func (d *desktop) beginNewHost() bool {
 		return false
 	}
 	d.settings = connectionSettings{Port: "22"}
+	d.connectionJumpID, d.showConnectionJumpPicker = 0, false
 	d.profileIdentityID = ""
 	d.profileTagsCaretPending, d.profileGroupCaretPending = false, false
 	d.profileSecretError = false

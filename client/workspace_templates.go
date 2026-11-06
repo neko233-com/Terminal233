@@ -304,6 +304,9 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 		if s.term == nil || terminalEnded(s.term) {
 			return savedWorkspace{}, fmt.Errorf("会话 %s 已结束，请先重新连接", s.label)
 		}
+		if s.jumpParent != nil {
+			return savedWorkspace{}, fmt.Errorf("会话 %s 使用临时跳板，暂不能保存为工作区模板", s.label)
+		}
 		e := workspaceTemplateEntry{FileDir: s.fileDir}
 		if group != nil {
 			e.TabName = group.tabNames[s.id]

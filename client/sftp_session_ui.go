@@ -52,11 +52,16 @@ func (d *desktop) reconnectSFTP(s *workspaceSession) {
 		return
 	}
 	settings, old := s.active, s.shell
+	via, err := d.sessionJumpClient(s)
+	if err != nil {
+		d.setSFTPStatus(s, err.Error())
+		return
+	}
 	d.busy = true
 	d.setSFTPStatus(s, "正在重新连接 SFTP…")
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-		shell, err := openSFTPTransport(ctx, settings)
+		shell, err := openSFTPTransportThrough(ctx, settings, via)
 		cancel()
 		d.win.Update(func() {
 			d.busy = false
@@ -108,11 +113,16 @@ func (d *desktop) openTerminalFromSFTP(s *workspaceSession) {
 		return
 	}
 	settings, originalShell, originalSession := s.active, s.shell, d.currentSession
+	via, err := d.sessionJumpClient(s)
+	if err != nil {
+		d.setSFTPStatus(s, err.Error())
+		return
+	}
 	options := d.terminalOptions()
 	d.busy = true
 	d.setSFTPStatus(s, "正在打开终端…")
 	go func() {
-		shell, term, err := openSSHSession(settings, options)
+		shell, term, err := openSSHSessionAtThrough(settings, options, "", via)
 		d.win.Update(func() {
 			d.busy = false
 			if err != nil {
@@ -137,6 +147,7 @@ func (d *desktop) openTerminalFromSFTP(s *workspaceSession) {
 			d.addSession(term, shell, settings, s.label)
 			for _, current := range d.sessions {
 				if current.id == d.currentSession {
+					current.jumpParent, current.jumpFingerprint = s.jumpParent, s.jumpFingerprint
 					current.sourceProfileID = s.sourceProfileID
 					current.cloudOriginURL, current.cloudOriginUser, current.cloudOriginTeam, current.cloudOriginID = s.cloudOriginURL, s.cloudOriginUser, s.cloudOriginTeam, s.cloudOriginID
 					current.cloudSources, current.cloudVersions = cloneCloudSources(s.cloudSources), cloneCloudSources(s.cloudVersions)

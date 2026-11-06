@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
+	"golang.org/x/crypto/ssh"
 )
 
 type desktop struct {
@@ -49,6 +50,8 @@ type desktop struct {
 	showFileTools                                                                           bool
 	showFileFilter, showFileOptions, showLeftPaneOptions                                    bool
 	showFileSessionPicker, fileReturnAfterConnect                                           bool
+	connectionJumpID                                                                        int
+	showConnectionJumpPicker                                                                bool
 	showSecondaryFilePicker                                                                 bool
 	secondaryPane                                                                           secondaryRemotePane
 	secondaryFileSearch                                                                     string
@@ -378,6 +381,16 @@ func (d *desktop) inspect() {
 	if d.busy {
 		return
 	}
+	jump, err := d.connectionJump(d.connectionJumpID)
+	if err != nil {
+		d.status = err.Error()
+		return
+	}
+	jumpID := d.connectionJumpID
+	var via *ssh.Client
+	if jump != nil {
+		via = jump.shell.client
+	}
 	if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
 		d.flushProfileAutosave()
 	}
@@ -387,9 +400,14 @@ func (d *desktop) inspect() {
 	d.status = "正在获取服务器指纹…"
 	settings := d.settings
 	go func() {
-		fp, err := inspectHost(settings)
+		fp, err := inspectHostThrough(settings, via)
 		d.win.Update(func() {
 			d.busy = false
+			current, jumpErr := d.connectionJump(jumpID)
+			if jumpErr != nil || d.connectionJumpID != jumpID || current != jump {
+				d.status = "跳板会话已改变，请重新获取目标指纹。"
+				return
+			}
 			d.finishHostInspection(settings, fp, err)
 		})
 	}()
@@ -425,6 +443,16 @@ func (d *desktop) connect() {
 	if d.busy || d.connectionLimitReached() || d.fingerprint == "" {
 		return
 	}
+	jump, err := d.connectionJump(d.connectionJumpID)
+	if err != nil {
+		d.status = err.Error()
+		return
+	}
+	var via *ssh.Client
+	jumpFingerprint := ""
+	if jump != nil {
+		via, jumpFingerprint = jump.shell.client, jump.active.Fingerprint
+	}
 	if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
 		d.flushProfileAutosave()
 	}
@@ -458,10 +486,10 @@ func (d *desktop) connect() {
 		var err error
 		if returnToFiles {
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-			shell, err = openSFTPTransport(ctx, settings)
+			shell, err = openSFTPTransportThrough(ctx, settings, via)
 			cancel()
 		} else {
-			shell, term, err = openSSHSession(settings, options)
+			shell, term, err = openSSHSessionAtThrough(settings, options, "", via)
 		}
 		d.win.Update(func() {
 			d.busy = false
@@ -483,11 +511,13 @@ func (d *desktop) connect() {
 			d.fileReturnAfterConnect = false
 			d.clearSecondaryConnectIntent()
 			d.addSession(term, shell, settings, settings.User+"@"+settings.Host)
+			d.connectionJumpID, d.showConnectionJumpPicker = 0, false
 			newSessionID := d.currentSession
 			d.editConnection = false
 			d.connectionDraft, d.connectionDraftSet, d.confirmDiscardConnection = connectionDraft{}, false, false
 			for _, session := range d.sessions {
 				if session.id == d.currentSession {
+					session.jumpParent, session.jumpFingerprint = jump, jumpFingerprint
 					if session.fileOnly {
 						d.watchSFTPTransport(session, shell)
 					}
@@ -1142,6 +1172,7 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 		if !d.settingsFromCloud {
 			d.identitySelector(c, markMetadataChanged)
 		}
+		d.connectionJumpPicker(c)
 		if d.profileIdentityID != "" && !d.settingsFromCloud {
 			ui.Text(c, "用户名及凭据来自所选身份").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		} else {

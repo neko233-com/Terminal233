@@ -73,6 +73,10 @@ task build:server
 
 密码和私钥路径均留空时，客户端使用当前用户的本机 SSH agent：Windows 默认连接 OpenSSH agent 命名管道，也支持 `SSH_AUTH_SOCK` 指定的本机管道或 Unix 套接字；其他平台使用 `SSH_AUTH_SOCK`。私钥留在 agent 中，仍须先核对 SSH 主机指纹。SSH、SFTP、端口转发及 `agent` 命令共用该认证方式；这不会向远端转发 agent。工作区恢复时，目标设备须有可用的对应 agent 和密钥。
 
+桌面连接表单可选择已连接且已验证指纹的 SSH 或 SFTP 会话作为临时跳板，随后通过跳板获取并核对目标指纹；再次选择跳板会话可串联多跳。目标的重连与由 SFTP 打开终端仍使用原跳板，跳板不可用时不会自动直连。临时跳板不会保存到主机或工作区模板；关闭跳板会断开依赖它的连接。
+
+Agent CLI 的 `exec`、`ls`、`get` 和 `put` 支持按连接顺序重复传入 `--jump 主机ID`，最多 8 个跳板。目标与各跳板均须是已保存、已核对指纹的本机主机；每一跳在进程内独立认证并校验指纹，退出时关闭整条连接。
+
 文件区可将所选文件或目录拖到目标文件夹行，复制到该目录而不切换当前路径；同栏和跨栏均可使用。Explorer 拖入支持多个来源目录和普通目录，最多 100 项；目录内部最多 10000 项、32 层，不跟随链接，不覆盖已有目标。包含同名目标的拖入批次会在开始前拒绝，复制到源目录内部也会拒绝。
 
 开发可配合 [codegraph233](https://github.com/neko233-com/codegraph233) 的 MCP 符号、调用图及影响查询，以及 [MyGo Breeze UI 的只读组件 MCP](https://github.com/yldm-tech/mygo-breeze-ui/tree/main/packages/breeze-mcp)。代码索引读取根目录 `.codegraph233.json`，只索引客户端和服务端 Go 产品代码；`.codegraph233/` 数据库不入库。组件目录用于参考，客户端继续直接使用 MyGo v0.7.4。默认限制查询数量与调用深度，精确文本搜索仍使用 `rg`，避免整文件或全图输出。

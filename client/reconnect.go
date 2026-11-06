@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/egoist/mygo/plugins/terminal"
+	"golang.org/x/crypto/ssh"
 )
 
 func openSSHSession(settings connectionSettings, options terminal.Options) (*remoteShell, *terminal.Terminal, error) {
@@ -10,7 +11,11 @@ func openSSHSession(settings connectionSettings, options terminal.Options) (*rem
 }
 
 func openSSHSessionAt(settings connectionSettings, options terminal.Options, dir string) (*remoteShell, *terminal.Terminal, error) {
-	shell, err := connectShellAt(settings, dir)
+	return openSSHSessionAtThrough(settings, options, dir, nil)
+}
+
+func openSSHSessionAtThrough(settings connectionSettings, options terminal.Options, dir string, via *ssh.Client) (*remoteShell, *terminal.Terminal, error) {
+	shell, err := connectShellAtThrough(settings, dir, via)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -28,6 +33,21 @@ func (d *desktop) reconnectCurrentSession() {
 		return
 	}
 	id, settings, oldTerm := d.currentSession, d.active, d.term
+	var owner *workspaceSession
+	for _, session := range d.sessions {
+		if session.id == id && session.term == oldTerm {
+			owner = session
+			break
+		}
+	}
+	if owner == nil {
+		return
+	}
+	via, err := d.sessionJumpClient(owner)
+	if err != nil {
+		d.status = err.Error()
+		return
+	}
 	if settings.Fingerprint == "" {
 		d.status = "该主机的信任已撤销，请在主机详情中重新连接并核对指纹。"
 		return
@@ -36,7 +56,7 @@ func (d *desktop) reconnectCurrentSession() {
 	d.busy = true
 	d.status = "正在重新连接并验证主机指纹…"
 	go func() {
-		shell, term, err := openSSHSession(settings, options)
+		shell, term, err := openSSHSessionAtThrough(settings, options, "", via)
 		d.win.Update(func() {
 			d.busy = false
 			if err != nil {

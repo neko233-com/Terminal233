@@ -382,6 +382,7 @@ func (d *desktop) finishCloudSave(accounts []cloudAccount, mutationErr, refreshE
 
 func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.pendingWorkspaceHost = nil
+	d.connectionJumpID, d.showConnectionJumpPicker = 0, false
 	d.profileIdentityID = ""
 	d.profileTagsCaretPending, d.profileGroupCaretPending = false, false
 	d.profileSecretError = false

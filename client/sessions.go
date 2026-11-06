@@ -119,6 +119,8 @@ type workspaceSession struct {
 	completion                                                      terminalCompletion
 	term                                                            *terminal.Terminal
 	shell                                                           *remoteShell
+	jumpParent                                                      *workspaceSession
+	jumpFingerprint                                                 string
 	active                                                          connectionSettings
 	fileDir, fileLocal, fileStatus, selectedFile                    string
 	fileFilter, fileSort                                            string

@@ -33,6 +33,17 @@ type agentHost struct {
 	Credentials bool   `json:"credentials_saved"`
 }
 
+type agentJumpFlags []string
+
+func (j *agentJumpFlags) String() string { return strings.Join(*j, ",") }
+func (j *agentJumpFlags) Set(value string) error {
+	if value == "" || len(*j) >= maxSSHJumpHosts {
+		return errors.New("跳板主机数量或 ID 无效")
+	}
+	*j = append(*j, value)
+	return nil
+}
+
 func agentHostID(p profile) string {
 	if p.StableID != "" {
 		return "local:" + p.StableID
@@ -79,9 +90,9 @@ func runAgentCLI(args []string, store string, stdout io.Writer) int {
 	}
 	if operation == "help" || operation == "--help" || operation == "-h" {
 		return write(map[string]any{"ok": true, "operation": "help", "commands": []string{
-			"agent hosts", "agent exec --host ID --command COMMAND [--timeout 30s]",
-			"agent ls --host ID --path /directory", "agent get --host ID --path /remote/file --local C:/file",
-			"agent put --host ID --local C:/file --path /remote/file",
+			"agent hosts", "agent exec --host ID --command COMMAND [--jump ID ...] [--timeout 30s]",
+			"agent ls --host ID --path /directory [--jump ID ...]", "agent get --host ID --path /remote/file --local C:/file [--jump ID ...]",
+			"agent put --host ID --local C:/file --path /remote/file [--jump ID ...]",
 		}, "authentication": "使用已核对的主机指纹，以及当前用户保存的凭据或本机 SSH agent；无需密码参数", "output": "JSON", "version": version}, 0)
 	}
 	if operation != "hosts" && operation != "exec" && operation != "ls" && operation != "get" && operation != "put" {
@@ -94,6 +105,8 @@ func runAgentCLI(args []string, store string, stdout io.Writer) int {
 	remote := f.String("path", ".", "远程路径")
 	local := f.String("local", "", "本机文件路径")
 	timeout := f.Duration("timeout", 30*time.Second, "请求时限")
+	var jumps agentJumpFlags
+	f.Var(&jumps, "jump", "按连接顺序指定已信任的跳板主机 ID，可重复")
 	if err := f.Parse(args[1:]); err != nil || len(f.Args()) != 0 {
 		return fail("参数无效；请运行 agent help（不接受密码参数）", 2)
 	}
@@ -108,7 +121,7 @@ func runAgentCLI(args []string, store string, stdout io.Writer) int {
 		return fail("读取本机主机失败："+err.Error(), 2)
 	}
 	if operation == "hosts" {
-		if *id != "" || *command != "" || *local != "" || *remote != "." {
+		if *id != "" || *command != "" || *local != "" || *remote != "." || len(jumps) != 0 {
 			return fail("hosts 不接受连接或文件参数", 2)
 		}
 		hosts := make([]agentHost, 0, len(d.profiles))
@@ -121,21 +134,40 @@ func runAgentCLI(args []string, store string, stdout io.Writer) int {
 	if *id == "" || (operation == "exec" && strings.TrimSpace(*command) == "") || (operation != "exec" && *command != "") || (operation == "exec" && (*local != "" || *remote != ".")) {
 		return fail("缺少主机或命令，或参数不适用于当前操作；请运行 agent help", 2)
 	}
-	p, err := d.agentProfile(*id)
-	if err != nil {
-		return fail(err.Error(), 2)
-	}
-	if !strings.HasPrefix(p.Settings.Fingerprint, "SHA256:") {
-		return fail("请先在 NekoSSH 界面核对该主机指纹", 2)
-	}
-	settings, err := d.profileCredential(p)
-	if err != nil {
-		return fail(err.Error(), 2)
+	ids := append(append([]string(nil), jumps...), *id)
+	hops := make([]connectionSettings, 0, len(ids))
+	defer func() {
+		for i := range hops {
+			hops[i].Password, hops[i].Passphrase = "", ""
+		}
+	}()
+	seenIDs, seenAddresses := make(map[string]bool, len(ids)), make(map[string]bool, len(ids))
+	for i, hostID := range ids {
+		if seenIDs[hostID] {
+			return fail("跳板链不能包含重复主机", 2)
+		}
+		seenIDs[hostID] = true
+		p, err := d.agentProfile(hostID)
+		if err != nil {
+			return fail(fmt.Sprintf("第 %d 跳：%s", i+1, err), 2)
+		}
+		if !strings.HasPrefix(p.Settings.Fingerprint, "SHA256:") {
+			return fail(fmt.Sprintf("请先在 NekoSSH 界面核对第 %d 跳的主机指纹", i+1), 2)
+		}
+		settings, err := d.profileCredential(p)
+		if err != nil {
+			return fail(fmt.Sprintf("第 %d 跳：%s", i+1, err), 2)
+		}
+		address, err := settings.address()
+		if err != nil || seenAddresses[strings.ToLower(address)] {
+			return fail("跳板链包含无效或重复的服务器地址", 2)
+		}
+		seenAddresses[strings.ToLower(address)] = true
+		hops = append(hops, settings)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
-	client, err := connectSSHClient(ctx, settings)
-	settings.Password, settings.Passphrase = "", ""
+	client, err := connectSSHRoute(ctx, hops)
 	if err != nil {
 		return fail("SSH 连接失败："+err.Error(), 2)
 	}

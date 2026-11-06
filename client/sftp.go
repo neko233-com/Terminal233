@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 )
 
 type contextReader struct {
@@ -121,7 +122,11 @@ func withSFTP(shell *remoteShell, f func(*sftp.Client) error) error {
 // An SFTP-only connection authenticates directly and verifies the subsystem
 // without requesting a PTY or starting an interactive shell.
 func openSFTPTransport(ctx context.Context, settings connectionSettings) (*remoteShell, error) {
-	client, err := connectSSHClient(ctx, settings)
+	return openSFTPTransportThrough(ctx, settings, nil)
+}
+
+func openSFTPTransportThrough(ctx context.Context, settings connectionSettings, via *ssh.Client) (*remoteShell, error) {
+	client, err := connectSSHClientThrough(ctx, settings, via)
 	if err != nil {
 		return nil, err
 	}

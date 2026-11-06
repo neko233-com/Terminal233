@@ -36,16 +36,24 @@ func (s connectionSettings) address() (string, error) {
 
 // inspectHost stops the SSH handshake before credentials can be sent.
 func inspectHost(s connectionSettings) (string, error) {
+	return inspectHostThrough(s, nil)
+}
+
+func inspectHostThrough(s connectionSettings, via *ssh.Client) (string, error) {
 	addr, err := s.address()
 	if err != nil {
 		return "", err
 	}
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := dialSSHAddress(ctx, addr, via)
 	if err != nil {
 		return "", err
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	var fingerprint string
 	cfg := &ssh.ClientConfig{User: s.User, HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 		fingerprint = ssh.FingerprintSHA256(key)
@@ -148,6 +156,10 @@ func remoteDirectoryCommand(dir string) (string, error) {
 }
 
 func connectShellAt(s connectionSettings, dir string) (*remoteShell, error) {
+	return connectShellAtThrough(s, dir, nil)
+}
+
+func connectShellAtThrough(s connectionSettings, dir string, via *ssh.Client) (*remoteShell, error) {
 	command := ""
 	if dir != "" {
 		var err error
@@ -156,7 +168,7 @@ func connectShellAt(s connectionSettings, dir string) (*remoteShell, error) {
 			return nil, err
 		}
 	}
-	client, err := connectSSHClient(context.Background(), s)
+	client, err := connectSSHClientThrough(context.Background(), s, via)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +209,19 @@ func connectShellAt(s connectionSettings, dir string) (*remoteShell, error) {
 // A forwarding rule needs only an SSH transport, not a shell or PTY. Both
 // paths use the same host-key verification and authentication policy.
 func connectSSHClient(ctx context.Context, s connectionSettings) (*ssh.Client, error) {
+	return connectSSHClientThrough(ctx, s, nil)
+}
+
+func dialSSHAddress(ctx context.Context, address string, via *ssh.Client) (net.Conn, error) {
+	if via != nil {
+		return via.DialContext(ctx, "tcp", address)
+	}
+	return (&net.Dialer{}).DialContext(ctx, "tcp", address)
+}
+
+// Each hop uses its own pinned fingerprint and credentials. A tunneled
+// connection is still a separate SSH handshake, not an agent-forwarded shell.
+func connectSSHClientThrough(ctx context.Context, s connectionSettings, via *ssh.Client) (*ssh.Client, error) {
 	addr, err := s.address()
 	if err != nil {
 		return nil, err
@@ -242,23 +267,70 @@ func connectSSHClient(ctx context.Context, s connectionSettings) (*ssh.Client, e
 		}
 		return nil
 	}}
-	conn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", addr)
+	dialCtx, cancelDial := context.WithTimeout(ctx, 10*time.Second)
+	conn, err := dialSSHAddress(dialCtx, addr, via)
+	cancelDial()
 	if err != nil {
 		return nil, err
 	}
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
-	stopCancellation := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	// SSH channel-backed connections need not implement deadlines. Closing
+	// on timeout also bounds their handshakes and unblocks cancellation.
+	handshakeCtx, cancelHandshake := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelHandshake()
+	stopCancellation := context.AfterFunc(handshakeCtx, func() { _ = conn.Close() })
 	cc, channels, requests, err := ssh.NewClientConn(conn, addr, cfg)
 	stopCancellation()
 	if err != nil {
 		_ = conn.Close()
+		if handshakeCtx.Err() != nil {
+			return nil, handshakeCtx.Err()
+		}
 		return nil, err
 	}
 	_ = conn.SetDeadline(time.Time{})
 	client := ssh.NewClient(cc, channels, requests)
-	if err := ctx.Err(); err != nil {
+	if err := handshakeCtx.Err(); err != nil {
 		_ = client.Close()
 		return nil, err
 	}
 	return client, nil
+}
+
+const maxSSHJumpHosts = 8
+
+// The returned final client owns the entire route: closing it also closes all
+// parent transports. Partial routes are closed on every failure.
+func connectSSHRoute(ctx context.Context, hops []connectionSettings) (*ssh.Client, error) {
+	if len(hops) == 0 || len(hops) > maxSSHJumpHosts+1 {
+		return nil, errors.New("跳板数量无效")
+	}
+	var parents []*ssh.Client
+	var previous *ssh.Client
+	for i, settings := range hops {
+		client, err := connectSSHClientThrough(ctx, settings, previous)
+		if err != nil {
+			if previous != nil {
+				_ = previous.Close()
+			}
+			for j := len(parents) - 1; j >= 0; j-- {
+				_ = parents[j].Close()
+			}
+			return nil, fmt.Errorf("第 %d 跳 SSH 连接失败：%w", i+1, err)
+		}
+		if previous != nil {
+			parents = append(parents, previous)
+		}
+		previous = client
+	}
+	if len(parents) > 0 {
+		final := previous
+		go func() {
+			_ = final.Wait()
+			for i := len(parents) - 1; i >= 0; i-- {
+				_ = parents[i].Close()
+			}
+		}()
+	}
+	return previous, nil
 }
