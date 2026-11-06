@@ -189,6 +189,8 @@ type desktop struct {
 	showArchive, archiveConfirm                                                             bool
 	archivePath, archivePassword, archiveStatus                                             string
 	archiveCancel                                                                           context.CancelFunc
+	localArchivePath, localArchivePassword, localArchiveStatus                              string
+	localArchivePending                                                                     *localArchiveDocument
 	accounts                                                                                []cloudAccount
 	forwardLocalPort, forwardHost, forwardPort, forwardStatus                               string
 	forwardMode                                                                             string
@@ -452,6 +454,10 @@ func (d *desktop) connect() {
 func (d *desktop) view(c *ui.Context) {
 	d.serviceProfileAutosave(c)
 	d.workspaceShortcuts(c)
+	if d.workspace != "local-archive" {
+		d.localArchivePassword = ""
+		d.localArchivePending = nil
+	}
 	if d.workspace != "known-hosts" {
 		d.knownHostConfirm = ""
 	}
@@ -948,6 +954,8 @@ func (d *desktop) view(c *ui.Context) {
 							d.identityView(c)
 						case "known-hosts":
 							d.knownHostsView(c)
+						case "local-archive":
+							d.localArchiveView(c)
 						case "cloud":
 							ui.Text(c, "云端工作区").FontSize(22).Bold()
 							d.cloudView(c)
@@ -1175,7 +1183,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.117"
+const version = "0.3.118"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

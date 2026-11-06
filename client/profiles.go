@@ -354,6 +354,11 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 		})
 	}
 	if d.showCompactProfileTools {
+		if ui.Button(c.Key("local-archive-open"), "本机导入与导出").Disabled(d.busy || draftBlocked).Clicked() {
+			if d.closeConnectionForNavigation() {
+				d.workspace = "local-archive"
+			}
+		}
 		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 			if workspaceButton(c, "profile-source-all", "全部来源", d.profileSource == "").Clicked() {
 				if d.profileSource == "cloud" {

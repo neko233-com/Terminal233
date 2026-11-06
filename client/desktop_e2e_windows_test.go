@@ -2641,4 +2641,86 @@ func TestDesktopNativeWindow(t *testing.T) {
 			t.Fatal("known-host revocation did not persist")
 		}
 	}
+	// Export and preview an encrypted local backup, then append it to the
+	// isolated test profile store without trusting imported host keys.
+	navigate("nav-connections")
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "key:profile-tools-toggle ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "key:local-archive-open ") {
+		call("act", map[string]any{"key": "profile-tools-toggle", "action": "press"})
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "key:local-archive-open ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "local-archive-open", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "key:local-archive-path ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	backupPath := filepath.Join(t.TempDir(), "local.nekobackup")
+	call("act", map[string]any{"key": "local-archive-path", "action": "setValue", "text": backupPath})
+	call("act", map[string]any{"key": "local-archive-password", "action": "setValue", "text": "test-backup-password"})
+	call("act", map[string]any{"key": "local-archive-export", "action": "press"})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "已加密导出") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	backup, err := os.ReadFile(backupPath)
+	if err != nil || strings.Contains(string(backup), settings.Password) {
+		t.Fatal("local backup was not safely exported")
+	}
+	doc, err := decodeLocalArchive(backup, "test-backup-password")
+	if err != nil || len(doc.Profiles) == 0 || len(doc.Identities) == 0 {
+		t.Fatalf("local backup contents invalid: %v", err)
+	}
+	call("act", map[string]any{"key": "local-archive-password", "action": "setValue", "text": "test-backup-password"})
+	call("act", map[string]any{"key": "local-archive-inspect", "action": "press"})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "key:local-archive-apply ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "key:local-archive-apply ") {
+		t.Fatal("local import preview missing")
+	}
+	call("act", map[string]any{"key": "local-archive-apply", "action": "press"})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "已导入 ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "已导入 ") {
+		t.Fatal("local backup import did not finish")
+	}
+	var afterImport desktop
+	if err := afterImport.loadProfiles(filepath.Join(configDir, "NekoSSH", "profiles.json")); err != nil {
+		t.Fatal(err)
+	}
+	if len(afterImport.profiles) != len(afterRevocation.profiles)+len(doc.Profiles) || len(afterImport.identities) != len(afterRevocation.identities)+len(doc.Identities) {
+		t.Fatal("local backup was not appended")
+	}
+	for _, p := range afterImport.profiles[len(afterRevocation.profiles):] {
+		if p.Settings.Fingerprint != "" {
+			t.Fatal("imported host key was trusted automatically")
+		}
+	}
 }
