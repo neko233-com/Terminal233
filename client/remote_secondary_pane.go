@@ -234,6 +234,15 @@ func (d *desktop) finishSecondaryPaneLoad(generation uint64, id int, shell *remo
 		if after != "" {
 			p.status = after + "；" + p.status
 		}
+		p.files, p.selected = nil, ""
+		p.paneSelection = paneSelection{}
+		if d.win != nil && !d.busy && p.directory != "" && dir != p.directory {
+			status := p.status
+			d.requestSecondaryPane(p.directory, -1)
+			if p.loading {
+				p.statusAfterLoad = status
+			}
+		}
 		return
 	}
 	if historyIndex < 0 || !p.history.commitNavigation(historyIndex, dir) {

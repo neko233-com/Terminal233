@@ -115,6 +115,10 @@ func (d *desktop) navigateFileHistory(offset int) {
 }
 
 func (d *desktop) refreshFilesWithHistory(previousStatus string, historyIndex int) {
+	d.readFileDirectory(previousStatus, historyIndex, true)
+}
+
+func (d *desktop) readFileDirectory(previousStatus string, historyIndex int, recoverPrevious bool) {
 	if d.busy || d.fileSessionUnavailable() {
 		return
 	}
@@ -129,33 +133,57 @@ func (d *desktop) refreshFilesWithHistory(previousStatus string, historyIndex in
 			files, err = listRemote(shell, dir)
 		}
 		d.win.Update(func() {
-			d.busy = false
-			if sessionID != d.currentSession || shell != d.shell {
-				return
-			}
-			if dir != d.fileDir {
-				d.fileStatus = "目录已改变，请重新打开目录"
-				return
-			}
-			if err != nil {
-				d.fileStatus = fmt.Sprintf("读取文件失败：%v", err)
-				if previousStatus != "" {
-					d.fileStatus = previousStatus + "；" + d.fileStatus
-				}
-				return
-			}
-			if historyIndex < 0 || !d.fileHistory.commitNavigation(historyIndex, dir) {
-				d.fileHistory.visit(dir)
-			}
-			d.files = files
-			d.filePaneSelection = paneSelection{}
-			d.reconcileCheckedFiles()
-			d.fileStatus = fmt.Sprintf("%d 个条目", len(files))
-			if previousStatus != "" {
-				d.fileStatus = previousStatus + "；" + d.fileStatus
+			if d.finishFileDirectoryRead(sessionID, shell, dir, previousStatus, historyIndex, files, err, recoverPrevious) {
+				// A failed navigation keeps history unchanged. Re-read that
+				// directory once so the restored listing is current.
+				d.readFileDirectory(d.fileStatus, -1, false)
 			}
 		})
 	}()
+}
+
+// finishFileDirectoryRead applies results only to their originating session
+// and directory. Its true result asks the caller to reload the last good path.
+func (d *desktop) finishFileDirectoryRead(sessionID int, shell *remoteShell, dir, previousStatus string, historyIndex int, files []remoteFile, err error, recoverPrevious bool) bool {
+	d.busy = false
+	if sessionID != d.currentSession || shell != d.shell {
+		return false
+	}
+	if dir != d.fileDir {
+		d.fileStatus = "目录已改变，请重新打开目录"
+		return false
+	}
+	if err != nil {
+		status := fmt.Sprintf("读取目录失败：%v", err)
+		if previousStatus != "" {
+			status = previousStatus + "；" + status
+		}
+		// Never leave a potentially stale listing actionable after a failed
+		// refresh, including a refresh following file modifications.
+		d.files = nil
+		d.selectedFile, d.confirmDelete, d.fileRename, d.fileNewDirectory = "", "", "", ""
+		d.filePaneSelection = paneSelection{}
+		d.fileChecked = nil
+		if _, previousDir, ok := d.fileHistory.target(0); recoverPrevious && ok && previousDir != dir {
+			d.fileDir = previousDir
+			d.fileCheckedDir = previousDir
+			d.fileStatus = status
+			return true
+		}
+		d.fileStatus = status
+		return false
+	}
+	if historyIndex < 0 || !d.fileHistory.commitNavigation(historyIndex, dir) {
+		d.fileHistory.visit(dir)
+	}
+	d.files = files
+	d.filePaneSelection = paneSelection{}
+	d.reconcileCheckedFiles()
+	d.fileStatus = fmt.Sprintf("%d 个条目", len(files))
+	if previousStatus != "" {
+		d.fileStatus = previousStatus + "；" + d.fileStatus
+	}
+	return false
 }
 
 func (d *desktop) transferProgress(sessionID int, shell *remoteShell, dir string, read int64) {

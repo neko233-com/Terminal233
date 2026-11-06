@@ -202,6 +202,15 @@ func (d *desktop) finishLocalPaneLoad(generation uint64, dir string, historyInde
 		if after != "" {
 			d.localPane.status = after + "；" + d.localPane.status
 		}
+		d.localPane.files, d.localPane.selected = nil, ""
+		d.localPane.paneSelection = paneSelection{}
+		if d.win != nil && d.localPane.directory != "" && !sameLocalDirectory(dir, d.localPane.directory) {
+			status := d.localPane.status
+			d.requestLocalPane(d.localPane.directory, -1)
+			if d.localPane.loading {
+				d.localPane.statusAfterLoad = status
+			}
+		}
 		return
 	}
 	if historyIndex < 0 || !d.localPane.history.commitNavigation(historyIndex, dir) {
