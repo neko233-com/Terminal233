@@ -330,8 +330,8 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 					continue
 				}
 				credentials, err := d.profileCredential(p)
-				durable := p.IdentityID != "" || p.EncryptedCredentials != "" || (credentials.KeyPath != "" && credentials.Passphrase == "")
-				if err == nil && durable && credentials.Password == s.active.Password && credentials.Passphrase == s.active.Passphrase && (credentials.KeyPath != "" || credentials.Password != "") {
+				durable := p.IdentityID != "" || p.EncryptedCredentials != "" || (credentials.KeyPath != "" && credentials.Passphrase == "") || (credentials.KeyPath == "" && credentials.Password == "" && agentConfigured())
+				if err == nil && durable && credentials.Password == s.active.Password && credentials.Passphrase == s.active.Passphrase && credentials.canUseStoredAuth() {
 					candidates = append(candidates, p)
 				}
 			}

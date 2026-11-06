@@ -1154,7 +1154,7 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 			})
 			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "密码").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
-				password := ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().OnChange(markDraftChanged).Grow(1)
+				password := ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("留空可使用 SSH agent").Tooltip("密码和私钥均留空时使用本机 SSH agent").Password().OnChange(markDraftChanged).Grow(1)
 				if d.connectionAuthFocusPending {
 					password.Focus()
 					d.connectionAuthFocusPending = false

@@ -73,7 +73,7 @@ func (d *desktop) startWorkspaceHostDrop(targetID int, local profileID, cloud cl
 		d.loadProfile(p)
 		intent.profile, intent.host, intent.port, intent.user = p.ID, d.settings.Host, d.settings.Port, d.settings.User
 		d.pendingWorkspaceHost = intent
-		if !d.profileSecretError && (p.Settings.KeyPath != "" || d.settings.Password != "") && d.trustedProfileFingerprint() != "" {
+		if !d.profileSecretError && d.settings.canUseStoredAuth() && d.trustedProfileFingerprint() != "" {
 			d.connectTrustedProfile()
 			return
 		}

@@ -161,7 +161,7 @@ func (d *desktop) openProfileConnection(p profile) {
 		return
 	}
 	d.loadProfile(p)
-	if !d.profileSecretError && (p.Settings.KeyPath != "" || d.settings.Password != "") && d.trustedProfileFingerprint() != "" {
+	if !d.profileSecretError && d.settings.canUseStoredAuth() && d.trustedProfileFingerprint() != "" {
 		d.connectTrustedProfile()
 		return
 	}

@@ -356,8 +356,8 @@ func (d *desktop) startSavedForward(rule savedForwardRule, invalidate func()) {
 		d.forwardRulesStatus = "请先连接主机并核对主机指纹。"
 		return
 	}
-	if settings.KeyPath == "" && settings.Password == "" {
-		d.forwardRulesStatus = "请先为主机保存密码或私钥。"
+	if !settings.canUseStoredAuth() {
+		d.forwardRulesStatus = "请先为主机保存密码、私钥或配置本机 SSH agent。"
 		return
 	}
 	if len(d.savedForwardRuns) >= 32 {

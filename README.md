@@ -68,6 +68,8 @@ task build:server
 
 本机终端不经过 SSH；Windows 使用 PowerShell 7 和可用的 PSReadLine 显示命令语法颜色。终端支持 ANSI 色彩，远程命令行语法高亮由远端 shell 配置决定。
 
+密码和私钥路径均留空时，客户端使用当前用户的本机 SSH agent：Windows 默认连接 OpenSSH agent 命名管道，也支持 `SSH_AUTH_SOCK` 指定的本机管道或 Unix 套接字；其他平台使用 `SSH_AUTH_SOCK`。私钥留在 agent 中，仍须先核对 SSH 主机指纹。SSH、SFTP、端口转发及 `agent` 命令共用该认证方式；这不会向远端转发 agent。工作区恢复时，目标设备须有可用的对应 agent 和密钥。
+
 文件区可将所选文件或目录拖到目标文件夹行，复制到该目录而不切换当前路径；同栏和跨栏均可使用。Explorer 拖入支持多个来源目录和普通目录，最多 100 项；目录内部最多 10000 项、32 层，不跟随链接，不覆盖已有目标。包含同名目标的拖入批次会在开始前拒绝，复制到源目录内部也会拒绝。
 
 开发可配合 [codegraph233](https://github.com/neko233-com/codegraph233) 的 MCP 符号、调用图及影响查询，以及 [MyGo Breeze UI 的只读组件 MCP](https://github.com/yldm-tech/mygo-breeze-ui/tree/main/packages/breeze-mcp)。代码索引读取根目录 `.codegraph233.json`，只索引客户端和服务端 Go 产品代码；`.codegraph233/` 数据库不入库。组件目录用于参考，客户端继续直接使用 MyGo v0.7.4。默认限制查询数量与调用深度，精确文本搜索仍使用 `rg`，避免整文件或全图输出。

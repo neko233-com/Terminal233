@@ -68,7 +68,7 @@ func (d *desktop) resolveWorkspace(w savedWorkspace) ([]workspaceRestoreTarget, 
 			if err != nil {
 				return nil, fmt.Errorf("第 %d 个主机：%w", i+1, err)
 			}
-			if settings.KeyPath == "" && settings.Password == "" {
+			if !settings.canUseStoredAuth() {
 				return nil, fmt.Errorf("第 %d 个主机没有保存可用凭据", i+1)
 			}
 			target.settings, target.label, target.sourceProfileID = settings, settings.User+"@"+settings.Host, string(matches[0].ID)

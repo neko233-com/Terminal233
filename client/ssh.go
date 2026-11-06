@@ -14,10 +14,15 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 type connectionSettings struct {
 	Host, Port, User, Password, KeyPath, Passphrase, Fingerprint string
+}
+
+func (s connectionSettings) canUseStoredAuth() bool {
+	return s.KeyPath != "" || s.Password != "" || agentConfigured()
 }
 
 func (s connectionSettings) address() (string, error) {
@@ -215,11 +220,20 @@ func connectSSHClient(ctx context.Context, s connectionSettings) (*ssh.Client, e
 			return nil, fmt.Errorf("解析私钥失败: %w", err)
 		}
 		auth = ssh.PublicKeys(signer)
-	} else {
-		if s.Password == "" {
-			return nil, errors.New("请输入密码或私钥路径")
-		}
+	} else if s.Password != "" {
 		auth = ssh.Password(s.Password)
+	} else {
+		agentCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		agentConn, err := dialLocalSSHAgent(agentCtx)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("无法连接本机 SSH agent，请填写密码或私钥：%w", err)
+		}
+		defer agentConn.Close()
+		_ = agentConn.SetDeadline(time.Now().Add(20 * time.Second))
+		stopAgent := context.AfterFunc(ctx, func() { _ = agentConn.Close() })
+		defer stopAgent()
+		auth = ssh.PublicKeysCallback(agent.NewClient(agentConn).Signers)
 	}
 	cfg := &ssh.ClientConfig{User: s.User, Auth: []ssh.AuthMethod{auth}, HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 		actual := ssh.FingerprintSHA256(key)

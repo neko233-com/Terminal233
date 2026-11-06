@@ -3,6 +3,7 @@ module github.com/neko233-com/nekossh/client
 go 1.27.3
 
 require (
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/egoist/mygo v0.7.4
 	github.com/gofrs/flock v0.13.1
 	github.com/pkg/sftp v1.13.12

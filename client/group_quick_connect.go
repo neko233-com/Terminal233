@@ -83,7 +83,7 @@ func (d *desktop) groupQuickTargets(group string, cloud bool) ([]workspaceRestor
 			if err == nil && !strings.HasPrefix(settings.Fingerprint, "SHA256:") {
 				err = errors.New("请先确认主机指纹")
 			}
-			if err == nil && settings.KeyPath == "" && settings.Password == "" {
+			if err == nil && !settings.canUseStoredAuth() {
 				err = errors.New("没有保存可用凭据")
 			}
 			if err != nil {

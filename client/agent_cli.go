@@ -82,7 +82,7 @@ func runAgentCLI(args []string, store string, stdout io.Writer) int {
 			"agent hosts", "agent exec --host ID --command COMMAND [--timeout 30s]",
 			"agent ls --host ID --path /directory", "agent get --host ID --path /remote/file --local C:/file",
 			"agent put --host ID --local C:/file --path /remote/file",
-		}, "authentication": "使用当前 Windows 用户保存的凭据及已核对指纹；无需密码参数", "output": "JSON", "version": version}, 0)
+		}, "authentication": "使用已核对的主机指纹，以及当前用户保存的凭据或本机 SSH agent；无需密码参数", "output": "JSON", "version": version}, 0)
 	}
 	if operation != "hosts" && operation != "exec" && operation != "ls" && operation != "get" && operation != "put" {
 		return fail("未知操作；请运行 agent help", 2)
