@@ -1,11 +1,17 @@
 package main
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+)
 
 // The same strip owns navigation and sessions at every window width. Keeping
 // it outside the workspace prevents tabs disappearing when changing tools.
 func (d *desktop) workspaceHeader(c *ui.Context, width, height float32) {
-	ui.Row(c.Key("workspace-header")).Label("全局标签栏").FillWidth().Height(52).Shrink(0).Padding(8, 12).Gap(6).AlignItems(ui.Center).Background(workspaceChrome(c)).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Children(func() {
+	bar := c.TitleBar()
+	usableWidth := width - bar.Left - bar.Right
+	compact := usableWidth < 700
+	ui.Row(c.Key("workspace-header")).Label("全局标签栏").FillWidth().Height(max(float32(52), bar.Height)).Shrink(0).Padding(8, 12+bar.Right, 8, 12+bar.Left).Gap(6).AlignItems(ui.Center).Background(workspaceChrome(c)).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).DragWindow().Children(func() {
 		sidebarLabel := "收起侧栏"
 		if !d.sidebarVisible() {
 			sidebarLabel = "展开侧栏"
@@ -18,16 +24,16 @@ func (d *desktop) workspaceHeader(c *ui.Context, width, height float32) {
 				d.savePreference("sidebar", d.sidebarCollapsed)
 			}
 		}
-		if width >= 1000 {
+		if usableWidth >= 1000 {
 			ui.Text(c, "NekoSSH").FontSize(15).Bold().Margin(0, 10, 0, 2)
 		}
 		libraryActive := d.workspace != "terminal" && d.workspace != "files" && d.workspace != "new-tab"
-		if workspaceTabButton(c, "workspace-hosts-tab", "主机", serverIcon, libraryActive).Clicked() {
+		if workspacePinnedTabButton(c, "workspace-hosts-tab", "主机", serverIcon, libraryActive, compact).Clicked() {
 			// Returning to the library resumes any host draft rather than
 			// silently closing its inspector.
 			d.workspace = "connections"
 		}
-		if workspaceTabButton(c, "workspace-files-tab", "SFTP", fileIcon, d.workspace == "files").Label("SFTP 标签页").Clicked() {
+		if workspacePinnedTabButton(c, "workspace-files-tab", "SFTP", fileIcon, d.workspace == "files", compact).Label("SFTP 标签页").Clicked() {
 			d.workspace = "files"
 			if d.term != nil && d.shell == nil && d.files == nil && !d.busy && d.win != nil {
 				d.refreshFiles()
@@ -43,13 +49,11 @@ func (d *desktop) workspaceHeader(c *ui.Context, width, height float32) {
 				d.cancelWorkspaceRestore()
 			}
 		}
-		themeLabel := "浅色"
-		if d.lightTheme {
-			themeLabel = "深色"
-		}
-		if terminalActionButton(c, "theme-toggle", themeLabel, appearanceIcon, false, false).Tooltip("切换" + themeLabel + "主题").Clicked() {
-			d.lightTheme = !d.lightTheme
-			d.savePreference("light", d.lightTheme)
+		if !compact {
+			themeLabel := d.appearanceActionLabel()
+			if terminalActionButton(c, "theme-toggle", themeLabel, appearanceIcon, false, false).Tooltip("切换" + themeLabel + "主题").Clicked() {
+				d.toggleAppearance()
+			}
 		}
 		settings := terminalActionButton(c, "settings-toggle", d.settingsButtonLabel(), settingsIcon, d.showSettings || d.updateAvailable != nil, false)
 		if settings.Clicked() {
@@ -64,6 +68,8 @@ func (d *desktop) workspaceHeader(c *ui.Context, width, height float32) {
 
 func workspaceTabButton(c *ui.Context, key, label string, icon *ui.SVG, active bool) ui.Element {
 	width, _ := c.Size()
+	bar := c.TitleBar()
+	width -= bar.Left + bar.Right
 	labelWidth := float32(160)
 	if width < 800 {
 		labelWidth = 100
@@ -84,6 +90,36 @@ func workspaceTabButton(c *ui.Context, key, label string, icon *ui.SVG, active b
 		ui.Text(c, label).FontSize(13).MaxWidth(labelWidth).SingleLine().TextColor(color)
 	})
 	return button
+}
+
+func workspacePinnedTabButton(c *ui.Context, key, label string, icon *ui.SVG, active, compact bool) ui.Element {
+	if compact {
+		return railButton(c, key, label, icon, active).Height(32).Shrink(0)
+	}
+	return workspaceTabButton(c, key, label, icon, active)
+}
+
+func (d *desktop) appearanceActionLabel() string {
+	if d.lightTheme {
+		return "深色"
+	}
+	return "浅色"
+}
+
+func (d *desktop) appearanceSource() mygo.ThemeSource {
+	if d.lightTheme {
+		return mygo.ThemeLight
+	}
+	return mygo.ThemeDark
+}
+
+func (d *desktop) toggleAppearance() {
+	d.lightTheme = !d.lightTheme
+	if d.win != nil {
+		mygo.Theme.SetSource(d.appearanceSource())
+		d.win.SetWindowButtonsTheme(d.appearanceSource())
+	}
+	d.savePreference("light", d.lightTheme)
 }
 
 func workspaceTabClose(c *ui.Context, key, label string, disabled bool) ui.Element {

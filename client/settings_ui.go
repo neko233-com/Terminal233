@@ -39,6 +39,9 @@ func (d *desktop) settingsView(c *ui.Context, height float32) {
 	ui.Scroll(c.Key("settings-scroll")).Label("设置面板").Width(320).Height(panelHeight).Background(c.Theme().Surface).Border(1, c.Theme().Border).Radius(8).Children(func() {
 		ui.Column(c).FillWidth().Padding(14).Gap(9).Children(func() {
 			ui.Text(c, "设置").FontSize(16).Bold()
+			if ui.Button(c.Key("settings-appearance"), "切换为"+d.appearanceActionLabel()+"主题").FillWidth().Clicked() {
+				d.toggleAppearance()
+			}
 			if ui.Button(c.Key("agent-cli-copy"), "复制 Agent CLI 命令").Tooltip("agent hosts 列出主机；exec、ls、get、put 复用已保存的凭据和指纹").FillWidth().Clicked() {
 				if exe, err := os.Executable(); err == nil {
 					mygo.Clipboard.WriteText("& '" + strings.ReplaceAll(exe, "'", "''") + "' agent help")

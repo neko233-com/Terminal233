@@ -321,6 +321,8 @@ func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	case (d.workspace == "terminal" || d.workspace == "files" || d.workspace == "new-tab") && !d.busy && c.Shortcut(ui.Cmd, ui.KeyW):
 		if d.workspace == "new-tab" {
 			d.closeNewTab()
+		} else if d.workspace == "terminal" && group != nil {
+			d.closeTerminalGroup(group.id)
 		} else {
 			d.closeCurrentSession()
 		}
@@ -1333,9 +1335,10 @@ func main() {
 	} else {
 		d.forwardRulesStatus = "转发规则存储不可用：" + err.Error()
 	}
-	mygo.Theme.SetSource(mygo.ThemeDark)
+	mygo.Theme.SetSource(d.appearanceSource())
 	mygo.App.WhenReady(func() {
-		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH", Width: 1200, Height: 760, MinWidth: 640, MinHeight: 480, Content: ui.View(d.view)})
+		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH", Width: 1200, Height: 760, MinWidth: 640, MinHeight: 480, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 52, Content: ui.View(d.view)})
+		d.win.SetWindowButtonsTheme(d.appearanceSource())
 		d.win.OnClosed(func() {
 			if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
 				d.flushProfileAutosave()

@@ -116,6 +116,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "key:host-entry-address ") {
 		t.Fatal("fresh native workspace should show the centered host entry")
 	}
+	verifyNativeWorkspaceChrome(t, app.Process.Pid, call)
 	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_HOST_ENTRY"); capturePath != "" {
 		capture := call("capture")["result"].(map[string]any)
 		pixels, err := base64.StdEncoding.DecodeString(fmt.Sprint(capture["png"]))

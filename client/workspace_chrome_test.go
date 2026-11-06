@@ -118,6 +118,7 @@ func TestUnifiedGroupTabKeepsCloseConfirmationReachable(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := ui.NewTester(d.view, 640, 480)
+	view.SetTitleBar(ui.TitleBar{Height: 52, Right: 138})
 	if err := view.Click("关闭工作区：" + name); err != nil {
 		t.Fatal(err)
 	}
@@ -131,5 +132,41 @@ func TestUnifiedGroupTabKeepsCloseConfirmationReachable(t *testing.T) {
 	}
 	if err := view.Click("取消关闭工作区：" + name); err != nil || len(d.sessions) != 2 || d.confirmTerminalGroupClose != 0 {
 		t.Fatalf("group close cancellation changed sessions: %v", err)
+	}
+	view.Key(ui.Cmd, ui.KeyW)
+	if len(d.sessions) != 2 || d.confirmTerminalGroupClose == 0 {
+		t.Fatal("closing a group tab with the keyboard bypassed confirmation")
+	}
+	view.Key(ui.Cmd, ui.KeyW)
+	if len(d.sessions) != 0 || len(d.terminalGroups) != 0 {
+		t.Fatal("confirmed keyboard close did not close the entire group tab")
+	}
+}
+
+func TestUnifiedChromeRespectsSystemCaptionAndDisplayScaling(t *testing.T) {
+	for _, width := range []int{640, 900, 1200} {
+		for _, scale := range []float32{1, 1.25, 1.5} {
+			t.Run(fmt.Sprintf("%d/%.2f", width, scale), func(t *testing.T) {
+				term := groupTestTerminals(t, 1)[0]
+				d := &desktop{workspace: "terminal", currentSession: 1, term: term, sessions: []*workspaceSession{{id: 1, label: "Production", term: term}}}
+				view := ui.NewTester(d.view, width, 760)
+				bar := ui.TitleBar{Height: 52, Right: 138}
+				view.SetTitleBar(bar)
+				view.SetZoom(scale)
+				view.Frame()
+				for _, label := range []string{"主机", "SFTP 标签页", "会话标签：Production", "设置", "新建标签页"} {
+					r, ok := view.Find(label)
+					if !ok || r.X < 0 || r.X+r.W > float32(width)-bar.Right+1 || r.Y < 0 || r.Y+r.H > 52*scale+1 {
+						t.Fatalf("native action overlaps caption or window at %.2f: %s %+v", scale, label, r)
+					}
+				}
+				if err := view.Click("设置"); err != nil {
+					t.Fatal(err)
+				}
+				if err := view.Click("切换为浅色主题"); err != nil || !d.lightTheme {
+					t.Fatalf("compact appearance action unavailable: %v", err)
+				}
+			})
+		}
 	}
 }
