@@ -18,6 +18,9 @@ var (
 	snippetIcon     = workspaceIcon(`<path d="M9 4C7 4 7 6 7 8v1c0 2-1 3-3 3 2 0 3 1 3 3v1c0 2 0 4 2 4M15 4c2 0 2 2 2 4v1c0 2 1 3 3 3-2 0-3 1-3 3v1c0 2 0 4-2 4"/>`)
 	starIcon        = workspaceIcon(`<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>`)
 	clockIcon       = workspaceIcon(`<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`)
+	searchIcon      = workspaceIcon(`<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>`)
+	splitIcon       = workspaceIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>`)
+	monitorIcon     = workspaceIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M5 13h3l2-4 3 7 2-4h4"/>`)
 	navigationIcons = map[string]*ui.SVG{
 		"nav-connections": serverIcon,
 		"nav-terminal":    terminalIcon,

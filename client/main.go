@@ -182,6 +182,17 @@ func navigationButton(c *ui.Context, key, label string, active bool) ui.Element 
 	return button
 }
 
+func terminalActionButton(c *ui.Context, key, label string, icon *ui.SVG, active, disabled bool) ui.Element {
+	button := ui.Button(c.Key(key), "").Label(label).Tooltip(label).Width(36).Height(36).Padding(8).BorderWidth(0).Radius(7).Disabled(disabled)
+	color := c.Theme().TextMuted
+	if active {
+		button = button.Background(c.Theme().SurfacePressed)
+		color = c.Theme().AccentHover
+	}
+	button.Children(func() { ui.Icon(c, icon).Width(18).Height(18).TextColor(color) })
+	return button
+}
+
 func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	mods := ui.Cmd | ui.Shift
 	switch {
@@ -612,9 +623,9 @@ func (d *desktop) view(c *ui.Context) {
 					if width < 1100 {
 						ui.ScrollHorizontal(c).FillWidth().Padding(8, 12).Gap(6).Children(func() { d.sessionTabs(c) })
 					}
-					ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+					ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Padding(6, 12).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 						if width >= 900 {
-							ui.Text(c, "终端").FontSize(17).Bold().Grow(1)
+							ui.Text(c, "终端").FontSize(14).Bold()
 						}
 						status := d.status
 						if terminalEnded(d.term) && !d.busy {
@@ -625,9 +636,10 @@ func (d *desktop) view(c *ui.Context) {
 							}
 						}
 						if width >= 900 {
-							ui.Text(c, status).FontSize(12).TextColor(t.TextMuted)
+							ui.Text(c, status).FontSize(12).TextColor(t.TextMuted).MaxWidth(240).SingleLine().Tooltip(status)
 						}
-						if ui.Button(c.Key("terminal-search-toggle"), "查找").Disabled(d.term == nil).Clicked() {
+						ui.Box(c).Grow(1)
+						if terminalActionButton(c, "terminal-search-toggle", "查找", searchIcon, d.terminalSearchOpen, d.term == nil).Clicked() {
 							if d.terminalSearchOpen {
 								d.closeTerminalSearch()
 							} else {
@@ -638,13 +650,7 @@ func (d *desktop) view(c *ui.Context) {
 						if d.quickOpen {
 							quickLabel = "收起快速命令"
 						}
-						if width < 900 {
-							quickLabel = "命令+"
-							if d.quickOpen {
-								quickLabel = "命令−"
-							}
-						}
-						if ui.Button(c.Key("quick-toggle"), quickLabel).Disabled(d.term == nil).Clicked() {
+						if terminalActionButton(c, "quick-toggle", quickLabel, snippetIcon, d.quickOpen, d.term == nil).Clicked() {
 							d.quickOpen = !d.quickOpen
 							if d.quickOpen && d.showFilePanel {
 								d.showFilePanel = false
@@ -653,16 +659,10 @@ func (d *desktop) view(c *ui.Context) {
 						}
 						if d.shell != nil || d.monitorCancel != nil {
 							monitorLabel := "服务器状态"
-							if width < 900 {
-								monitorLabel = "状态"
-							}
 							if d.monitorCancel != nil {
 								monitorLabel = "关闭状态"
-								if width < 900 {
-									monitorLabel = "状态−"
-								}
 							}
-							if ui.Button(c.Key("monitor-toggle"), monitorLabel).Disabled(d.monitorCancel == nil && terminalEnded(d.term)).Clicked() {
+							if terminalActionButton(c, "monitor-toggle", monitorLabel, monitorIcon, d.monitorCancel != nil, d.monitorCancel == nil && terminalEnded(d.term)).Clicked() {
 								d.toggleMonitor()
 							}
 						}
@@ -670,26 +670,14 @@ func (d *desktop) view(c *ui.Context) {
 						if d.splitSession != 0 {
 							splitLabel = "关闭分屏"
 						}
-						if width < 900 {
-							splitLabel = "分屏+"
-							if d.splitSession != 0 {
-								splitLabel = "分屏−"
-							}
-						}
-						if ui.Button(c.Key("toggle-split"), splitLabel).Disabled(!d.canSwitchSession() || (d.splitSession == 0 && len(d.sessions) < 2)).Clicked() {
+						if terminalActionButton(c, "toggle-split", splitLabel, splitIcon, d.splitSession != 0, !d.canSwitchSession() || (d.splitSession == 0 && len(d.sessions) < 2)).Clicked() {
 							d.toggleSplit()
 						}
 						label := "打开文件面板"
 						if d.showFilePanel {
 							label = "收起文件面板"
 						}
-						if width < 900 {
-							label = "文件+"
-							if d.showFilePanel {
-								label = "文件−"
-							}
-						}
-						if ui.Button(c.Key("toggle-file-panel"), label).Disabled(d.term == nil || !d.canSwitchSession()).Clicked() {
+						if terminalActionButton(c, "toggle-file-panel", label, fileIcon, d.showFilePanel, d.term == nil || !d.canSwitchSession()).Clicked() {
 							d.showFilePanel = !d.showFilePanel
 							if d.showFilePanel {
 								d.quickOpen = false
@@ -709,7 +697,7 @@ func (d *desktop) view(c *ui.Context) {
 									d.openLocalTerminal()
 								}
 								if ui.Button(c.Key("terminal-empty-connections"), "选择 SSH 连接").Clicked() {
-									d.workspace, d.editConnection = "connections", false
+									d.workspace = "connections"
 								}
 							})
 						})
@@ -934,7 +922,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.72"
+const version = "0.3.73"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -945,6 +933,7 @@ func main() {
 		return
 	}
 	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息", cloudURL: defaultCloudURL, forwardLocalPort: "0", forwardHost: "127.0.0.1", teamInviteHours: "24", teamInviteUses: "1"}
+	d.terminalLightTheme, d.terminalDarkTheme, _ = terminalThemePair("")
 	if dir, err := os.UserConfigDir(); err != nil {
 		d.profileStoreBlocked = true
 		d.status = "无法找到本机配置目录：" + err.Error()

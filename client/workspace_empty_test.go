@@ -45,3 +45,16 @@ func TestCloudLoginVisibleInMinimumWindow(t *testing.T) {
 		t.Fatalf("login should be visible without scrolling at minimum size: %+v", button)
 	}
 }
+
+func TestEmptyTerminalNavigationKeepsHostDraft(t *testing.T) {
+	d := &desktop{workspace: "terminal", editConnection: true, settings: connectionSettings{Host: "before.test", Port: "22", User: "alice"}}
+	d.captureConnectionDraft()
+	d.settings.Host = "draft.test"
+	view := ui.NewTester(d.view, 640, 480)
+	if err := view.Click("选择 SSH 连接"); err != nil {
+		t.Fatal(err)
+	}
+	if d.workspace != "connections" || !d.editConnection || d.settings.Host != "draft.test" || !d.hasUnsavedConnection() {
+		t.Fatal("terminal navigation lost the unfinished host draft")
+	}
+}

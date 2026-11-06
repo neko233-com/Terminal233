@@ -144,10 +144,14 @@ func TestTerminalThemesPersistAndApplyToExistingAndNewSessions(t *testing.T) {
 		t.Fatal("theme was lost when another setting was saved")
 	}
 	d.changeTerminalTheme("")
-	if d.terminalOptions().Theme != nil || d.terminalOptions().DarkTheme != nil {
-		t.Fatal("follow-interface theme did not restore defaults")
+	if d.terminalOptions().Theme == nil || d.terminalOptions().DarkTheme == nil || d.terminalOptions().Theme.Background != workspaceLightTheme.Background || d.terminalOptions().DarkTheme.Background != workspaceTheme.Background {
+		t.Fatal("follow-interface theme did not match the workspace backgrounds")
 	}
 	view.Frame()
+	color = view.Image().RGBAAt(int(r.X+10), int(r.Y+r.H-10))
+	if color.R != workspaceTheme.Background.R || color.G != workspaceTheme.Background.G || color.B != workspaceTheme.Background.B {
+		t.Fatal("follow-interface theme did not apply to the existing terminal")
+	}
 	if err := view.Click("终端设置"); err != nil {
 		t.Fatal(err)
 	}

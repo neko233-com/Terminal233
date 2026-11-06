@@ -106,6 +106,26 @@ func TestWideTerminalPlacesQuickCommandsBesideTerminal(t *testing.T) {
 	}
 }
 
+func TestTerminalToolbarUsesAccessibleCompactActions(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	for _, size := range [][2]int{{640, 480}, {1280, 800}} {
+		d := &desktop{workspace: "terminal", term: term, currentSession: 1, sessions: []*workspaceSession{{id: 1, label: "local", term: term}}}
+		view := ui.NewTester(d.view, size[0], size[1])
+		for _, label := range []string{"查找", "快速命令", "分屏查看", "打开文件面板"} {
+			r, ok := view.Find(label)
+			if !ok || r.W > 40 || r.H > 40 || r.X < 0 || r.X+r.W > float32(size[0]) || r.Y+r.H > float32(size[1]) {
+				t.Errorf("toolbar action %q not compact or reachable at %dx%d: %+v", label, size[0], size[1], r)
+			}
+		}
+	}
+}
+
 func TestWideWorkspaceTabsSwitchBetweenHostsAndSession(t *testing.T) {
 	left, right := net.Pipe()
 	defer right.Close()

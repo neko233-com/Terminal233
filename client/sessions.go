@@ -310,7 +310,11 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 			if current {
 				label = "当前会话：" + s.label
 			}
-			if ui.Button(c.Key(fmt.Sprintf("split-focus-%d", s.id)), label).Disabled(current || !d.canSwitchSession()).Clicked() {
+			button := ui.Button(c.Key(fmt.Sprintf("split-focus-%d", s.id)), label).BorderWidth(0).Padding(4, 10).FontSize(12).Disabled(current || !d.canSwitchSession())
+			if current {
+				button = button.Background(c.Theme().SurfacePressed)
+			}
+			if button.Clicked() {
 				d.selectSession(s.id)
 			}
 			view := terminal.View(c, s.term).Label("终端：" + s.label).Grow(1).FillWidth()

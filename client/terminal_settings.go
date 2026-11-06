@@ -58,7 +58,10 @@ func terminalThemePair(id string) (*terminal.Theme, *terminal.Theme, error) {
 			continue
 		}
 		if choice.id == "" {
-			return nil, nil, nil
+			light, dark := terminal.LightTheme(), terminal.DarkTheme()
+			light.Background, light.Foreground = workspaceLightTheme.Background, workspaceLightTheme.Text
+			dark.Background, dark.Foreground = workspaceTheme.Background, workspaceTheme.Text
+			return light, dark, nil
 		}
 		light, err := terminal.GhosttyTheme(choice.light)
 		if err != nil {
