@@ -1,6 +1,10 @@
 package main
 
-import "github.com/egoist/mygo/ui"
+import (
+	"fmt"
+
+	"github.com/egoist/mygo/ui"
+)
 
 func (d *desktop) clampFileWorkspaceSplit(width float32) {
 	if d.fileWorkspacePercent == 0 {
@@ -32,6 +36,19 @@ func fileListRegion(c *ui.Context, key, label string, height float32) ui.Element
 		return list.Grow(1).MinHeight(60)
 	}
 	return list.Height(height)
+}
+
+// Successful directory counts belong in the footer; errors and transfer
+// messages remain visible above the list.
+func filePaneNotice(status string, count int) string {
+	if status == fmt.Sprintf("%d 个条目", count) {
+		return ""
+	}
+	return status
+}
+
+func filePathButton(c *ui.Context, key, text, label, tip string, disabled bool) ui.Element {
+	return ui.Button(c.Key(key), text).Label(label).Tooltip(tip).Width(32).Height(32).Padding(0).BorderWidth(0).Radius(6).Background(ui.Transparent).Disabled(disabled)
 }
 
 func (d *desktop) filePickerLabelWidth(c *ui.Context, left bool) float32 {
@@ -75,6 +92,7 @@ func (d *desktop) fileColumnHeader(c *ui.Context, left bool) {
 		order = "name"
 	}
 	ui.Row(c.Key("file-columns-"+scope)).Label(scope+"文件列标题").FillWidth().Height(30).Shrink(0).Gap(8).Padding(0, 8).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Children(func() {
+		ui.Box(c).Width(16).Shrink(0)
 		for _, column := range []struct {
 			key, name string
 			width     float32

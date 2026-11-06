@@ -83,6 +83,14 @@ func TestSavedJumpChainConnectionWorkspaceAndBackup(t *testing.T) {
 	if _, err := reopened.resolveWorkspace(w); err != nil {
 		t.Fatalf("workspace could not resolve its unchanged route: %v", err)
 	}
+	reopened.workspaceHostSelected = map[string]bool{"profile:" + string(p3.ID): true}
+	selected, err := reopened.workspaceFromSelection()
+	if err != nil || len(selected.Entries) != 1 || selected.Entries[0].JumpRoute != settings.savedRouteSignature() {
+		t.Fatalf("selected workspace omitted the saved jump route: %v", err)
+	}
+	if _, err := reopened.resolveWorkspace(selected); err != nil {
+		t.Fatalf("selected workspace could not resolve its jump route: %v", err)
+	}
 	if _, err := prepareCloudAccount(settings, "target", nil, ""); err == nil {
 		t.Fatal("cloud sync silently discarded a saved jump route")
 	}
@@ -104,6 +112,9 @@ func TestSavedJumpChainConnectionWorkspaceAndBackup(t *testing.T) {
 	}
 	if _, err := reopened.resolveWorkspace(w); err == nil {
 		t.Fatal("workspace accepted revoked jump trust")
+	}
+	if _, err := reopened.workspaceFromSelection(); err == nil {
+		t.Fatal("selected workspace accepted revoked jump trust")
 	}
 	reopened.profiles[0].Settings.Fingerprint = fp1
 	doc, err := reopened.snapshotLocalArchive()

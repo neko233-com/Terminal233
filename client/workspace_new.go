@@ -74,8 +74,15 @@ func (d *desktop) workspaceFromSelection() (savedWorkspace, error) {
 		if !d.workspaceHostSelected["profile:"+string(p.ID)] {
 			continue
 		}
-		s := p.Settings
-		w.Entries = append(w.Entries, workspaceTemplateEntry{Kind: "profile", Label: p.Label, Group: p.Group, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint})
+		s, err := d.profileCredential(p)
+		if err != nil {
+			return savedWorkspace{}, fmt.Errorf("%s：%w", p.Label, err)
+		}
+		s, err = d.resolveSavedRoute(s)
+		if err != nil {
+			return savedWorkspace{}, fmt.Errorf("%s：%w", p.Label, err)
+		}
+		w.Entries = append(w.Entries, workspaceTemplateEntry{Kind: "profile", Label: p.Label, Group: p.Group, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint, JumpRoute: s.savedRouteSignature()})
 	}
 	if d.cloud != nil && d.cloud.base != nil {
 		for _, a := range d.accounts {

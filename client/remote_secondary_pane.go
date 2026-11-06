@@ -289,14 +289,14 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 	}
 	ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 		backIndex, backDir, back := p.history.target(-1)
-		if ui.Button(c.Key("secondary-back"), "‹").Label("左侧目录后退").Tooltip("后退").Width(36).Disabled(d.busy || p.loading || !back).Clicked() {
+		if filePathButton(c, "secondary-back", "‹", "左侧目录后退", "后退", d.busy || p.loading || !back).Clicked() {
 			d.requestSecondaryPane(backDir, backIndex)
 		}
 		forwardIndex, forwardDir, forward := p.history.target(1)
-		if ui.Button(c.Key("secondary-forward"), "›").Label("左侧目录前进").Tooltip("前进").Width(36).Disabled(d.busy || p.loading || !forward).Clicked() {
+		if filePathButton(c, "secondary-forward", "›", "左侧目录前进", "前进", d.busy || p.loading || !forward).Clicked() {
 			d.requestSecondaryPane(forwardDir, forwardIndex)
 		}
-		if ui.Button(c.Key("secondary-parent"), "↑").Label("左侧上一级目录").Tooltip("上一级").Width(36).Disabled(d.busy || p.loading).Clicked() {
+		if filePathButton(c, "secondary-parent", "↑", "左侧上一级目录", "上一级", d.busy || p.loading).Clicked() {
 			d.requestSecondaryPane(path.Dir(p.directory), -1)
 		}
 		ui.TextInput(c.Key("secondary-path"), &p.input).Label("左侧远程目录").Placeholder("远程目录路径").OnChange(d.secondaryPaneInputChanged).OnSubmit(func() { d.requestSecondaryPane(p.input, -1) }).Grow(1)
@@ -306,7 +306,7 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 				d.requestSecondaryPane(target, -1)
 			}
 		})
-		if ui.Button(c.Key("secondary-refresh"), "↻").Label("打开左侧目录").Tooltip("打开或刷新目录").Width(36).Disabled(d.busy).Clicked() {
+		if filePathButton(c, "secondary-refresh", "↻", "打开左侧目录", "打开或刷新目录", d.busy).Clicked() {
 			d.requestSecondaryPane(p.input, -1)
 		}
 	})
@@ -316,8 +316,8 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 			p.paneSelection = paneSelection{}
 		})
 	}
-	if p.status != "" {
-		ui.Text(c, p.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+	if notice := filePaneNotice(p.status, len(p.files)); notice != "" {
+		ui.Text(c, notice).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
 	d.fileColumnHeader(c, true)
 
@@ -330,7 +330,7 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 				label = "📁 " + label
 			}
 			ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-				row := ui.Button(c.Key("secondary-file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Background(ui.Transparent).Disabled(d.busy || p.loading || p.input != p.directory)
+				row := ui.Button(c.Key("secondary-file-"+f.Name), "").Label(label).Height(34).Padding(0, 8).Radius(6).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Background(ui.Transparent).Disabled(d.busy || p.loading || p.input != p.directory)
 				if p.selected == f.Name || p.paneSelection.names[f.Name] {
 					row = row.Selected(true).Background(c.Theme().SurfacePressed)
 				}
@@ -340,7 +340,7 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 						icon, color = fileIcon, c.Theme().AccentHover
 					}
 					ui.Icon(c, icon).Width(16).Height(16).Shrink(0).TextColor(color)
-					ui.Text(c, f.Name).Grow(1).SingleLine().Tooltip(f.Name)
+					ui.Text(c, f.Name).FontSize(13).Grow(1).SingleLine().Tooltip(f.Name)
 					d.fileMetadata(c, f, true)
 				})
 				item := d.leftPaneDragForFile(f)
@@ -380,16 +380,18 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 			})
 		}
 	})
-	if len(p.paneSelection.names) > 1 {
-		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, fmt.Sprintf("已选择 %d 项", len(p.paneSelection.names))).FontSize(12).TextColor(c.Theme().TextMuted)
+	ui.Row(c).FillWidth().Shrink(0).Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
+		summary := fmt.Sprintf("%d 项", len(visible))
+		if count := len(p.paneSelection.names); count > 0 {
+			summary = fmt.Sprintf("已选择 %d 项", count)
+		}
+		ui.Text(c, summary).FontSize(12).TextColor(c.Theme().TextMuted).Grow(1)
+		if len(p.paneSelection.names) > 1 {
 			if ui.Button(c.Key("secondary-clear-selection"), "清除").Label("清除左侧文件选择").Disabled(d.busy).Clicked() {
 				p.paneSelection = paneSelection{}
 				p.selected = ""
 			}
-		})
-	}
-	ui.Row(c).FillWidth().Gap(6).Children(func() {
+		}
 		left, right := d.leftPaneDrag(p.selected), d.rightPaneDrag(d.selectedFile)
 		leftLabel, rightLabel := "复制到右侧 →", "← 复制到左侧"
 		if len(left.items) > 1 {
@@ -398,10 +400,10 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 		if len(right.items) > 1 {
 			rightLabel = fmt.Sprintf("← 复制 %d 项", len(right.items))
 		}
-		if ui.Button(c.Key("secondary-copy-right"), leftLabel).Disabled(!d.canCopySecondaryToRight(left)).Clicked() {
+		if p.selected != "" && ui.Button(c.Key("secondary-copy-right"), leftLabel).Disabled(!d.canCopySecondaryToRight(left)).Clicked() {
 			d.copySecondaryToRight(left)
 		}
-		if ui.Button(c.Key("secondary-copy-left"), rightLabel).Disabled(!d.canCopyRightToSecondary(right)).Clicked() {
+		if d.selectedFile != "" && ui.Button(c.Key("secondary-copy-left"), rightLabel).Disabled(!d.canCopyRightToSecondary(right)).Clicked() {
 			d.copyRightToSecondary(right)
 		}
 	})

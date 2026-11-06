@@ -93,19 +93,21 @@ func (d *desktop) leftPaneToolbar(c *ui.Context) {
 	if mkdir.Clicked() {
 		d.beginLeftAction("mkdir", "")
 	}
-	rename := terminalActionButton(c, "left-pane-rename", "重命名左侧所选项", editIcon, false, d.busy || !ready || selected == "" || count > 1)
-	if rename.Clicked() {
-		d.beginLeftAction("rename", selected)
-	}
-	remove := terminalActionButton(c, "left-pane-delete", "删除左侧所选项", trashIcon, false, d.busy || !ready || selected == "" || count > 1)
-	if remove.Clicked() {
-		d.beginLeftAction("delete", selected)
-	}
 	anchor := mkdir
-	if d.leftPaneAction.kind == "rename" {
-		anchor = rename
-	} else if d.leftPaneAction.kind == "delete" {
-		anchor = remove
+	if selected != "" && count <= 1 {
+		rename := terminalActionButton(c, "left-pane-rename", "重命名左侧所选项", editIcon, false, d.busy || !ready)
+		if rename.Clicked() {
+			d.beginLeftAction("rename", selected)
+		}
+		remove := terminalActionButton(c, "left-pane-delete", "删除左侧所选项", trashIcon, false, d.busy || !ready)
+		if remove.Clicked() {
+			d.beginLeftAction("delete", selected)
+		}
+		if d.leftPaneAction.kind == "rename" {
+			anchor = rename
+		} else if d.leftPaneAction.kind == "delete" {
+			anchor = remove
+		}
 	}
 	open := d.leftPaneAction.kind != ""
 	ui.PopoverBase(c, anchor, &open, func(panel ui.Element) {

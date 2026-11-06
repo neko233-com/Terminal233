@@ -592,6 +592,7 @@ func (d *desktop) fileView(c *ui.Context, compact bool) { d.filePaneView(c, comp
 func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 	d.syncCheckedDirectory()
 	local := d.term != nil && d.shell == nil
+	emptyFilePane := d.fileSessionUnavailable() && d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0
 	var optionsButton ui.Element
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
 		sessionLabel := "选择主机"
@@ -641,19 +642,21 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 				}
 			}
 		}
-		if terminalActionButton(c, "file-filter-toggle", "筛选文件列表", searchIcon, d.showFileFilter || d.fileFilter != "", false).Clicked() {
-			d.showFileFilter = !d.showFileFilter
-		}
-		optionsLabel := "排序与显示"
-		if d.showFileOptions {
-			optionsLabel = "收起排序与显示"
-		}
-		optionsButton = terminalActionButton(c, "file-options-toggle", optionsLabel, moreIcon, d.showFileOptions, false)
-		if optionsButton.Clicked() {
-			d.showFileOptions = !d.showFileOptions
+		if !emptyFilePane {
+			if terminalActionButton(c, "file-filter-toggle", "筛选文件列表", searchIcon, d.showFileFilter || d.fileFilter != "", false).Clicked() {
+				d.showFileFilter = !d.showFileFilter
+			}
+			optionsLabel := "排序与显示"
+			if d.showFileOptions {
+				optionsLabel = "收起排序与显示"
+			}
+			optionsButton = terminalActionButton(c, "file-options-toggle", optionsLabel, moreIcon, d.showFileOptions, false)
+			if optionsButton.Clicked() {
+				d.showFileOptions = !d.showFileOptions
+			}
 		}
 	})
-	if d.fileSessionUnavailable() && d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0 {
+	if emptyFilePane {
 		empty := ui.Column(c).FillWidth().Padding(24).Gap(10)
 		if fill {
 			empty = empty.Grow(1).Justify(ui.Center).AlignItems(ui.Center)
@@ -661,15 +664,18 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 			empty = empty.Background(c.Theme().Surface).Radius(8)
 		}
 		empty.Children(func() {
-			ui.Text(c, "选择主机").FontSize(17).Bold()
-			ui.Text(c, "连接后浏览和传输文件。").FontSize(13).TextColor(c.Theme().TextMuted).Wrap()
-			ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-				if ui.Button(c.Key("files-open-local"), "打开本机终端").Disabled(d.busy || d.terminalLimitReached()).Clicked() {
-					d.openLocalTerminal()
-				}
+			ui.Box(c).Width(56).Height(56).Radius(14).Background(c.Theme().SurfacePressed).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+				ui.Icon(c, fileIcon).Width(24).Height(24).TextColor(c.Theme().TextMuted)
+			})
+			ui.Text(c, "选择主机").FontSize(17).Bold().TextAlign(ui.Center)
+			ui.Text(c, "连接后即可浏览和传输文件").FontSize(13).TextColor(c.Theme().TextMuted).Wrap().TextAlign(ui.Center)
+			ui.Row(c).FillWidth().Wrap().Gap(8).Justify(ui.Center).Children(func() {
 				if ui.PrimaryButton(c.Key("files-open-connections"), "选择 SSH 连接").Clicked() {
 					d.fileReturnAfterConnect = true
 					d.workspace = "connections"
+				}
+				if ui.Button(c.Key("files-open-local"), "打开本机终端").Disabled(d.busy || d.terminalLimitReached()).Clicked() {
+					d.openLocalTerminal()
 				}
 			})
 		})
@@ -684,13 +690,13 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 	ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 		_, _, canBack := d.fileHistory.target(-1)
 		_, _, canForward := d.fileHistory.target(1)
-		if ui.Button(c.Key("file-back"), "‹").Label("后退").Tooltip("后退").Width(36).Disabled(d.busy || d.fileSessionUnavailable() || !canBack).Clicked() {
+		if filePathButton(c, "file-back", "‹", "后退", "后退", d.busy || d.fileSessionUnavailable() || !canBack).Clicked() {
 			d.navigateFileHistory(-1)
 		}
-		if ui.Button(c.Key("file-forward"), "›").Label("前进").Tooltip("前进").Width(36).Disabled(d.busy || d.fileSessionUnavailable() || !canForward).Clicked() {
+		if filePathButton(c, "file-forward", "›", "前进", "前进", d.busy || d.fileSessionUnavailable() || !canForward).Clicked() {
 			d.navigateFileHistory(1)
 		}
-		if ui.Button(c.Key("file-parent"), "↑").Label("上一级").Tooltip("上一级").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
+		if filePathButton(c, "file-parent", "↑", "上一级", "上一级", d.busy || d.fileSessionUnavailable()).Clicked() {
 			if local {
 				d.fileDir = filepath.Dir(d.fileDir)
 			} else {
@@ -718,7 +724,7 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 			d.filePaneSelection = paneSelection{}
 			d.refreshFiles()
 		})
-		if ui.Button(c.Key("file-refresh"), "↻").Label("打开目录").Tooltip("打开目录").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
+		if filePathButton(c, "file-refresh", "↻", "打开目录", "打开目录", d.busy || d.fileSessionUnavailable()).Clicked() {
 			d.selectedFile, d.confirmDelete, d.fileRename = "", "", ""
 			d.refreshFiles()
 		}
@@ -728,8 +734,12 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 	} else if terminalEnded(d.term) {
 		ui.Text(c, "当前会话已结束，文件操作不可用；请重新连接或打开终端。").TextColor(c.Theme().TextMuted).Wrap()
 	}
-	if d.fileStatus != "" {
-		status := ui.Text(c, d.fileStatus).FontSize(12).Tooltip(d.fileStatus)
+	notice := d.fileStatus
+	if fill {
+		notice = filePaneNotice(notice, len(d.files))
+	}
+	if notice != "" {
+		status := ui.Text(c, notice).FontSize(12).Tooltip(notice)
 		if fill {
 			status.SingleLine()
 		} else {
@@ -884,14 +894,14 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 							delete(d.fileChecked, f.Name)
 						}
 					}
-					row := ui.Button(c.Key("file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Background(ui.Transparent).Disabled(d.busy || d.fileSessionUnavailable())
+					row := ui.Button(c.Key("file-"+f.Name), "").Label(label).Height(34).Padding(0, 8).Radius(6).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Background(ui.Transparent).Disabled(d.busy || d.fileSessionUnavailable())
 					row.Children(func() {
 						icon, color := documentIcon, c.Theme().TextMuted
 						if f.IsDir {
 							icon, color = fileIcon, c.Theme().AccentHover
 						}
 						ui.Icon(c, icon).Width(16).Height(16).Shrink(0).TextColor(color)
-						ui.Text(c, f.Name).Grow(1).SingleLine().Tooltip(f.Name)
+						ui.Text(c, f.Name).FontSize(13).Grow(1).SingleLine().Tooltip(f.Name)
 						if fill {
 							d.fileMetadata(c, f, false)
 						} else {
@@ -1031,7 +1041,10 @@ func (d *desktop) filePaneFooter(c *ui.Context, local, compact bool, visible []r
 	if toolsOpen {
 		toolsLabel = "收起文件操作"
 	}
-	ui.Row(c).FillWidth().Children(func() {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+		if fill {
+			ui.Text(c, fmt.Sprintf("%d 项", len(visible))).FontSize(12).TextColor(c.Theme().TextMuted).Grow(1)
+		}
 		if ui.Button(c.Key("file-tools-toggle"), toolsLabel).Disabled(d.cancelTransfer != nil).Clicked() {
 			d.showFileTools = !d.showFileTools
 		}

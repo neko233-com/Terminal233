@@ -251,13 +251,13 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 	ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 		_, _, back := d.localPane.history.target(-1)
 		_, _, forward := d.localPane.history.target(1)
-		if ui.Button(c.Key("local-pane-back"), "‹").Label("本机目录后退").Tooltip("后退").Width(36).Disabled(!back).Clicked() {
+		if filePathButton(c, "local-pane-back", "‹", "本机目录后退", "后退", !back).Clicked() {
 			d.navigateLocalPane(-1)
 		}
-		if ui.Button(c.Key("local-pane-forward"), "›").Label("本机目录前进").Tooltip("前进").Width(36).Disabled(!forward).Clicked() {
+		if filePathButton(c, "local-pane-forward", "›", "本机目录前进", "前进", !forward).Clicked() {
 			d.navigateLocalPane(1)
 		}
-		if ui.Button(c.Key("local-pane-parent"), "↑").Label("本机上一级目录").Tooltip("上一级").Width(36).Disabled(d.busy || d.localPane.loading || d.localPane.directory == "").Clicked() {
+		if filePathButton(c, "local-pane-parent", "↑", "本机上一级目录", "上一级", d.busy || d.localPane.loading || d.localPane.directory == "").Clicked() {
 			d.requestLocalPane(filepath.Dir(d.localPane.directory), -1)
 		}
 		ui.TextInput(c.Key("local-pane-path"), &d.localPane.input).Label("本机目录").Placeholder("本机绝对目录路径").OnChange(d.localPaneInputChanged).OnSubmit(func() { d.requestLocalPane(d.localPane.input, -1) }).Grow(1)
@@ -267,7 +267,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 				d.requestLocalPane(target, -1)
 			}
 		})
-		if ui.Button(c.Key("local-pane-open"), "↻").Label("打开本机目录").Tooltip("打开或刷新目录").Width(36).Clicked() {
+		if filePathButton(c, "local-pane-open", "↻", "打开本机目录", "打开或刷新目录", false).Clicked() {
 			d.requestLocalPane(d.localPane.input, -1)
 		}
 	})
@@ -277,8 +277,8 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 			d.localPane.paneSelection = paneSelection{}
 		})
 	}
-	if d.localPane.status != "" {
-		ui.Text(c, d.localPane.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+	if notice := filePaneNotice(d.localPane.status, len(d.localPane.files)); notice != "" {
+		ui.Text(c, notice).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
 	d.fileColumnHeader(c, true)
 
@@ -291,7 +291,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 				label = "📁 " + label
 			}
 			ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-				row := ui.Button(c.Key("local-pane-file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Background(ui.Transparent)
+				row := ui.Button(c.Key("local-pane-file-"+f.Name), "").Label(label).Height(34).Padding(0, 8).Radius(6).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Background(ui.Transparent)
 				if d.localPane.selected == f.Name || d.localPane.paneSelection.names[f.Name] {
 					row = row.Selected(true).Background(c.Theme().SurfacePressed)
 				}
@@ -301,7 +301,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 						icon, color = fileIcon, c.Theme().AccentHover
 					}
 					ui.Icon(c, icon).Width(16).Height(16).Shrink(0).TextColor(color)
-					ui.Text(c, f.Name).Grow(1).SingleLine().Tooltip(f.Name)
+					ui.Text(c, f.Name).FontSize(13).Grow(1).SingleLine().Tooltip(f.Name)
 					d.fileMetadata(c, f, true)
 				})
 				item := d.localPaneDragForFile(f)
@@ -346,16 +346,18 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 			})
 		}
 	})
-	if len(d.localPane.paneSelection.names) > 1 {
-		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, fmt.Sprintf("已选择 %d 项", len(d.localPane.paneSelection.names))).FontSize(12).TextColor(c.Theme().TextMuted)
+	ui.Row(c).FillWidth().Shrink(0).Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
+		summary := fmt.Sprintf("%d 项", len(visible))
+		if count := len(d.localPane.paneSelection.names); count > 0 {
+			summary = fmt.Sprintf("已选择 %d 项", count)
+		}
+		ui.Text(c, summary).FontSize(12).TextColor(c.Theme().TextMuted).Grow(1)
+		if len(d.localPane.paneSelection.names) > 1 {
 			if ui.Button(c.Key("local-pane-clear-selection"), "清除").Label("清除本机文件选择").Disabled(d.busy).Clicked() {
 				d.localPane.paneSelection = paneSelection{}
 				d.localPane.selected = ""
 			}
-		})
-	}
-	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+		}
 		localEligible, remoteEligible := false, false
 		for _, entry := range d.localPane.files {
 			if entry.Name == d.localPane.selected && eligiblePaneItem(entry) {
@@ -380,7 +382,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 		if len(origin.items) > 1 {
 			uploadLabel = fmt.Sprintf("复制 %d 项 →", len(origin.items))
 		}
-		if ui.Button(c.Key("local-pane-upload"), uploadLabel).Disabled(!localEligible || pathPending || !d.canUploadPaneFile(origin)).Clicked() {
+		if localEligible && ui.Button(c.Key("local-pane-upload"), uploadLabel).Disabled(pathPending || !d.canUploadPaneFile(origin)).Clicked() {
 			d.uploadPaneFile(origin)
 		}
 		source := d.rightPaneDrag(d.selectedFile)
@@ -389,7 +391,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 		if len(source.items) > 1 {
 			downloadLabel = fmt.Sprintf("← 复制 %d 项", len(source.items))
 		}
-		if ui.Button(c.Key("local-pane-download"), downloadLabel).Disabled(!remoteEligible || pathPending || downloadErr != nil).Clicked() {
+		if remoteEligible && ui.Button(c.Key("local-pane-download"), downloadLabel).Disabled(pathPending || downloadErr != nil).Clicked() {
 			d.downloadPaneFile(source)
 		}
 	})

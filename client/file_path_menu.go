@@ -48,7 +48,7 @@ func fileParentMenu(c *ui.Context, key, directory string, local, disabled bool, 
 	if disabled || len(parents) == 0 {
 		*open = false
 	}
-	button := ui.Button(c.Key(key+"-toggle"), "▾").Label("选择上级目录").Tooltip("选择上级目录").Width(32).Padding(0).Disabled(disabled || len(parents) == 0)
+	button := filePathButton(c, key+"-toggle", "▾", "选择上级目录", "选择上级目录", disabled || len(parents) == 0)
 	if button.Clicked() {
 		*open = !*open
 	}
