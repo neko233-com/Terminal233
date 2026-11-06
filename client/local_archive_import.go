@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -19,15 +21,12 @@ func newUnusedBackupID(used map[string]bool) (string, error) {
 	return "", errors.New("无法生成唯一标识，请重试")
 }
 
-// Appends the entire profile/identity set and the rule set. The rule file is
-// locked before the profile commit; if its write fails, the profile change is
-// rolled back with the normal stale-revision check rather than overwriting a
-// concurrent writer. A failed rollback is reported as a partial import.
+// Imports both stores using a recoverable journal under their respective locks.
 func (d *desktop) importLocalArchive(doc localArchiveDocument) error {
-	return d.importLocalArchiveWith(doc, updateForwardRules)
+	return d.importLocalArchiveWith(doc, nil)
 }
 
-func (d *desktop) importLocalArchiveWith(doc localArchiveDocument, updateRules func(string, func(*forwardRulesFile) error) (forwardRulesFile, error)) error {
+func (d *desktop) importLocalArchiveWith(doc localArchiveDocument, fault func(string) error) error {
 	if err := validateLocalArchive(doc); err != nil {
 		return err
 	}
@@ -115,51 +114,74 @@ func (d *desktop) importLocalArchiveWith(doc localArchiveDocument, updateRules f
 	if len(groups) > 10000 {
 		return errors.New("导入后分组数量超过上限")
 	}
-	committed := false
-	saved, err := updateRules(d.forwardRulesPath, func(file *forwardRulesFile) error {
-		if len(file.Items)+len(doc.Rules) > maxSavedForwardRules {
-			return errors.New("导入后转发规则数量超过上限")
+	unlock, err := lockLocalImport(d.profilePath, d.forwardRulesPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := checkLocalImportPending(d.profilePath); err != nil {
+		return err
+	}
+	oldProfiles, profilesExist, err := readLocalStore(d.profilePath, 4<<20)
+	if err != nil {
+		return err
+	}
+	if profilesExist != d.profileExists || (profilesExist && sha256.Sum256(oldProfiles) != d.profileRevision) {
+		d.profileStoreConflict = true
+		return errors.New("本机连接已被其他窗口修改，请重新载入")
+	}
+	oldRules, rulesExist, err := readLocalStore(d.forwardRulesPath, 2<<20)
+	if err != nil {
+		return err
+	}
+	file, err := readForwardRulesUnchecked(d.forwardRulesPath)
+	if err != nil {
+		return err
+	}
+	if len(file.Items)+len(doc.Rules) > maxSavedForwardRules {
+		return errors.New("导入后转发规则数量超过上限")
+	}
+	usedRules := map[string]bool{}
+	for _, r := range file.Items {
+		usedRules[r.ID] = true
+	}
+	for _, src := range doc.Rules {
+		id, e := newUnusedBackupID(usedRules)
+		if e != nil {
+			return e
 		}
-		usedRules := map[string]bool{}
-		for _, r := range file.Items {
-			usedRules[r.ID] = true
-		}
-		for _, src := range doc.Rules {
-			id, e := newUnusedBackupID(usedRules)
+		hostID, ok := hostMap[src.HostID]
+		if !ok {
+			hostID, e = newUnusedBackupID(usedHost)
 			if e != nil {
 				return e
 			}
-			hostID, ok := hostMap[src.HostID]
-			if !ok {
-				hostID, e = newUnusedBackupID(usedHost)
-				if e != nil {
-					return e
-				}
-				hostMap[src.HostID] = hostID
-			}
-			src.ID, src.HostID = id, hostID
-			file.Items = append(file.Items, src)
+			hostMap[src.HostID] = hostID
 		}
-		d.profiles, d.identities, d.profileGroups, d.nextProfileID = profiles, identities, groups, next
-		if err := d.saveProfiles(); err != nil {
-			d.profiles, d.identities, d.profileGroups, d.nextProfileID = beforeProfiles, beforeIdentities, beforeGroups, beforeNext
-			return err
-		}
-		committed = true
-		return nil
-	})
-	if err != nil {
-		if !committed {
-			return err
-		}
-		d.profiles, d.identities, d.profileGroups, d.nextProfileID = beforeProfiles, beforeIdentities, beforeGroups, beforeNext
-		if rollbackErr := d.saveProfiles(); rollbackErr != nil {
-			d.profiles, d.identities, d.profileGroups, d.nextProfileID = profiles, identities, groups, next
-			return fmt.Errorf("主机已导入但转发规则写入及自动回滚失败，请重新载入后核对：%v；%v", err, rollbackErr)
-		}
-		return fmt.Errorf("转发规则未保存，主机导入已回滚：%w", err)
+		src.ID, src.HostID = id, hostID
+		file.Items = append(file.Items, src)
 	}
-	d.forwardRules = saved.Items
+	d.profiles, d.identities, d.profileGroups, d.nextProfileID = profiles, identities, groups, next
+	newProfiles, version, err := d.encodeProfiles()
+	d.profiles, d.identities, d.profileGroups, d.nextProfileID = beforeProfiles, beforeIdentities, beforeGroups, beforeNext
+	if err != nil {
+		return err
+	}
+	newRules, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err = commitLocalImportLocked(d.profilePath, d.forwardRulesPath, oldProfiles, profilesExist, oldRules, rulesExist, newProfiles, newRules, fault); err != nil {
+		if checkLocalImportPending(d.profilePath) != nil {
+			d.profileStoreBlocked = true
+		}
+		return err
+	}
+	d.profiles, d.identities, d.profileGroups, d.nextProfileID = profiles, identities, groups, next
+	d.profileExists, d.profileRevision, d.profileFormat = true, sha256.Sum256(newProfiles), version
+	d.profileStoreConflict = false
+	d.forwardRules = file.Items
+	d.stopChangedForwardRules()
 	d.reconcileForwardRules()
 	return nil
 }

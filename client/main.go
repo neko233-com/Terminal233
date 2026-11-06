@@ -1183,7 +1183,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.118"
+const version = "0.3.119"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -1207,9 +1207,19 @@ func main() {
 	if dir, err := os.UserConfigDir(); err != nil {
 		d.profileStoreBlocked = true
 		d.status = "无法找到本机配置目录：" + err.Error()
-	} else if err = d.loadProfiles(filepath.Join(dir, "NekoSSH", "profiles.json")); err != nil {
-		d.profileStoreBlocked = true
-		d.status = "读取本机连接失败（未覆盖原文件）：" + err.Error()
+	} else {
+		d.profilePath = filepath.Join(dir, "NekoSSH", "profiles.json")
+		d.forwardRulesPath = filepath.Join(dir, "NekoSSH", "forward-rules.json")
+		if recovered, recoveryErr := recoverLocalImport(d.profilePath, d.forwardRulesPath); recoveryErr != nil {
+			d.profileStoreBlocked = true
+			d.status = "恢复本机导入失败（原文件已保留）：" + recoveryErr.Error()
+			d.localArchiveStatus = d.status
+		} else if err = d.loadProfiles(d.profilePath); err != nil {
+			d.profileStoreBlocked = true
+			d.status = "读取本机连接失败（未覆盖原文件）：" + err.Error()
+		} else if recovered {
+			d.status = "已恢复中断的本机导入。"
+		}
 	}
 	if dir, err := os.UserConfigDir(); err != nil {
 		d.preferencesStatus = "界面设置不可用：" + err.Error()

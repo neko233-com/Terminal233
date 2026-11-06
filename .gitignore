@@ -152,3 +152,5 @@ workspaces.json
 .workspaces-*.tmp
 forward-rules.json
 .forward-rules-*.tmp
+.local-import.journal
+.local-import-*.tmp

@@ -32,6 +32,21 @@ type diskProfiles struct {
 }
 
 func (d *desktop) loadProfiles(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	lock := flock.New(path + ".lock")
+	locked, err := lock.TryLock()
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return errors.New("另一个窗口正在保存连接，请稍后重试")
+	}
+	defer lock.Unlock()
+	if err := checkLocalImportPending(path); err != nil {
+		return err
+	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		d.profileSelectionAnchor = ""
@@ -116,13 +131,7 @@ func (d *desktop) loadProfiles(path string) error {
 	return nil
 }
 
-func (d *desktop) saveProfiles() error {
-	if d.profileStoreBlocked {
-		return errors.New("连接存储不可用，原文件未覆盖")
-	}
-	if d.profilePath == "" {
-		return nil
-	}
+func (d *desktop) encodeProfiles() ([]byte, int, error) {
 	version := 1
 	if len(d.profileGroups) != 0 || d.profileFormat == 2 {
 		version = 2
@@ -140,7 +149,7 @@ func (d *desktop) saveProfiles() error {
 			version = max(version, 3)
 		}
 		if !validStoredProfileTags(p.Tags) {
-			return errors.New("连接标签格式无效")
+			return nil, 0, errors.New("连接标签格式无效")
 		}
 		if len(p.Tags) > 0 {
 			version = max(version, 4)
@@ -150,7 +159,7 @@ func (d *desktop) saveProfiles() error {
 		}
 		if p.StableID != "" {
 			if !validRandomID(p.StableID) {
-				return errors.New("主机标识无效")
+				return nil, 0, errors.New("主机标识无效")
 			}
 			version = max(version, 6)
 		}
@@ -158,6 +167,23 @@ func (d *desktop) saveProfiles() error {
 	}
 	saved.Version = version
 	data, err := json.MarshalIndent(saved, "", "  ")
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(data) > 4<<20 {
+		return nil, 0, errors.New("连接列表文件过大")
+	}
+	return data, version, nil
+}
+
+func (d *desktop) saveProfiles() error {
+	if d.profileStoreBlocked {
+		return errors.New("连接存储不可用，原文件未覆盖")
+	}
+	if d.profilePath == "" {
+		return nil
+	}
+	data, version, err := d.encodeProfiles()
 	if err != nil {
 		return err
 	}
@@ -176,6 +202,9 @@ func (d *desktop) saveProfiles() error {
 		return errors.New("另一个窗口正在保存连接，请稍后重试")
 	}
 	defer lock.Unlock()
+	if err := checkLocalImportPending(d.profilePath); err != nil {
+		return err
+	}
 	current, err := os.ReadFile(d.profilePath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err

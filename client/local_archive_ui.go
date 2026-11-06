@@ -35,11 +35,10 @@ func (d *desktop) localArchiveAction(action string) {
 			d.win.Update(func() {
 				d.busy = false
 				if err != nil {
-					if worker.profileRevision != expected && !worker.profileStoreConflict && d.profileRevision == expected {
-						// A failed rule write may have committed and then safely
-						// rolled back profiles, changing the on-disk revision.
-						d.profileRevision, d.profileExists, d.profileFormat = worker.profileRevision, worker.profileExists, worker.profileFormat
-					} else if worker.profileStoreConflict || d.profileRevision != expected {
+					if worker.profileStoreBlocked {
+						d.profileStoreBlocked = true
+					}
+					if worker.profileStoreConflict || d.profileRevision != expected {
 						d.profileStoreConflict = true
 					}
 					d.localArchiveStatus = "导入失败：" + err.Error()
@@ -110,6 +109,40 @@ func (d *desktop) localArchiveAction(action string) {
 	}()
 }
 
+func (d *desktop) retryLocalImportRecovery() {
+	if d.busy || d.win == nil || d.profilePath == "" || d.forwardRulesPath == "" {
+		return
+	}
+	profilesPath, rulesPath := d.profilePath, d.forwardRulesPath
+	d.busy = true
+	d.localArchiveStatus = "正在恢复本机数据…"
+	go func() {
+		_, err := recoverLocalImport(profilesPath, rulesPath)
+		worker := &desktop{forwardRulesPath: rulesPath}
+		if err == nil {
+			err = worker.loadProfiles(profilesPath)
+		}
+		var rules forwardRulesFile
+		if err == nil {
+			rules, err = readForwardRules(rulesPath)
+		}
+		d.win.Update(func() {
+			d.busy = false
+			if err != nil {
+				d.localArchiveStatus = "恢复失败，原文件已保留：" + err.Error()
+				return
+			}
+			d.profiles, d.identities, d.profileGroups, d.nextProfileID = worker.profiles, worker.identities, worker.profileGroups, worker.nextProfileID
+			d.profileRevision, d.profileExists, d.profileFormat = worker.profileRevision, worker.profileExists, worker.profileFormat
+			d.profileStoreBlocked, d.profileStoreConflict = false, false
+			d.forwardRules = rules.Items
+			d.stopChangedForwardRules()
+			d.reconcileForwardRules()
+			d.localArchiveStatus = "本机数据已恢复。"
+		})
+	}()
+}
+
 func (d *desktop) localArchiveView(c *ui.Context) {
 	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 		if ui.Button(c.Key("local-archive-back"), "‹").Label("返回主机列表").Disabled(d.busy).Clicked() {
@@ -121,6 +154,11 @@ func (d *desktop) localArchiveView(c *ui.Context) {
 	})
 	ui.Text(c, "加密备份主机、身份与转发规则；不包含私钥文件。导入后需重新核对主机指纹。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	ui.Column(c).FillWidth().MaxWidth(620).Gap(8).Children(func() {
+		if d.profileStoreBlocked && d.profilePath != "" && d.forwardRulesPath != "" {
+			if ui.Button(c.Key("local-archive-recover"), "重试恢复本机数据").Disabled(d.busy).Clicked() {
+				d.retryLocalImportRecovery()
+			}
+		}
 		ui.TextInput(c.Key("local-archive-path"), &d.localArchivePath).Label("本机备份路径").Placeholder("选择加密备份文件").OnChange(func() { d.localArchivePending = nil }).FillWidth()
 		ui.TextInput(c.Key("local-archive-password"), &d.localArchivePassword).Label("本机备份密码").Placeholder("至少 12 字节").Password().OnChange(func() { d.localArchivePending = nil }).FillWidth()
 		ui.Row(c).Gap(8).Wrap().Children(func() {

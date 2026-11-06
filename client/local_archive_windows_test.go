@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -162,74 +164,171 @@ func TestLocalArchiveImportRejectsStaleProfilesWithoutWritingRules(t *testing.T)
 	}
 }
 
-func TestLocalArchiveRollsBackWhenRuleCommitFails(t *testing.T) {
+func TestLocalArchiveInterruptedRecovery(t *testing.T) {
 	_, doc := backupFixture(t)
-	dir := t.TempDir()
-	target := &desktop{forwardRulesPath: filepath.Join(dir, "forward-rules.json")}
-	if err := target.loadProfiles(filepath.Join(dir, "profiles.json")); err != nil {
-		t.Fatal(err)
-	}
-	target.settings = connectionSettings{Host: "existing.example", Port: "22", User: "alice"}
-	if err := target.saveCurrentProfile(); err != nil {
-		t.Fatal(err)
-	}
-	failAfterProfiles := func(path string, change func(*forwardRulesFile) error) (forwardRulesFile, error) {
-		file, err := readForwardRules(path)
-		if err != nil {
-			return file, err
-		}
-		if err = change(&file); err != nil {
-			return file, err
-		}
-		return forwardRulesFile{}, errors.New("simulated rule write failure")
-	}
-	if err := target.importLocalArchiveWith(doc, failAfterProfiles); err == nil || !strings.Contains(err.Error(), "已回滚") {
-		t.Fatal("failed rule write was not rolled back")
-	}
-	var restored desktop
-	if err := restored.loadProfiles(target.profilePath); err != nil || len(restored.profiles) != 1 || restored.profiles[0].Settings.Host != "existing.example" {
-		t.Fatal("rollback did not restore original profiles")
-	}
-	if len(target.profiles) != 1 || len(target.identities) != 0 {
-		t.Fatal("rollback left staged items in memory")
+	for _, stage := range []string{"journal", "profiles", "rules"} {
+		t.Run(stage, func(t *testing.T) {
+			dir := t.TempDir()
+			target := &desktop{forwardRulesPath: filepath.Join(dir, "forward-rules.json")}
+			if err := target.loadProfiles(filepath.Join(dir, "profiles.json")); err != nil {
+				t.Fatal(err)
+			}
+			target.settings = connectionSettings{Host: "existing.example", Port: "22", User: "alice"}
+			if err := target.saveCurrentProfile(); err != nil {
+				t.Fatal(err)
+			}
+			err := target.importLocalArchiveWith(doc, func(step string) error {
+				if step == stage {
+					return errors.New("interrupted")
+				}
+				return nil
+			})
+			if err == nil || !target.profileStoreBlocked {
+				t.Fatal("interruption not blocked", err)
+			}
+			data, err := os.ReadFile(localImportJournalPath(target.profilePath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, secret := range []string{"identity-secret", "key-phrase", "host-secret"} {
+				if strings.Contains(string(data), secret) {
+					t.Fatal("journal contains plaintext secret")
+				}
+			}
+			var other desktop
+			if other.loadProfiles(target.profilePath) == nil {
+				t.Fatal("incomplete profiles exposed")
+			}
+			if _, err := readForwardRules(target.forwardRulesPath); err == nil {
+				t.Fatal("incomplete rules exposed")
+			}
+			if _, err := updateForwardRules(target.forwardRulesPath, func(*forwardRulesFile) error { return nil }); err == nil {
+				t.Fatal("pending rules modified")
+			}
+			recovered, err := recoverLocalImport(target.profilePath, target.forwardRulesPath)
+			if err != nil || !recovered {
+				t.Fatal("recovery failed", err)
+			}
+			if recovered, err = recoverLocalImport(target.profilePath, target.forwardRulesPath); err != nil || recovered {
+				t.Fatal("recovery not idempotent", err)
+			}
+			if err = other.loadProfiles(target.profilePath); err != nil || len(other.profiles) != 1+len(doc.Profiles) || other.profiles[0].Settings.Host != "existing.example" {
+				t.Fatal("profiles not recovered", err)
+			}
+			rules, err := readForwardRules(target.forwardRulesPath)
+			if err != nil || len(rules.Items) != len(doc.Rules) || rules.Items[0].HostID != other.profiles[1].StableID {
+				t.Fatal("rules not recovered", err)
+			}
+		})
 	}
 }
 
-func TestLocalArchiveRollbackNeverOverwritesConcurrentEdit(t *testing.T) {
+func TestLocalArchiveRecoveryPreservesExternalChanges(t *testing.T) {
 	_, doc := backupFixture(t)
 	dir := t.TempDir()
 	target := &desktop{forwardRulesPath: filepath.Join(dir, "forward-rules.json")}
 	if err := target.loadProfiles(filepath.Join(dir, "profiles.json")); err != nil {
 		t.Fatal(err)
 	}
-	target.settings = connectionSettings{Host: "existing.example", Port: "22", User: "alice"}
-	if err := target.saveCurrentProfile(); err != nil {
+	if err := target.importLocalArchiveWith(doc, func(step string) error {
+		if step == "profiles" {
+			return errors.New("interrupted")
+		}
+		return nil
+	}); err == nil {
+		t.Fatal("expected interruption")
+	}
+	external := []byte(`{"Version":1,"Items":[]}`)
+	if err := os.WriteFile(target.profilePath, external, 0600); err != nil {
 		t.Fatal(err)
 	}
-	concurrent := func(path string, change func(*forwardRulesFile) error) (forwardRulesFile, error) {
-		file, err := readForwardRules(path)
-		if err != nil {
-			return file, err
-		}
-		if err = change(&file); err != nil {
-			return file, err
-		}
-		var other desktop
-		if err = other.loadProfiles(target.profilePath); err != nil {
-			return file, err
-		}
-		other.profiles[0].Label = "other-window"
-		if err = other.saveProfiles(); err != nil {
-			return file, err
-		}
-		return forwardRulesFile{}, errors.New("simulated rule write failure")
+	if _, err := recoverLocalImport(target.profilePath, target.forwardRulesPath); err == nil {
+		t.Fatal("external modification was overwritten")
 	}
-	if err := target.importLocalArchiveWith(doc, concurrent); err == nil || !target.profileStoreConflict || !strings.Contains(err.Error(), "自动回滚失败") {
-		t.Fatal("concurrent edit did not block rollback")
+	actual, _ := os.ReadFile(target.profilePath)
+	if string(actual) != string(external) {
+		t.Fatal("external data changed")
 	}
-	var restored desktop
-	if err := restored.loadProfiles(target.profilePath); err != nil || restored.profiles[0].Label != "other-window" || len(restored.profiles) != 1+len(doc.Profiles) {
-		t.Fatal("rollback overwrote concurrent edit")
+	if _, err := os.Stat(localImportJournalPath(target.profilePath)); err != nil {
+		t.Fatal("recovery data lost", err)
+	}
+	if _, err := os.Stat(target.forwardRulesPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("rule file unexpectedly changed", err)
+	}
+}
+
+func TestLocalArchiveRecoveryAfterProcessExit(t *testing.T) {
+	if stage := os.Getenv("NEKOSSH_RECOVERY_CHILD"); stage != "" {
+		dir := os.Getenv("NEKOSSH_RECOVERY_DIR")
+		target := &desktop{forwardRulesPath: filepath.Join(dir, "forward-rules.json")}
+		if err := target.loadProfiles(filepath.Join(dir, "profiles.json")); err != nil {
+			t.Fatal(err)
+		}
+		const hostID = "11111111111111111111111111111111"
+		doc := localArchiveDocument{Version: 1, Profiles: []localArchiveProfile{{StableID: hostID, Host: "host.example", Port: "22", User: "alice", Password: "synthetic-secret"}}, Rules: []savedForwardRule{{ID: "22222222222222222222222222222222", HostID: hostID, Name: "test", Mode: "local", ListenPort: "0", TargetHost: "localhost", TargetPort: "5432"}}}
+		if err := target.importLocalArchiveWith(doc, func(step string) error {
+			if step == stage {
+				os.Exit(73)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Fatal("interrupt checkpoint was not reached")
+	}
+	for _, stage := range []string{"journal", "profiles", "rules"} {
+		t.Run(stage, func(t *testing.T) {
+			dir := t.TempDir()
+			cmd := exec.Command(os.Args[0], "-test.run=^TestLocalArchiveRecoveryAfterProcessExit$")
+			cmd.Env = append(os.Environ(), "NEKOSSH_RECOVERY_CHILD="+stage, "NEKOSSH_RECOVERY_DIR="+dir)
+			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+			err := cmd.Run()
+			if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 73 {
+				t.Fatalf("child did not exit at checkpoint: %v", err)
+			}
+			profilePath, rulesPath := filepath.Join(dir, "profiles.json"), filepath.Join(dir, "forward-rules.json")
+			if recovered, err := recoverLocalImport(profilePath, rulesPath); err != nil || !recovered {
+				t.Fatal("failed to recover exited process", err)
+			}
+			var d desktop
+			if err := d.loadProfiles(profilePath); err != nil || len(d.profiles) != 1 {
+				t.Fatal("profile not recovered", err)
+			}
+			rules, err := readForwardRules(rulesPath)
+			if err != nil || len(rules.Items) != 1 || rules.Items[0].HostID != d.profiles[0].StableID {
+				t.Fatal("rule not recovered", err)
+			}
+		})
+	}
+}
+
+func TestLocalArchiveRecoveryRejectsCorruptJournal(t *testing.T) {
+	_, doc := backupFixture(t)
+	dir := t.TempDir()
+	d := &desktop{forwardRulesPath: filepath.Join(dir, "forward-rules.json")}
+	if err := d.loadProfiles(filepath.Join(dir, "profiles.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.importLocalArchiveWith(doc, func(step string) error {
+		if step == "journal" {
+			return errors.New("interrupted")
+		}
+		return nil
+	}); err == nil {
+		t.Fatal("expected interruption")
+	}
+	path := localImportJournalPath(d.profilePath)
+	if err := os.WriteFile(path, []byte(`{"Version":1}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recoverLocalImport(d.profilePath, d.forwardRulesPath); err == nil {
+		t.Fatal("corrupt recovery data accepted")
+	}
+	if _, err := os.Stat(d.profilePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("profile changed", err)
+	}
+	if _, err := os.Stat(d.forwardRulesPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("rules changed", err)
 	}
 }
 

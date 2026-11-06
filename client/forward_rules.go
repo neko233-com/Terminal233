@@ -68,6 +68,23 @@ func validateForwardRule(r savedForwardRule) error {
 }
 
 func readForwardRules(filename string) (forwardRulesFile, error) {
+	if filename == "" {
+		return forwardRulesFile{}, errors.New("转发规则存储不可用")
+	}
+	if err := checkLocalImportPending(filename); err != nil {
+		return forwardRulesFile{}, err
+	}
+	saved, err := readForwardRulesUnchecked(filename)
+	if err != nil {
+		return saved, err
+	}
+	if err := checkLocalImportPending(filename); err != nil {
+		return forwardRulesFile{}, err
+	}
+	return saved, nil
+}
+
+func readForwardRulesUnchecked(filename string) (forwardRulesFile, error) {
 	var saved forwardRulesFile
 	if filename == "" {
 		return saved, errors.New("转发规则存储不可用")
