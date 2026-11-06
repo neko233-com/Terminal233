@@ -144,19 +144,19 @@ func TestTerminalFocusLayoutKeepsNavigationAndPreference(t *testing.T) {
 		if err := view.Click("展开侧栏"); err != nil {
 			t.Fatal(err)
 		}
-		if !view.HasText("工作区") || d.sidebarCollapsed || !d.terminalNavigationOpen {
+		if !view.HasText("展开文字导航") || d.sidebarCollapsed || !d.terminalNavigationOpen {
 			t.Fatal("terminal navigation did not open independently of the saved sidebar preference")
 		}
 		if err := view.Click("收起侧栏"); err != nil {
 			t.Fatal(err)
 		}
-		if d.sidebarCollapsed || d.terminalNavigationOpen || view.HasText("工作区") {
+		if d.sidebarCollapsed || d.terminalNavigationOpen || view.HasText("展开文字导航") {
 			t.Fatal("closing terminal navigation changed the saved sidebar preference")
 		}
 		if err := view.Click("主机"); err != nil {
 			t.Fatal(err)
 		}
-		if d.workspace != "connections" || !view.HasText("工作区") {
+		if d.workspace != "connections" || !view.HasText("展开文字导航") {
 			t.Fatal("hosts tab did not restore normal navigation")
 		}
 	}

@@ -15,6 +15,7 @@ type workspacePreferences struct {
 	Version                int     `json:"version"`
 	Light                  bool    `json:"light"`
 	SidebarCollapsed       bool    `json:"sidebar_collapsed"`
+	SidebarExpanded        bool    `json:"sidebar_expanded,omitempty"`
 	ShowFiles              bool    `json:"show_files"`
 	TerminalFontSize       int     `json:"terminal_font_size"`
 	TerminalTheme          string  `json:"terminal_theme,omitempty"`
@@ -70,6 +71,7 @@ func (d *desktop) loadPreferences(path string) error {
 		return err
 	}
 	d.lightTheme, d.sidebarCollapsed, d.showFilePanel = p.Light, p.SidebarCollapsed, p.ShowFiles
+	d.railExpanded = p.SidebarExpanded
 	d.externalEditorPath = p.ExternalEditor
 	d.terminalFontSize = p.TerminalFontSize
 	d.splitLayout = p.SplitLayout
@@ -125,6 +127,8 @@ func writePreference(path, field string, value bool) error {
 			p.Light = value
 		case "sidebar":
 			p.SidebarCollapsed = value
+		case "rail":
+			p.SidebarExpanded = value
 		case "files":
 			p.ShowFiles = value
 		default:

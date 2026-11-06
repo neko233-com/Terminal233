@@ -113,7 +113,7 @@ func TestNewTabSearchIsCenteredInWorkspace(t *testing.T) {
 		r, ok := view.Find("搜索主机或会话")
 		left := float32(0)
 		if tc.sidebar {
-			left = workspaceSidebarWidth(float32(tc.width))
+			left = d.sidebarWidth(float32(tc.width))
 		}
 		center := (left + float32(tc.width)) / 2
 		if !ok || math.Abs(float64(r.X+r.W/2-center)) > 2 || r.W > 760 {

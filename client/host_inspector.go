@@ -112,7 +112,7 @@ func (d *desktop) closeConnectionEditor() bool {
 // window uses the existing full-width editor instead.
 func (d *desktop) connectionInspectorDocked(windowWidth float32) bool {
 	if !d.sidebarCollapsed {
-		windowWidth -= workspaceSidebarWidth(windowWidth)
+		windowWidth -= d.sidebarWidth(windowWidth)
 	}
 	return windowWidth >= 820
 }

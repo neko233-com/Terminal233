@@ -20,6 +20,13 @@ func workspaceSidebarWidth(width float32) float32 {
 	return 235
 }
 
+func (d *desktop) sidebarWidth(width float32) float32 {
+	if d.railExpanded {
+		return workspaceSidebarWidth(width)
+	}
+	return 64
+}
+
 type profile struct {
 	ID                          profileID
 	Group, Label                string
@@ -178,10 +185,10 @@ func (d *desktop) profileView(c *ui.Context) {
 	draftBlocked := d.connectionNavigationBlocked()
 	docked := d.connectionInspectorDocked(width) && d.editConnection
 	if !d.sidebarCollapsed {
-		width -= workspaceSidebarWidth(width)
+		width -= d.sidebarWidth(width)
 	}
 	if docked {
-		width -= connectionInspectorWidth + 16
+		width -= connectionInspectorWidth
 	}
 	compact := width < 600
 	columns := 1

@@ -58,7 +58,7 @@ func sameLocalDirectory(a, b string) bool {
 func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
 	d.externalEditJobsView(c)
 	if !d.sidebarCollapsed {
-		width -= workspaceSidebarWidth(width)
+		width -= d.sidebarWidth(width)
 	}
 	if width < 860 {
 		if d.narrowFilePane == "" {

@@ -48,6 +48,7 @@ type desktop struct {
 	secondaryPreviousTerm                                                                   *terminal.Terminal
 	fileSessionSearch                                                                       string
 	sidebarCollapsed                                                                        bool
+	railExpanded                                                                            bool
 	terminalNavigationOpen                                                                  bool
 	sessions                                                                                []*workspaceSession
 	terminalGroups                                                                          []*terminalGroup
@@ -555,14 +556,23 @@ func (d *desktop) view(c *ui.Context) {
 		showSidebar := d.sidebarVisible()
 		workspaceWidth := width
 		if showSidebar {
-			workspaceWidth -= workspaceSidebarWidth(width)
+			workspaceWidth -= d.sidebarWidth(width)
 		}
 		compactAuxiliaryPanels := height < 650 || (workspaceWidth < 940 && height < 1000)
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
 			if showSidebar {
-				ui.Scroll(c).Width(workspaceSidebarWidth(width)).FillHeight().Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
+				ui.Scroll(c).Width(d.sidebarWidth(width)).FillHeight().Background(t.Background).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
+					if !d.railExpanded {
+						d.compactWorkspaceNavigation(c)
+						return
+					}
 					ui.Column(c).Padding(16).Gap(8).Children(func() {
-						ui.Text(c, "工作区").FontSize(12).TextColor(t.TextMuted)
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+							ui.Text(c, "工作区").FontSize(12).TextColor(t.TextMuted).Grow(1)
+							if terminalActionButton(c, "workspace-rail-compact", "使用图标导航", railCompactIcon, false, false).Clicked() {
+								d.setRailExpanded(false)
+							}
+						})
 						if navigationButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
 							d.workspace = "connections"
 							if d.editConnection {
@@ -897,10 +907,14 @@ func (d *desktop) view(c *ui.Context) {
 					return
 				}
 				if (d.workspace == "" || d.workspace == "connections") && (!d.editConnection || d.connectionInspectorDocked(width)) {
-					ui.Row(c).Grow(1).FillWidth().Padding(24).Gap(16).Children(func() {
-						ui.Column(c).Grow(1).FillHeight().Children(func() { d.profileView(c) })
+					ui.Row(c).Grow(1).FillWidth().Children(func() {
+						ui.Column(c).Grow(1).FillHeight().Padding(24).Children(func() { d.profileView(c) })
 						if d.editConnection {
-							ui.Column(c.Key("connection-inspector")).Label("主机详情面板").Width(connectionInspectorWidth).FillHeight().Shrink(0).Background(t.Surface).Radius(10).Children(func() {
+							inspectorBackground := ui.Hex("#171c30")
+							if d.lightTheme {
+								inspectorBackground = t.Surface
+							}
+							ui.Column(c.Key("connection-inspector")).Label("主机详情面板").Width(connectionInspectorWidth).FillHeight().Shrink(0).Background(inspectorBackground).BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
 								ui.Column(c).FillWidth().Padding(12, 16).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() { d.connectionHeader(c, true) })
 								ui.Scroll(c.Key("connection-form-scroll")).Label("主机详情内容").Grow(1).FillWidth().Children(func() {
 									ui.Column(c).FillWidth().Padding(16).Gap(10).Children(func() { d.connectionView(c, true) })
@@ -973,7 +987,7 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 	}
 	sectionColor, sectionPadding, sectionGap := c.Theme().Surface, float32(18), float32(10)
 	if docked {
-		sectionColor, sectionPadding, sectionGap = c.Theme().SurfaceHover, 12, 6
+		sectionColor, sectionPadding, sectionGap = c.Theme().Surface, 12, 6
 	}
 	markMetadataChanged := func() { d.confirmDiscardConnection = false; d.profileAutoDirty = true }
 	markDraftChanged := func() { d.confirmDiscardConnection = false; d.profileSecretError = false; d.profileAutoDirty = true }
@@ -1150,7 +1164,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.114"
+const version = "0.3.115"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

@@ -557,7 +557,7 @@ func TestCollapsedSidebarKeepsKeyboardNavigation(t *testing.T) {
 	if err := test.Click("收起侧栏"); err != nil {
 		t.Fatal(err)
 	}
-	if !d.sidebarCollapsed || test.HasText("工作区") || !test.HasText("展开侧栏") {
+	if !d.sidebarCollapsed || test.HasText("展开文字导航") || !test.HasText("展开侧栏") {
 		t.Fatal("sidebar did not collapse")
 	}
 	test.Key(ui.Cmd|ui.Shift, ui.Key4)
@@ -567,7 +567,7 @@ func TestCollapsedSidebarKeepsKeyboardNavigation(t *testing.T) {
 	if err := test.Click("展开侧栏"); err != nil {
 		t.Fatal(err)
 	}
-	if d.sidebarCollapsed || !test.HasText("工作区") {
+	if d.sidebarCollapsed || !test.HasText("展开文字导航") {
 		t.Fatal("sidebar did not reopen")
 	}
 }

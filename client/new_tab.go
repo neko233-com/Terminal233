@@ -283,7 +283,7 @@ func (d *desktop) newTabView(c *ui.Context) {
 	}
 	width, _ := c.Size()
 	if d.sidebarVisible() {
-		width -= workspaceSidebarWidth(width)
+		width -= d.sidebarWidth(width)
 	}
 	contentWidth := min(float32(760), max(float32(1), width-48))
 	ui.Row(c).FillWidth().Padding(40, 24).Justify(ui.Center).Children(func() {

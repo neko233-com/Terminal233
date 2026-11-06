@@ -112,6 +112,31 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "连接列表") {
 		t.Fatalf("missing native fields: %s", tree)
 	}
+	if !strings.Contains(tree, "key:workspace-rail-expand ") {
+		t.Fatal("compact icon navigation is missing")
+	}
+	call("act", map[string]any{"key": "workspace-rail-expand", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "key:workspace-rail-compact ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "key:workspace-rail-compact ") {
+		t.Fatal("text navigation did not open")
+	}
+	call("act", map[string]any{"key": "workspace-rail-compact", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "key:workspace-rail-expand ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "key:workspace-rail-expand ") {
+		t.Fatal("icon navigation did not return")
+	}
 	call("act", map[string]any{"key": "nav-snippets", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
