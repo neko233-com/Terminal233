@@ -26,10 +26,25 @@ func TestSerialConfigurationValidation(t *testing.T) {
 		{Port: "COM1", BaudRate: 9600, DataBits: 8, Parity: "invalid", StopBits: "1"},
 		{Port: "COM1", BaudRate: 9600, DataBits: 8, Parity: "None", StopBits: "1.5"},
 		{Port: "COM1", BaudRate: 9600, DataBits: 5, Parity: "None", StopBits: "2"},
+		{Port: "COM1", BaudRate: 9600, DataBits: 8, Parity: "None", StopBits: "1", Flow: "invalid"},
+		{Port: "COM1", BaudRate: 9600, DataBits: 8, Parity: "None", StopBits: "1", Flow: "RTS/CTS", RTS: true},
 	} {
 		if _, err := bad.mode(); err == nil {
 			t.Fatalf("invalid serial settings accepted: %#v", bad)
 		}
+	}
+}
+
+func TestSerialFlowWorkspaceVersion(t *testing.T) {
+	settings := serialSettings{Port: "COM7", BaudRate: 9600, DataBits: 8, Parity: "None", StopBits: "1", Flow: "RTS/CTS"}
+	w := savedWorkspace{ID: "0123456789abcdef0123456789abcdef", Name: "flow", Active: 0, SplitFirst: -1, SplitSecond: -1, Entries: []workspaceTemplateEntry{{Kind: "serial", Serial: &settings}}}
+	path := filepath.Join(t.TempDir(), "workspaces.json")
+	if _, err := updateWorkspaceTemplates(path, func(f *workspaceTemplatesFile) error { f.Items = append(f.Items, w); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	file, err := readWorkspaceTemplates(path)
+	if err != nil || file.Version != 7 || file.Items[0].Entries[0].Serial.Flow != "RTS/CTS" {
+		t.Fatalf("flow settings did not round-trip in version 7: %v", err)
 	}
 }
 

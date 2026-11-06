@@ -176,11 +176,18 @@ func readWorkspaceTemplates(filename string) (workspaceTemplatesFile, error) {
 	if err = dec.Decode(&struct{}{}); err != io.EOF {
 		return workspaceTemplatesFile{}, errors.New("工作区文件格式无效")
 	}
-	if (saved.Version < 1 || saved.Version > 6) || len(saved.Items) > maxWorkspaceTemplates {
+	if (saved.Version < 1 || saved.Version > 7) || len(saved.Items) > maxWorkspaceTemplates {
 		return workspaceTemplatesFile{}, errors.New("工作区版本或数量无效")
 	}
 	seen := map[string]bool{}
 	for i, w := range saved.Items {
+		if saved.Version < 7 {
+			for _, entry := range w.Entries {
+				if entry.Serial != nil && entry.Serial.Flow != "" {
+					return workspaceTemplatesFile{}, errors.New("工作区版本与串口流控不符")
+				}
+			}
+		}
 		if saved.Version < 6 {
 			for _, entry := range w.Entries {
 				if entry.Kind == "serial" || entry.Serial != nil {
@@ -256,6 +263,9 @@ func updateWorkspaceTemplates(filename string, update func(*workspaceTemplatesFi
 			saved.Version = 2
 		}
 		for _, entry := range w.Entries {
+			if entry.Serial != nil && entry.Serial.Flow != "" && saved.Version < 7 {
+				saved.Version = 7
+			}
 			if entry.Kind == "serial" && saved.Version < 6 {
 				saved.Version = 6
 			}

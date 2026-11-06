@@ -71,7 +71,7 @@ task build:server
 
 本机终端不经过 SSH；Windows 使用 PowerShell 7 和可用的 PSReadLine 显示命令语法颜色。终端支持 ANSI 色彩，远程命令行语法高亮由远端 shell 配置决定。
 
-新标签页可打开 Windows 串口终端，选择或输入 COM 端口，并设置波特率、数据位、校验位、停止位及初始 DTR/RTS 电平；设备断开后可重新连接。串口会话可保存在本机工作区，但不作为 SSH 文件会话，也不会同步到云端。目前使用无流控模式，尚不支持 RTS/CTS 或 XON/XOFF 流控；启用 DTR 或 RTS 可能触发设备动作。串口需要设备和驱动支持，本机尚未使用真实串口设备验证。
+新标签页可打开 Windows 串口终端，选择或输入 COM 端口，并设置波特率、数据位、校验位、停止位、无流控 / RTS/CTS / XON/XOFF 及初始 DTR/RTS 电平；设备断开后可重新连接。RTS/CTS 模式下 RTS 由驱动控制；启用 DTR 或 RTS 可能触发设备动作。串口会话可保存在本机工作区，但不作为 SSH 文件会话，也不会同步到云端。串口需要设备和驱动支持，本机尚未使用真实串口设备验证。
 
 密码和私钥路径均留空时，客户端使用当前用户的本机 SSH agent：Windows 默认连接 OpenSSH agent 命名管道，也支持 `SSH_AUTH_SOCK` 指定的本机管道或 Unix 套接字；其他平台使用 `SSH_AUTH_SOCK`。私钥留在 agent 中，仍须先核对 SSH 主机指纹。SSH、SFTP、端口转发及 `agent` 命令共用该认证方式；这不会向远端转发 agent。工作区恢复时，目标设备须有可用的对应 agent 和密钥。
 

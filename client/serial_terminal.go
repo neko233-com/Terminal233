@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,17 +21,18 @@ type serialSettings struct {
 	DataBits int    `json:"data_bits"`
 	Parity   string `json:"parity"`
 	StopBits string `json:"stop_bits"`
+	Flow     string `json:"flow,omitempty"`
 	DTR      bool   `json:"dtr,omitempty"`
 	RTS      bool   `json:"rts,omitempty"`
 }
 
 type serialDraft struct {
-	Port, BaudRate, DataBits, Parity, StopBits string
-	DTR, RTS                                   bool
+	Port, BaudRate, DataBits, Parity, StopBits, Flow string
+	DTR, RTS                                         bool
 }
 
 func defaultSerialDraft() serialDraft {
-	return serialDraft{BaudRate: "115200", DataBits: "8", Parity: "None", StopBits: "1"}
+	return serialDraft{BaudRate: "115200", DataBits: "8", Parity: "None", StopBits: "1", Flow: "None"}
 }
 
 func (draft serialDraft) settings() (serialSettings, error) {
@@ -42,7 +44,11 @@ func (draft serialDraft) settings() (serialSettings, error) {
 	if err != nil {
 		return serialSettings{}, errors.New("数据位无效")
 	}
-	s := serialSettings{Port: strings.ToUpper(strings.TrimSpace(draft.Port)), BaudRate: baud, DataBits: bits, Parity: draft.Parity, StopBits: draft.StopBits, DTR: draft.DTR, RTS: draft.RTS}
+	flow := draft.Flow
+	if flow == "None" {
+		flow = ""
+	}
+	s := serialSettings{Port: strings.ToUpper(strings.TrimSpace(draft.Port)), BaudRate: baud, DataBits: bits, Parity: draft.Parity, StopBits: draft.StopBits, Flow: flow, DTR: draft.DTR, RTS: draft.RTS}
 	if err := s.validate(); err != nil {
 		return serialSettings{}, err
 	}
@@ -78,6 +84,14 @@ func (s serialSettings) validate() error {
 	default:
 		return errors.New("停止位无效")
 	}
+	switch s.Flow {
+	case "", "RTS/CTS", "XON/XOFF":
+	default:
+		return errors.New("流控方式无效")
+	}
+	if s.Flow == "RTS/CTS" && s.RTS {
+		return errors.New("RTS/CTS 流控由系统控制 RTS，请关闭手动 RTS")
+	}
 	return nil
 }
 
@@ -111,6 +125,13 @@ func serialOpenError(port string, err error) error {
 	return fmt.Errorf("无法打开串口 %s：%w", port, err)
 }
 
+func openSerialDevice(settings serialSettings, mode *serial.Mode) (io.ReadWriteCloser, error) {
+	if settings.Flow != "" {
+		return openSerialFlowPort(settings)
+	}
+	return serial.Open(settings.Port, mode)
+}
+
 func openSerialTerminal(ctx context.Context, settings serialSettings, options terminal.Options) (*terminal.Terminal, error) {
 	mode, err := settings.mode()
 	if err != nil {
@@ -119,7 +140,7 @@ func openSerialTerminal(ctx context.Context, settings serialSettings, options te
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	port, err := serial.Open(settings.Port, mode)
+	port, err := openSerialDevice(settings, mode)
 	if err != nil {
 		return nil, serialOpenError(settings.Port, err)
 	}
@@ -278,10 +299,13 @@ func (d *desktop) serialSetupView(c *ui.Context) {
 				ui.Select(c.Key("serial-stop"), &d.serialDraft.StopBits, []string{"1", "1.5", "2"}).Label("停止位").FillWidth()
 			})
 		})
-		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).FillWidth().Wrap().Gap(12).AlignItems(ui.Center).Children(func() {
 			ui.Checkbox(c.Key("serial-dtr"), &d.serialDraft.DTR, "DTR").Label("连接时启用 DTR").Tooltip("部分设备会响应 DTR 信号并复位")
-			ui.Checkbox(c.Key("serial-rts"), &d.serialDraft.RTS, "RTS").Label("连接时启用 RTS").Tooltip("设置连接时的 RTS 电平")
-			ui.Text(c, "无流控").FontSize(12).TextColor(c.Theme().TextMuted)
+			ui.Checkbox(c.Key("serial-rts"), &d.serialDraft.RTS, "RTS").Label("连接时启用 RTS").Tooltip("RTS/CTS 流控时由系统控制").Disabled(d.serialDraft.Flow == "RTS/CTS")
+			ui.Text(c, "流控").FontSize(12).TextColor(c.Theme().TextMuted)
+			if ui.Select(c.Key("serial-flow"), &d.serialDraft.Flow, []string{"None", "RTS/CTS", "XON/XOFF"}).Label("串口流控").Width(125).Changed() && d.serialDraft.Flow == "RTS/CTS" {
+				d.serialDraft.RTS = false
+			}
 			ui.Box(c).Grow(1)
 			if ui.PrimaryButton(c.Key("serial-connect"), "连接串口").Disabled(d.busy || d.terminalLimitReached()).Clicked() {
 				d.startSerialSession()
