@@ -244,6 +244,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			if local.Clicked() {
 				d.openLocalTerminal()
 			}
+			d.profileTagFilterButton(c, draftBlocked || d.busy)
 			label := "分组管理"
 			if d.showGroupControls {
 				label = "收起分组管理"
@@ -451,10 +452,10 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 		}
 	}
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
-	if query == "" && !d.profileFavorites && !d.profileRecent {
+	if query == "" && len(d.profileTagFilters) == 0 && !d.profileFavorites && !d.profileRecent {
 		d.profileGroupCards(c, cardWidth, draftBlocked)
 	}
-	showLocal := d.profileSource != "cloud" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
+	showLocal := len(d.profileTagFilters) == 0 && d.profileSource != "cloud" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
 		(query == "" || strings.Contains("本机终端 local terminal powershell", query))
 	ui.Text(c, "主机").FontSize(13).TextColor(c.Theme().TextMuted)
 	var moveFrom, moveTo profileID
@@ -473,7 +474,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				d.openLocalTerminal()
 			}
 		}
-		if d.profileSource != "cloud" && len(d.profiles) == 0 {
+		if d.profileSource != "cloud" && len(d.profiles) == 0 && query == "" && len(d.profileTagFilters) == 0 && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent {
 			ui.Column(c).Width(cardWidth).Padding(16).Gap(6).Background(c.Theme().Surface).Radius(10).Children(func() {
 				ui.Text(c, "还没有本机 SSH 连接").FontSize(14).Bold()
 				ui.Text(c, "新建连接后即可在这里访问。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
@@ -591,10 +592,10 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 					ui.Row(c).FillWidth().Wrap().Gap(4).Children(func() {
 						for i, tag := range p.Tags {
 							tag := tag
-							if ui.Button(c.Key(fmt.Sprintf("profile-tag-%s-%d", p.ID, i)), tag).Label("搜索标签："+tag).Tooltip("搜索标签："+tag).Padding(3, 7).BorderWidth(0).Background(c.Theme().SurfaceHover).Disabled(draftBlocked).Clicked() {
+							button := ui.Button(c.Key(fmt.Sprintf("profile-tag-%s-%d", p.ID, i)), tag).Label("按标签筛选："+tag).Tooltip("按标签筛选："+tag).Padding(3, 7).BorderWidth(0).Background(c.Theme().SurfaceHover).Selected(hasProfileTag(d.profileTagFilters, tag)).Disabled(draftBlocked)
+							if button.Clicked() {
 								if d.closeConnectionForNavigation() {
-									d.profileFilter, d.profileSearch = "", tag
-									d.profileFavorites, d.profileRecent = false, false
+									d.toggleProfileTagFilter(tag)
 								}
 							}
 						}
@@ -770,10 +771,10 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 						ui.Row(c).FillWidth().Wrap().Gap(4).Children(func() {
 							for i, tag := range account.Tags {
 								tag := tag
-								if ui.Button(c.Key(fmt.Sprintf("cloud-profile-tag-%s-%d", account.ID, i)), tag).Label("搜索云端标签："+tag).Tooltip("搜索标签："+tag).Padding(3, 7).BorderWidth(0).Background(c.Theme().SurfaceHover).Disabled(draftBlocked).Clicked() {
+								button := ui.Button(c.Key(fmt.Sprintf("cloud-profile-tag-%s-%d", account.ID, i)), tag).Label("按云端标签筛选："+tag).Tooltip("按标签筛选："+tag).Padding(3, 7).BorderWidth(0).Background(c.Theme().SurfaceHover).Selected(hasProfileTag(d.profileTagFilters, tag)).Disabled(draftBlocked)
+								if button.Clicked() {
 									if d.closeConnectionForNavigation() {
-										d.profileFilter, d.profileSearch = "", tag
-										d.profileFavorites, d.profileRecent = false, false
+										d.toggleProfileTagFilter(tag)
 									}
 								}
 							}
@@ -805,7 +806,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 			}
 		})
 	}
-	if (len(d.profiles) > 0 || d.cloud != nil || query != "") && shown == 0 && !showLocal {
+	if (len(d.profiles) > 0 || d.cloud != nil || query != "" || len(d.profileTagFilters) > 0) && shown == 0 && !showLocal {
 		ui.Text(c, "没有匹配的连接").TextColor(c.Theme().TextMuted)
 	}
 	if moveFrom != "" && d.prepareConnectionNavigation() {
@@ -820,7 +821,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 }
 
 func (d *desktop) profileVisible(p profile) bool {
-	if d.profileSource == "cloud" || (d.profileRecent && p.LastConnected <= 0) || (d.profileFavorites && !p.Favorite) || (d.profileFilter != "" && !groupWithin(p.Group, d.profileFilter)) {
+	if !d.profileInScope(p) || !matchesProfileTags(p.Tags, d.profileTagFilters) {
 		return false
 	}
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))

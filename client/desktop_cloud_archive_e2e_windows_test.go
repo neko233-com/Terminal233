@@ -70,7 +70,7 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.discoverCapabilities()
-	account := cloudAccount{Label: "隔离测试连接", Host: "example.test", Port: 22, Username: "alice", Password: "test-ssh-password", HostKeyFingerprint: "SHA256:test", Tags: []string{"fixture-prod"}}
+	account := cloudAccount{Label: "隔离测试连接", Host: "example.test", Port: 22, Username: "alice", Password: "test-ssh-password", HostKeyFingerprint: "SHA256:test", Tags: []string{"fixture-prod", "fixture-db"}}
 	if err := client.save(account); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,15 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	waitText("同步服务已登录")
 	call("act", map[string]any{"key": "nav-connections", "action": "press"})
 	waitText("隔离测试连接 · alice@example.test")
-	waitText("搜索云端标签：fixture-prod")
+	waitText("按云端标签筛选：fixture-prod")
+	call("act", map[string]any{"key": "profile-tags-filter", "action": "press"})
+	waitText("筛选标签：fixture-db")
+	call("act", map[string]any{"key": "profile-tags-option-0", "action": "press"})
+	call("act", map[string]any{"key": "profile-tags-option-1", "action": "press"})
+	waitText("标签筛选（已选 2）")
+	waitText("隔离测试连接 · alice@example.test")
+	call("act", map[string]any{"key": "profile-tags-clear", "action": "press"})
+	call("act", map[string]any{"key": "profile-tags-filter", "action": "press"})
 	call("act", map[string]any{"key": "profile-search", "action": "setValue", "text": "fixture-prod"})
 	waitText("隔离测试连接 · alice@example.test")
 	call("act", map[string]any{"key": "profile-search", "action": "setValue", "text": ""})
@@ -183,7 +191,7 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	if err != nil || bytes.Contains(data, []byte(account.Password)) {
 		t.Fatal("native export was missing or contained plaintext")
 	}
-	if decoded, err := decodeCloudArchive(data, "test-backup-password"); err != nil || len(decoded) != 1 || decoded[0].Password != account.Password || len(decoded[0].Tags) != 1 || decoded[0].Tags[0] != "fixture-prod" {
+	if decoded, err := decodeCloudArchive(data, "test-backup-password"); err != nil || len(decoded) != 1 || decoded[0].Password != account.Password || len(decoded[0].Tags) != 2 || decoded[0].Tags[0] != "fixture-prod" {
 		t.Fatal("native export could not be decrypted")
 	}
 	call("act", map[string]any{"key": "archive-password", "action": "setValue", "text": "wrong-backup-password"})
@@ -199,7 +207,7 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	waitText("确认追加导入")
 	call("act", map[string]any{"key": "archive-import", "action": "press"})
 	waitText("已追加导入 1 条连接")
-	if accounts, err := client.list(); err != nil || len(accounts) != 2 || accounts[0].ID == accounts[1].ID || len(accounts[0].Tags) != 1 || len(accounts[1].Tags) != 1 {
+	if accounts, err := client.list(); err != nil || len(accounts) != 2 || accounts[0].ID == accounts[1].ID || len(accounts[0].Tags) != 2 || len(accounts[1].Tags) != 2 {
 		t.Fatal("native import did not append a separate connection")
 	}
 	// Exercise the team controls against the same isolated Go service.

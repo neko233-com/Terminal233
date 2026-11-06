@@ -15,10 +15,7 @@ func (d *desktop) clearCloudBatch() {
 }
 
 func (d *desktop) cloudAccountVisible(a cloudAccount) bool {
-	if d.cloud == nil || d.profileSource == "local" || d.profileFavorites || d.profileRecent {
-		return false
-	}
-	if d.profileFilter != "" && (d.profileSource != "cloud" || !groupWithin(d.cloudGroupSnapshot.Assignments[a.ID], d.profileFilter)) {
+	if !d.cloudAccountInScope(a) || !matchesProfileTags(a.Tags, d.profileTagFilters) {
 		return false
 	}
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))

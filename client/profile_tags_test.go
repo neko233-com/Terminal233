@@ -42,10 +42,10 @@ func TestProfileTagsRoundTripSearchAndFilter(t *testing.T) {
 	}
 	restored.profiles = append(restored.profiles, profile{ID: "2", Label: "two", Settings: connectionSettings{Host: "two.example", Port: "22", User: "bob"}, Tags: []string{"development"}})
 	view := ui.NewTester(restored.view, 1280, 900)
-	if err := view.Click("搜索标签：生产"); err != nil {
+	if err := view.Click("按标签筛选：生产"); err != nil {
 		t.Fatal(err)
 	}
-	if restored.profileSearch != "生产" || !view.HasText("one") || view.HasText("two") {
+	if !hasProfileTag(restored.profileTagFilters, "生产") || !view.HasText("one") || view.HasText("two") {
 		t.Fatal("clicking a tag did not filter hosts")
 	}
 	results := restored.newTabResults("api one")
@@ -92,10 +92,10 @@ func TestCloudTagsVisibleSearchAndEditor(t *testing.T) {
 	a := cloudAccount{ID: "cloud1", Label: "remote", Host: "example.test", Port: 22, Username: "alice", Tags: []string{"生产", "api"}}
 	d := &desktop{workspace: "connections", cloud: &cloudClient{cloudTags: true}, accounts: []cloudAccount{a}}
 	v := ui.NewTester(d.view, 1280, 900)
-	if err := v.Click("搜索云端标签：生产"); err != nil {
+	if err := v.Click("按云端标签筛选：生产"); err != nil {
 		t.Fatal(err)
 	}
-	if d.profileSearch != "生产" || !d.cloudAccountVisible(a) || d.cloudAccountVisible(cloudAccount{Label: "other", Host: "other.test"}) {
+	if !hasProfileTag(d.profileTagFilters, "生产") || !d.cloudAccountVisible(a) || d.cloudAccountVisible(cloudAccount{Label: "other", Host: "other.test"}) {
 		t.Fatal("cloud tag filtering failed")
 	}
 	results := d.newTabResults("api remote")

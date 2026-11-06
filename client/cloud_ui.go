@@ -662,6 +662,7 @@ func (d *desktop) cloudLogout() {
 // Logging out and restoring a backup both invalidate the cloud session.
 func (d *desktop) clearCloudState() {
 	d.clearCloudBatch()
+	d.profileTagFilters, d.profileTagQuery, d.showProfileTagFilter = nil, "", false
 	d.cloudGroupSnapshot, d.cloudGroupsStale = cloudGroupSnapshot{}, false
 	d.cloudWorkspaceSnapshot, d.cloudWorkspacesStale, d.confirmCloudWorkspaceRemove = cloudWorkspaceSnapshot{}, false, ""
 	if d.cloud != nil {

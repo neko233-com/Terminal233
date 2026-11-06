@@ -86,6 +86,9 @@ type desktop struct {
 	groupInput                                                                              string
 	confirmGroupDelete                                                                      bool
 	profileSearch, profileGroup, profileTags, selectedProfile, quickConnect                 string
+	profileTagQuery                                                                         string
+	profileTagFilters                                                                       []string
+	showProfileTagFilter                                                                    bool
 	showProfileInspector                                                                    bool
 	profileInspectorAt                                                                      time.Time
 	connectionDraft                                                                         connectionDraft
@@ -1101,7 +1104,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.107"
+const version = "0.3.108"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
