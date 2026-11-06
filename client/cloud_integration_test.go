@@ -120,6 +120,20 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	if _, err = client.replaceCloudWorkspaces(staleWorkspaces); err == nil {
 		t.Fatal("stale workspace update accepted")
 	}
+	originalWorkspace := cloneCloudWorkspace(workspaceState.Items[0])
+	updatedWorkspace := cloneCloudWorkspace(originalWorkspace)
+	updatedWorkspace.ViewMode = "focus"
+	change, err := replaceCloudGroupSnapshot(workspaceState, &originalWorkspace, updatedWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceState, err = client.replaceCloudWorkspaces(change)
+	if err != nil || workspaceState.Items[0].ViewMode != "focus" {
+		t.Fatal("cloud workspace update failed", err)
+	}
+	if _, err = client.replaceCloudWorkspaces(change); err == nil {
+		t.Fatal("replayed cloud update ignored revision")
+	}
 	groupState, err := client.listCloudGroups()
 	if err != nil {
 		t.Fatal(err)

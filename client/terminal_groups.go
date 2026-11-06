@@ -22,6 +22,11 @@ type terminalGroup struct {
 	renameDraft, renameStatus string
 	rowPerc                   [12]float32
 	columnPerc                [12]float32
+	savedLocal                *savedWorkspace
+	savedCloud                *cloudWorkspace
+	savedCloudURL, savedUser  string
+	savedSignature            [32]byte
+	pendingCloud              *pendingWorkspaceSync
 }
 
 type terminalGroupMemberDrag int

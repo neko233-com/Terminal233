@@ -82,6 +82,15 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	if _, err = client.replaceCloudGroups(initialGroups); err != nil {
 		t.Fatal(err)
 	}
+	workspaceState, err := client.listCloudWorkspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workspaceID = "00000000000000000000000000001234"
+	workspaceState.Items = append(workspaceState.Items, cloudWorkspace{ID: workspaceID, Name: "云端工作区", Entries: []cloudWorkspaceEntry{{Kind: "local", Label: "本机一"}, {Kind: "local", Label: "本机二"}}, SplitFirst: -1, SplitSecond: -1, ViewMode: "focus"})
+	if _, err = client.replaceCloudWorkspaces(workspaceState); err != nil {
+		t.Fatal(err)
+	}
 	caPath := filepath.Join(temp, "test-ca.pem")
 	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: proxy.Certificate().Raw}), 0600); err != nil {
 		t.Fatal(err)
@@ -111,7 +120,7 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 		t.Fatalf("native automation unavailable: %v", err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(120 * time.Second))
 	reader := bufio.NewReader(conn)
 	call := func(method string, params ...map[string]any) map[string]any {
 		t.Helper()
@@ -162,6 +171,22 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	call("act", map[string]any{"key": "cloudpassword", "action": "setValue", "text": "test-cloud-password"})
 	call("act", map[string]any{"key": "cloudlogin", "action": "press"})
 	waitText("同步服务已登录")
+	call("act", map[string]any{"key": "local-terminal", "action": "press"})
+	waitText("cloud-workspace-open-" + workspaceID)
+	call("act", map[string]any{"key": "cloud-workspace-open-" + workspaceID, "action": "press"})
+	waitText("group-tab-1")
+	call("act", map[string]any{"key": "toggle-split", "action": "press"})
+	waitText("group-save-1")
+	call("act", map[string]any{"key": "group-save-1", "action": "press"})
+	waitText("工作区已同步")
+	updated, err := client.listCloudWorkspaces()
+	if err != nil || len(updated.Items) != 1 || updated.Items[0].ID != workspaceID || updated.Items[0].ViewMode != "grid" {
+		t.Fatal("cloud workspace was not updated", err)
+	}
+	call("act", map[string]any{"key": "group-close-1", "action": "press"})
+	waitText("确认关闭工作区")
+	call("act", map[string]any{"key": "group-close-1", "action": "press"})
+	waitText("nav-connections")
 	call("act", map[string]any{"key": "nav-connections", "action": "press"})
 	waitText("隔离测试连接 · alice@example.test")
 	waitText("按云端标签筛选：fixture-prod")

@@ -646,6 +646,23 @@ func TestDesktopRemotePanes(t *testing.T) {
 	}
 	press("toggle-split")
 	waitKey("group-rail-1")
+	waitKey("group-save-1")
+	if capturePath := os.Getenv("NEKOSSH_TEST_WORKSPACE_CAPTURE"); capturePath != "" {
+		result := call("capture", nil)["result"].(map[string]any)
+		png, err := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(capturePath, png, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "key", "key": "Ctrl+S"}}})
+	waitGone("group-save-1")
+	updatedWorkspace, err := readWorkspaceTemplates(workspaceFile)
+	if err != nil || len(updatedWorkspace.Items) != 1 || updatedWorkspace.Items[0].ID != id || updatedWorkspace.Items[0].ViewMode != "focus" {
+		t.Fatal("saved workspace was not updated", err)
+	}
 	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_FOCUS"); capturePath != "" {
 		result := call("capture", nil)["result"].(map[string]any)
 		png, decodeErr := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))

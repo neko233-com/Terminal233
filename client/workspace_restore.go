@@ -81,6 +81,9 @@ func (d *desktop) resolveWorkspace(w savedWorkspace) ([]workspaceRestoreTarget, 
 			}
 			target.settings = connectionSettings{Host: e.Host, Port: e.Port, User: e.User, Fingerprint: e.Fingerprint}
 			target.label = e.User + "@" + e.Host
+			if e.Label != "" {
+				target.label = e.Label
+			}
 		}
 		targets = append(targets, target)
 	}
@@ -123,7 +126,7 @@ func hydrateWorkspaceCloudTargets(ctx context.Context, targets []workspaceRestor
 			return nil, fmt.Errorf("第 %d 个云主机已修改或不可用，请重新保存工作区", i+1)
 		}
 		target.settings.Password = match.Password
-		if match.Label != "" {
+		if target.entry.Label == "" && match.Label != "" {
 			target.label = match.Label
 		}
 		target.cloudVersion = match.UpdatedAt
@@ -157,6 +160,10 @@ func (d *desktop) saveWorkspaceTemplate() {
 		return
 	}
 	d.workspaceTemplates = saved.Items
+	if group := d.terminalGroupFor(d.currentSession); group != nil && group.savedLocal == nil && group.savedCloud == nil && group.name == w.Name {
+		original := cloneSavedWorkspace(w)
+		group.savedLocal, group.savedSignature = &original, d.workspaceGroupSignature(group)
+	}
 	d.workspaceTemplateName = ""
 	d.workspaceTemplatesStatus = "工作区已保存"
 	for _, entry := range w.Entries {
@@ -261,6 +268,15 @@ func (d *desktop) restoreWorkspaceTemplate(w savedWorkspace) {
 }
 
 func (d *desktop) startWorkspace(w savedWorkspace, saved bool) {
+	d.startWorkspaceWithCloudSource(w, saved, nil)
+}
+
+type workspaceCloudSource struct {
+	workspace cloudWorkspace
+	url, user string
+}
+
+func (d *desktop) startWorkspaceWithCloudSource(w savedWorkspace, saved bool, cloudSource *workspaceCloudSource) {
 	if d.busy || d.win == nil {
 		return
 	}
@@ -414,9 +430,20 @@ func (d *desktop) startWorkspace(w savedWorkspace, saved bool) {
 				if group := d.terminalGroupFor(ids[w.Active]); group != nil {
 					copy(group.rowPerc[:], w.RowPerc)
 					copy(group.columnPerc[:], w.ColumnPerc)
+					if saved {
+						original := cloneSavedWorkspace(w)
+						group.savedLocal = &original
+					}
+					if cloudSource != nil {
+						original := cloneCloudWorkspace(cloudSource.workspace)
+						group.savedCloud, group.savedCloudURL, group.savedUser = &original, cloudSource.url, cloudSource.user
+					}
 				}
 			}
 			d.splitLayout = w.SplitLayout
+			if group := d.terminalGroupFor(ids[w.Active]); group != nil && (group.savedLocal != nil || group.savedCloud != nil) {
+				group.savedSignature = d.workspaceGroupSignature(group)
+			}
 			d.newTabOpen = false
 			d.workspace = "terminal"
 			d.pendingTerminalFocus = d.currentSession
@@ -523,7 +550,7 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 							d.workspaceTemplatesStatus = err.Error()
 							d.showWorkspaceTemplates = true
 						} else {
-							d.startWorkspace(local, false)
+							d.startWorkspaceWithCloudSource(local, false, &workspaceCloudSource{workspace: w, url: d.cloud.base.String(), user: d.cloudUser})
 						}
 					}
 					if d.showWorkspaceTemplates {

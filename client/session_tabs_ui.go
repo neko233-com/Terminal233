@@ -62,6 +62,12 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 				if dragged, ok := ui.Drop[sessionDragID](tab); ok {
 					moveFrom, moveTo = dragged, sessionDragID(tabInfo.representative)
 				}
+				if d.workspaceGroupDirty(g) {
+					if ui.Button(c.Key(fmt.Sprintf("group-save-%d", g.id)), "●").Label("保存工作区：" + g.name).Tooltip("保存工作区").Width(24).Height(30).Padding(0).BorderWidth(0).Background(c.Theme().Background).TextColor(c.Theme().TextMuted).Disabled(d.busy).Clicked() {
+						d.selectSession(g.focused)
+						d.saveActiveWorkspaceGroup(g)
+					}
+				}
 				closeLabel, closeText := "关闭工作区："+g.name, "×"
 				if d.confirmTerminalGroupClose == g.id {
 					closeLabel, closeText = "确认关闭工作区："+g.name, "确认"

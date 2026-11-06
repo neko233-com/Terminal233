@@ -287,6 +287,7 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 			}
 		} else if s.cloudOriginID != "" {
 			e.Kind = "cloud"
+			e.Label = s.label
 			e.Host, e.Port, e.User, e.Fingerprint = s.active.Host, s.active.Port, s.active.User, s.active.Fingerprint
 			e.CloudURL, e.CloudUser, e.CloudTeam, e.CloudID = s.cloudOriginURL, s.cloudOriginUser, s.cloudOriginTeam, s.cloudOriginID
 		} else {

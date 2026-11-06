@@ -281,6 +281,7 @@ func (d *desktop) toggleQuickCommands() {
 
 func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	mods := ui.Cmd | ui.Shift
+	group := d.terminalGroupFor(d.currentSession)
 	switch {
 	case (d.workspace == "terminal" || d.workspace == "files") && len(d.sessions) > 1 && d.canSwitchSession() && c.Shortcut(ui.Cmd, ui.KeyTab):
 		d.selectAdjacentSession(1)
@@ -307,6 +308,24 @@ func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	case c.Shortcut(mods, ui.KeyF):
 		if d.term != nil {
 			d.workspace, d.terminalSearchOpen = "terminal", true
+		}
+	case d.workspace == "terminal" && group != nil && !group.renameOpen && !d.terminalSearchOpen && !d.quickEditorOpen && c.Shortcut(ui.Cmd, ui.KeyS):
+		if d.busy {
+			d.status = "请等待当前操作完成"
+		} else {
+			d.saveActiveWorkspaceGroup(group)
+		}
+	case d.workspace == "terminal" && group != nil && !group.renameOpen && !d.terminalSearchOpen && !d.quickEditorOpen && c.Shortcut(ui.Cmd|ui.Alt, ui.KeyM):
+		if d.busy {
+			d.status = "请等待当前操作完成"
+		} else {
+			d.toggleSplit()
+		}
+	case d.workspace == "terminal" && group != nil && !group.renameOpen && !d.terminalSearchOpen && !d.quickEditorOpen && c.Shortcut(ui.Cmd|ui.Alt, ui.KeyB):
+		if d.busy {
+			d.status = "请等待当前操作完成"
+		} else {
+			d.toggleGroupBroadcast(group)
 		}
 	case d.workspace == "terminal" && d.term != nil && c.Shortcut(ui.Cmd, ui.KeyPeriod):
 		d.toggleQuickCommands()
@@ -1202,7 +1221,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.121"
+const version = "0.3.122"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
