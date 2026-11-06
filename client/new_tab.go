@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -18,6 +20,7 @@ func (d *desktop) openNewTab() {
 func (d *desktop) closeNewTab() {
 	d.newTabOpen = false
 	d.newTabQuery, d.newTabStatus = "", ""
+	d.newTabSelected, d.newTabSelectionQuery = "", ""
 	if d.workspace != "new-tab" {
 		return
 	}
@@ -42,88 +45,227 @@ func (d *desktop) newTabQuickConnect() {
 	d.openQuickConnection()
 	d.workspace, d.newTabOpen = "connections", false
 	d.newTabQuery, d.newTabStatus = "", ""
+	d.newTabSelected, d.newTabSelectionQuery = "", ""
+}
+
+type newTabResult struct {
+	key, label, detail, accessible, kind, id string
+	sessionID                                int
+	enabled                                  bool
+}
+
+func newTabMatches(query, text string) bool {
+	text = strings.ToLower(text)
+	for _, word := range strings.Fields(strings.ToLower(query)) {
+		if !strings.Contains(text, word) {
+			return false
+		}
+	}
+	return true
+}
+
+func (d *desktop) newTabResults(query string) []newTabResult {
+	query = strings.TrimSpace(query)
+	openDisabled := d.busy || d.hasUnsavedConnection() || len(d.sessions) >= maxWorkspaceSessions
+	localDisabled := d.busy || len(d.sessions) >= maxWorkspaceSessions
+	quick := newTabResult{key: "new-tab-quick-connect", label: "填写 SSH 连接信息", accessible: "填写 SSH 连接信息", kind: "quick", enabled: !openDisabled}
+	results := make([]newTabResult, 0, 1+len(d.sessions)+len(d.profiles)+len(d.accounts))
+	explicitSSH := strings.HasPrefix(query, "ssh ")
+	if explicitSSH {
+		results = append(results, quick)
+	}
+	if newTabMatches(query, "本机终端 local terminal powershell") {
+		results = append(results, newTabResult{key: "new-tab-local", label: "本机终端", detail: "PowerShell 7", accessible: "打开本机终端", kind: "local", enabled: !localDisabled})
+	}
+	for _, s := range d.sessions {
+		if newTabMatches(query, s.label) {
+			label := sessionDisplayLabel(s)
+			results = append(results, newTabResult{key: fmt.Sprintf("new-tab-session-%d", s.id), label: label, detail: fmt.Sprintf("已打开 · 会话 %d", s.id), accessible: fmt.Sprintf("切换到会话：%s · 会话 %d", label, s.id), kind: "session", sessionID: s.id, enabled: d.canSwitchSession()})
+		}
+	}
+	for _, p := range d.profiles {
+		name := p.Label
+		if name == "" {
+			name = p.Settings.User + "@" + p.Settings.Host
+		}
+		address := p.Settings.User + "@" + net.JoinHostPort(p.Settings.Host, p.Settings.Port)
+		if newTabMatches(query, name+" "+address+" "+p.Settings.User+"@"+p.Settings.Host+" "+p.Settings.Host+" "+p.Settings.User+" "+p.Group) {
+			results = append(results, newTabResult{key: "new-tab-profile-" + string(p.ID), label: name, detail: address + " · 本机", accessible: "打开主机：" + name + " · 本机", kind: "profile", id: string(p.ID), enabled: !openDisabled})
+		}
+	}
+	if d.cloud != nil {
+		for _, a := range d.accounts {
+			name := a.Label
+			if name == "" {
+				name = a.Username + "@" + a.Host
+			}
+			address := a.Username + "@" + net.JoinHostPort(a.Host, strconv.Itoa(a.Port))
+			if newTabMatches(query, name+" "+address+" "+a.Username+"@"+a.Host+" "+a.Host+" "+a.Username) {
+				results = append(results, newTabResult{key: "new-tab-cloud-" + a.ID, label: name, detail: address + " · 云端", accessible: "打开主机：" + name + " · 云端", kind: "cloud", id: a.ID, enabled: !openDisabled})
+			}
+		}
+	}
+	if !explicitSSH && looksLikeQuickConnection(query) {
+		results = append(results, quick)
+	}
+	return results
+}
+
+func (d *desktop) activateNewTabResult(key string) {
+	for _, result := range d.newTabResults(d.newTabQuery) {
+		if result.key != key || !result.enabled {
+			continue
+		}
+		switch result.kind {
+		case "quick":
+			d.newTabQuickConnect()
+		case "local":
+			before := d.nextSession
+			d.openLocalTerminal()
+			if d.nextSession != before {
+				d.newTabOpen, d.newTabQuery = false, ""
+				d.newTabSelected, d.newTabSelectionQuery = "", ""
+			} else {
+				d.newTabStatus = d.status
+			}
+		case "session":
+			d.selectSession(result.sessionID)
+		case "profile":
+			for _, p := range d.profiles {
+				if string(p.ID) == result.id {
+					d.newTabOpen, d.newTabQuery = false, ""
+					d.newTabSelected, d.newTabSelectionQuery = "", ""
+					d.openProfileConnection(p)
+					return
+				}
+			}
+		case "cloud":
+			for _, a := range d.accounts {
+				if a.ID == result.id {
+					d.newTabOpen, d.newTabQuery = false, ""
+					d.newTabSelected, d.newTabSelectionQuery = "", ""
+					d.loadCloudAccount(a)
+					return
+				}
+			}
+		}
+		return
+	}
+}
+
+func (d *desktop) newTabSyncSelection(query string) {
+	if d.newTabSelectionQuery != query {
+		d.newTabSelectionQuery, d.newTabSelected, d.newTabStatus = query, "", ""
+	}
+}
+
+func (d *desktop) newTabTextKey(k ui.TextKey) bool {
+	if k.Mods != 0 {
+		return false
+	}
+	query := k.Text()
+	d.newTabQuery = query
+	d.newTabSyncSelection(query)
+	var eligible []newTabResult
+	for _, result := range d.newTabResults(query) {
+		if result.enabled {
+			eligible = append(eligible, result)
+		}
+	}
+	index := -1
+	for i, result := range eligible {
+		if result.key == d.newTabSelected {
+			index = i
+			break
+		}
+	}
+	if index < 0 && strings.TrimSpace(query) != "" && len(eligible) > 0 {
+		index = 0
+	}
+	switch k.Key {
+	case ui.KeyDown, ui.KeyUp:
+		if len(eligible) == 0 {
+			return true
+		}
+		if k.Key == ui.KeyDown {
+			index = (index + 1) % len(eligible)
+		} else if index < 0 {
+			index = len(eligible) - 1
+		} else {
+			index = (index - 1 + len(eligible)) % len(eligible)
+		}
+		d.newTabSelected = eligible[index].key
+		return true
+	case ui.KeyEnter:
+		if index >= 0 {
+			d.activateNewTabResult(eligible[index].key)
+		}
+		return true
+	case ui.KeyEscape:
+		if query != "" {
+			k.SetText("")
+			d.newTabSelected, d.newTabSelectionQuery, d.newTabStatus = "", "", ""
+		} else {
+			d.closeNewTab()
+		}
+		return true
+	}
+	return false
 }
 
 func (d *desktop) newTabView(c *ui.Context) {
-	query := strings.ToLower(strings.TrimSpace(d.newTabQuery))
-	matches := func(text string) bool { return query == "" || strings.Contains(strings.ToLower(text), query) }
-	draftBlocked := d.hasUnsavedConnection()
-	openDisabled := d.busy || draftBlocked || len(d.sessions) >= maxWorkspaceSessions
+	d.newTabSyncSelection(d.newTabQuery)
+	results := d.newTabResults(d.newTabQuery)
+	highlight := d.newTabSelected
+	if highlight != "" {
+		found := false
+		for _, result := range results {
+			if result.key == highlight && result.enabled {
+				found = true
+				break
+			}
+		}
+		if !found {
+			highlight = ""
+		}
+	}
+	if highlight == "" && strings.TrimSpace(d.newTabQuery) != "" {
+		for _, result := range results {
+			if result.enabled {
+				highlight = result.key
+				break
+			}
+		}
+	}
 	ui.Column(c).FillWidth().MaxWidth(760).Padding(28).Gap(12).Children(func() {
 		ui.Text(c, "新标签页").FontSize(22).Bold()
-		ui.TextInput(c.Key("new-tab-search"), &d.newTabQuery).Label("搜索主机或会话").Placeholder("搜索主机或会话，或输入 ssh 用户@主机").FillWidth().AutoFocus().OnSubmit(func() {
-			if looksLikeQuickConnection(d.newTabQuery) {
-				d.newTabQuickConnect()
-			}
-		})
+		ui.TextInput(c.Key("new-tab-search"), &d.newTabQuery).Label("搜索主机或会话").Placeholder("搜索主机或会话，或输入 ssh 用户@主机").FillWidth().AutoFocus().OnTextKey(d.newTabTextKey)
 		if d.newTabStatus != "" {
 			ui.Text(c, d.newTabStatus).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		}
-		if draftBlocked {
+		if d.hasUnsavedConnection() {
 			ui.Text(c, "主机详情有未保存的更改；保存或关闭后可打开其他主机。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		}
-		if looksLikeQuickConnection(d.newTabQuery) {
-			if ui.Button(c.Key("new-tab-quick-connect"), "填写 SSH 连接信息").Disabled(openDisabled).Clicked() {
-				d.newTabQuickConnect()
-			}
-		}
-		if matches("本机终端 local terminal powershell") {
-			if ui.Button(c.Key("new-tab-local"), "本机终端").Label("打开本机终端").FillWidth().Justify(ui.Start).Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
-				before := d.nextSession
-				d.openLocalTerminal()
-				if d.nextSession != before {
-					d.newTabOpen, d.newTabQuery = false, ""
-				} else {
-					d.newTabStatus = d.status
-				}
-			}
-		}
-		shown := 0
-		for _, session := range d.sessions {
-			s := session
-			if !matches(s.label) {
-				continue
-			}
-			shown++
-			label := fmt.Sprintf("%s · 会话 %d", sessionDisplayLabel(s), s.id)
-			if ui.Button(c.Key(fmt.Sprintf("new-tab-session-%d", s.id)), label).Label("切换到会话：" + label).FillWidth().Justify(ui.Start).Disabled(!d.canSwitchSession()).Clicked() {
-				d.selectSession(s.id)
-			}
-		}
-		for _, profile := range d.profiles {
-			p := profile
-			name := p.Label
-			if name == "" {
-				name = p.Settings.User + "@" + p.Settings.Host
-			}
-			if !matches(name + " " + p.Settings.Host + " " + p.Settings.User + " " + p.Group) {
-				continue
-			}
-			shown++
-			if ui.Button(c.Key("new-tab-profile-"+string(p.ID)), name+" · 本机").Label("打开主机：" + name + " · 本机").FillWidth().Justify(ui.Start).Disabled(openDisabled).Clicked() {
-				d.newTabOpen, d.newTabQuery = false, ""
-				d.openProfileConnection(p)
-			}
-		}
-		if d.cloud != nil {
-			for _, account := range d.accounts {
-				a := account
-				name := a.Label
-				if name == "" {
-					name = a.Username + "@" + a.Host
-				}
-				if !matches(name + " " + a.Host + " " + a.Username) {
-					continue
-				}
-				shown++
-				if ui.Button(c.Key("new-tab-cloud-"+a.ID), name+" · 云端").Label("打开主机：" + name + " · 云端").FillWidth().Justify(ui.Start).Disabled(openDisabled).Clicked() {
-					d.newTabOpen, d.newTabQuery = false, ""
-					d.loadCloudAccount(a)
-				}
-			}
-		}
-		if shown == 0 && query != "" && !matches("本机终端 local terminal powershell") && !looksLikeQuickConnection(d.newTabQuery) {
+		if len(results) == 0 && strings.TrimSpace(d.newTabQuery) != "" {
 			ui.Text(c, "没有匹配的主机或会话").FontSize(12).TextColor(c.Theme().TextMuted)
+		}
+		for _, result := range results {
+			r := result
+			button := ui.Button(c.Key(r.key), "").Label(r.accessible).FillWidth().Justify(ui.Start).Disabled(!r.enabled)
+			if highlight == r.key {
+				button = button.Selected(true).Background(c.Theme().SurfacePressed).TextColor(c.Theme().Text)
+			}
+			button.Children(func() {
+				ui.Column(c).FillWidth().Gap(2).Children(func() {
+					ui.Text(c, r.label).Wrap()
+					if r.detail != "" {
+						ui.Text(c, r.detail).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+					}
+				})
+			})
+			if button.Clicked() {
+				d.activateNewTabResult(r.key)
+			}
 		}
 	})
 }

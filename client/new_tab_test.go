@@ -73,6 +73,13 @@ func TestNewTabProtectsHostDraftAndQuickConnect(t *testing.T) {
 	if d.workspace != "new-tab" || d.settings.Host != "unsaved" {
 		t.Fatal("saved host discarded an unsaved draft")
 	}
+	if err := view.Click("搜索主机或会话"); err != nil {
+		t.Fatal(err)
+	}
+	view.Key(0, ui.KeyEnter)
+	if d.workspace != "new-tab" || d.settings.Host != "unsaved" {
+		t.Fatal("keyboard selection bypassed unsaved draft protection")
+	}
 	d.settings.Host = "before"
 	d.newTabQuery = "ssh bob@other.test -p 2222"
 	d.newTabQuickConnect()
@@ -90,5 +97,82 @@ func TestNewTabFitsMinimumWindow(t *testing.T) {
 		if !ok || r.Y < 0 || r.Y+r.H > 480 {
 			t.Fatalf("%s is not visible at minimum window size: %+v", label, r)
 		}
+	}
+}
+
+func TestNewTabKeyboardSearchSelectsSavedHost(t *testing.T) {
+	d := &desktop{workspace: "connections", profiles: []profile{
+		{ID: "1", Label: "一号", Group: "生产", Settings: connectionSettings{Host: "first.example", Port: "22", User: "bob"}},
+		{ID: "2", Label: "二号", Group: "生产", Settings: connectionSettings{Host: "second.example", Port: "22", User: "alice", Fingerprint: "SHA256:saved"}},
+	}}
+	d.openNewTab()
+	view := ui.NewTester(d.view, 1280, 900)
+	if err := view.Click("搜索主机或会话"); err != nil {
+		t.Fatal(err)
+	}
+	view.Type("生产 example")
+	view.Key(0, ui.KeyDown)
+	if d.newTabSelected != "new-tab-profile-2" {
+		t.Fatalf("arrow selection = %q", d.newTabSelected)
+	}
+	view.Key(0, ui.KeyEnter)
+	if d.workspace != "connections" || d.settings.Host != "second.example" || d.selectedProfile != "2" || d.expectedFingerprint != "SHA256:saved" {
+		t.Fatal("Enter did not open the selected saved host")
+	}
+
+	d.editConnection = false
+	d.openNewTab()
+	view.Frame()
+	if err := view.Click("搜索主机或会话"); err != nil {
+		t.Fatal(err)
+	}
+	view.Type("bob@first.example")
+	view.Key(0, ui.KeyEnter)
+	if d.selectedProfile != "1" || d.settings.Host != "first.example" {
+		t.Fatal("exact user@host should select the saved host before creating a new one")
+	}
+}
+
+func TestNewTabKeyboardQuickConnectAndEscape(t *testing.T) {
+	d := &desktop{workspace: "connections"}
+	d.openNewTab()
+	view := ui.NewTester(d.view, 1280, 900)
+	if err := view.Click("搜索主机或会话"); err != nil {
+		t.Fatal(err)
+	}
+	view.Key(0, ui.KeyEnter)
+	if d.workspace != "new-tab" {
+		t.Fatal("empty search unexpectedly opened a terminal")
+	}
+	view.Type("ssh alice@example.test -p 2222")
+	view.Key(0, ui.KeyEnter)
+	if d.workspace != "connections" || d.settings.Host != "example.test" || d.settings.Port != "2222" || d.fingerprint != "" {
+		t.Fatal("explicit SSH input did not open the verification-first form")
+	}
+	d.editConnection = false
+	d.openNewTab()
+	view.Frame()
+	if err := view.Click("搜索主机或会话"); err != nil {
+		t.Fatal(err)
+	}
+	view.Type("no matches")
+	view.Key(0, ui.KeyEscape)
+	if d.workspace != "new-tab" || d.newTabQuery != "" {
+		t.Fatal("first Escape did not clear search")
+	}
+	view.Key(0, ui.KeyEscape)
+	if d.workspace != "connections" || d.newTabOpen {
+		t.Fatal("second Escape did not close the new tab")
+	}
+}
+
+func TestNewTabSearchMatchesEndpointAndCloudWithoutSecrets(t *testing.T) {
+	d := &desktop{cloud: &cloudClient{}, accounts: []cloudAccount{{ID: "a", Label: "云主机", Host: "example.test", Port: 2222, Username: "alice", Password: "not-searchable-secret"}}}
+	results := d.newTabResults("alice@example.test:2222")
+	if len(results) < 1 || results[0].key != "new-tab-cloud-a" || results[0].detail != "alice@example.test:2222 · 云端" {
+		t.Fatalf("endpoint search failed: %#v", results)
+	}
+	if got := d.newTabResults("not-searchable-secret"); len(got) != 0 {
+		t.Fatal("credential text leaked into search")
 	}
 }

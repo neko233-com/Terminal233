@@ -18,6 +18,7 @@ type desktop struct {
 	workspace                                                                               string
 	newTabOpen                                                                              bool
 	newTabQuery, newTabReturn, newTabStatus                                                 string
+	newTabSelected, newTabSelectionQuery                                                    string
 	editConnection                                                                          bool
 	showKeyOptions                                                                          bool
 	lightTheme                                                                              bool
@@ -966,7 +967,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.81"
+const version = "0.3.82"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
