@@ -858,6 +858,14 @@ func (d *desktop) view(c *ui.Context) {
 						if width >= 900 {
 							ui.Text(c, status).FontSize(12).TextColor(t.TextMuted).MaxWidth(240).SingleLine().Tooltip(status)
 						}
+						for _, session := range d.sessions {
+							if session.id == d.currentSession {
+								if command := sessionRunningCommand(session); command != "" {
+									ui.Text(c, command).Label("运行中的命令：" + command).FontSize(11).TextColor(t.TextMuted).MaxWidth(180).SingleLine().Tooltip(command)
+								}
+								break
+							}
+						}
 						if len(d.groupConnectFailures) > 0 {
 							d.groupConnectionFailuresButton(c)
 						}
@@ -1249,7 +1257,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.126"
+const version = "0.3.127"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

@@ -427,6 +427,9 @@ func (d *desktop) terminalGroupView(c *ui.Context, g *terminalGroup, width float
 					if dir := sessionTerminalDirectory(s); dir != "" {
 						ui.Text(c, dir).FontSize(11).TextColor(c.Theme().TextMuted).MaxWidth(160).SingleLine().Tooltip(dir)
 					}
+					if command := sessionRunningCommand(s); command != "" {
+						ui.Text(c, command).Label("运行中的命令：" + command).FontSize(11).TextColor(c.Theme().TextMuted).MaxWidth(160).SingleLine().Tooltip(command)
+					}
 					d.broadcastMemberButton(c, g, s)
 					if ui.Button(c.Key(fmt.Sprintf("group-close-member-%d", s.id)), "×").Label("关闭终端：" + groupSessionName(g, s)).BorderWidth(0).Background(c.Theme().Surface).Width(30).Disabled(d.busy).Clicked() {
 						closeID = s.id
@@ -467,6 +470,9 @@ func (d *desktop) terminalGroupView(c *ui.Context, g *terminalGroup, width float
 								ui.Text(c, groupSessionDisplayLabel(g, s)).FontSize(12).SingleLine()
 								if dir := sessionTerminalDirectory(s); dir != "" {
 									ui.Text(c, dir).FontSize(10).TextColor(c.Theme().TextMuted).MaxWidth(110).SingleLine().Tooltip(dir)
+								}
+								if command := sessionRunningCommand(s); command != "" {
+									ui.Text(c, command).Label("运行中的命令：" + command).FontSize(10).TextColor(c.Theme().TextMuted).MaxWidth(110).SingleLine().Tooltip(command)
 								}
 							})
 						})

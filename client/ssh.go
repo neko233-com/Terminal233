@@ -64,6 +64,7 @@ type remoteShell struct {
 	out         io.Reader
 	monitorOnce sync.Once
 	monitorGate chan struct{}
+	integration shellIntegration
 }
 
 func (s *remoteShell) takeMonitorSlot() bool {
@@ -76,7 +77,13 @@ func (s *remoteShell) takeMonitorSlot() bool {
 	}
 }
 
-func (s *remoteShell) Read(p []byte) (int, error)  { return s.out.Read(p) }
+func (s *remoteShell) Read(p []byte) (int, error) {
+	n, err := s.out.Read(p)
+	if n > 0 {
+		s.integration.feed(p[:n])
+	}
+	return n, err
+}
 func (s *remoteShell) Write(p []byte) (int, error) { return s.in.Write(p) }
 func (s *remoteShell) Resize(cols, rows int) error { return s.session.WindowChange(rows, cols) }
 func (s *remoteShell) Close() error {

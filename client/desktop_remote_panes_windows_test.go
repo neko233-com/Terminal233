@@ -852,6 +852,38 @@ func TestDesktopRemotePanes(t *testing.T) {
 		press("terminal-search-close")
 		waitGone("terminal-search-input")
 	}
+	// An SSH shell's OSC markers update command state in the native workspace.
+	press("group-focus-17")
+	waitSelected("group-focus-17")
+	integrationTree := call("tree", nil)["result"].(map[string]any)
+	integrationTerminal := ""
+	for _, entry := range integrationTree["nodes"].([]any) {
+		node := entry.(map[string]any)
+		if node["label"] == "终端：fixture-2" {
+			integrationTerminal, _ = node["id"].(string)
+			break
+		}
+	}
+	if integrationTerminal == "" {
+		t.Fatal("shell integration terminal not found")
+	}
+	call("act", map[string]any{"id": integrationTerminal, "action": "focus"})
+	call("input", map[string]any{"events": []any{map[string]any{"type": "text", "text": "\x1b]633;E;tail\\x20-f\\x20app.log\x07\x1b]633;C\x07"}}})
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "运行中的命令：tail -f app.log") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "运行中的命令：tail -f app.log") {
+		t.Fatal("native shell state was not displayed")
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "text", "text": "\x1b]633;D;0\x07"}}})
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) && strings.Contains(fmt.Sprint(call("tree", nil)), "运行中的命令：tail -f app.log") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if strings.Contains(fmt.Sprint(call("tree", nil)), "运行中的命令：tail -f app.log") {
+		t.Fatal("finished shell command stayed visible")
+	}
 	// Real-time input in focus mode is sent to the other workspace terminals.
 	press("toggle-broadcast")
 	until = time.Now().Add(5 * time.Second)
