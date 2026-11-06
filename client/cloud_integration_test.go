@@ -146,6 +146,21 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	if mutationErr != nil || refreshErr != nil || secondID == "" || len(both) != 2 {
 		t.Fatalf("expected two independent records: %v %v", mutationErr, refreshErr)
 	}
+	groupState, err = client.listCloudGroups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, changed, err := movedCloudGroupState(groupState, both, []string{accounts[0].ID, secondID}, "empty")
+	if err != nil || changed != 2 {
+		t.Fatal("batch group move failed to prepare", err)
+	}
+	savedGroups, err = client.replaceCloudGroups(batch)
+	if err != nil || savedGroups.Assignments[accounts[0].ID] != "empty" || savedGroups.Assignments[secondID] != "empty" {
+		t.Fatal("batch group move failed", err)
+	}
+	if _, err = client.replaceCloudGroups(batch); err == nil {
+		t.Fatal("stale batch group update accepted")
+	}
 	settings.Password = "updated-first"
 	update, err := prepareCloudAccount(settings, "", both, accounts[0].ID)
 	if err != nil {

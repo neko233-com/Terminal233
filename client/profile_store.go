@@ -30,6 +30,7 @@ type diskProfiles struct {
 func (d *desktop) loadProfiles(path string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		d.profileSelectionAnchor = ""
 		d.confirmProfileDelete = ""
 		d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
 		d.profiles, d.nextProfileID = nil, 0
@@ -69,6 +70,7 @@ func (d *desktop) loadProfiles(path string) error {
 		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Settings: settings, EncryptedCredentials: p.EncryptedCredentials})
 	}
 	d.profiles, d.nextProfileID, d.profilePath = profiles, len(profiles), path
+	d.profileSelectionAnchor = ""
 	d.profileGroups, d.confirmGroupDelete = saved.Groups, false
 	d.profileFormat, d.foldedGroups = saved.Version, nil
 	d.confirmProfileDelete = ""

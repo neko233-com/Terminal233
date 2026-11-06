@@ -169,7 +169,72 @@ func (d *desktop) cloudGroupTree() ([]string, map[string]int) {
 }
 
 func (d *desktop) cloudGroupOperation(action, accountID, target string) {
+	d.cloudGroupOperationForIDs(action, []string{accountID}, target, false)
+}
+
+func (d *desktop) moveDraggedCloudProfilesToGroup(id, group string) {
+	ids := []string{id}
+	_, selected := d.checkedCloud[id]
+	if selected {
+		ids = nil
+		for checked := range d.checkedCloud {
+			ids = append(ids, checked)
+		}
+	}
+	d.cloudGroupOperationForIDs("move", ids, group, selected)
+}
+
+// Construct one compare-and-swap update without mutating the displayed state.
+func movedCloudGroupState(state cloudGroupSnapshot, accounts []cloudAccount, ids []string, target string) (cloudGroupSnapshot, int, error) {
+	if !cloudGroupAccountsMatch(state, accounts) || len(ids) == 0 {
+		return cloudGroupSnapshot{}, 0, errors.New("云端连接列表已变化，请刷新。")
+	}
+	if target != "" {
+		found := false
+		for _, group := range state.Groups {
+			if group == target {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return cloudGroupSnapshot{}, 0, errors.New("目标云端分组不存在。")
+		}
+	}
+	available := make(map[string]bool, len(accounts))
+	for _, a := range accounts {
+		available[a.ID] = true
+	}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id == "" || seen[id] || !available[id] {
+			return cloudGroupSnapshot{}, 0, errors.New("部分云端连接已不存在，请刷新。")
+		}
+		seen[id] = true
+	}
+	next := cloudGroupSnapshot{Groups: append([]string{}, state.Groups...), Assignments: make(map[string]string, len(state.Assignments)), AccountIDs: append([]string{}, state.AccountIDs...), Revision: state.Revision}
+	for id, path := range state.Assignments {
+		next.Assignments[id] = path
+	}
+	changed := 0
+	for _, id := range ids {
+		if next.Assignments[id] != target {
+			changed++
+		}
+		if target == "" {
+			delete(next.Assignments, id)
+		} else {
+			next.Assignments[id] = target
+		}
+	}
+	return next, changed, nil
+}
+
+func (d *desktop) cloudGroupOperationForIDs(action string, accountIDs []string, target string, clearSelection bool) {
 	if d.busy || d.cloud == nil || !d.cloud.cloudGroups || d.cloudGroupsStale || d.cloudListStale || !d.canWriteCloudScope() {
+		if !d.busy {
+			d.status = "当前云端空间不可写或需要刷新。"
+		}
 		return
 	}
 	if action == "remove" && !d.confirmGroupDelete {
@@ -269,25 +334,16 @@ func (d *desktop) cloudGroupOperation(action, accountID, target string) {
 			}
 		}
 	case "move":
-		if target != "" && !exists(target) {
-			d.status = "目标云端分组不存在。"
+		var changed int
+		var err error
+		state, changed, err = movedCloudGroupState(state, d.accounts, accountIDs, target)
+		if err != nil {
+			d.status = err.Error()
 			return
 		}
-		found := false
-		for _, a := range d.accounts {
-			if a.ID == accountID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			d.status = "云端连接不存在，请刷新。"
+		if changed == 0 {
+			d.status = "所选主机已在该分组。"
 			return
-		}
-		if target == "" {
-			delete(state.Assignments, accountID)
-		} else {
-			state.Assignments[accountID] = target
 		}
 	default:
 		return
@@ -326,6 +382,9 @@ func (d *desktop) cloudGroupOperation(action, accountID, target string) {
 				d.cloudFoldedGroups = nil
 				if action != "move" {
 					d.profileFilter = target
+				}
+				if action == "move" && clearSelection {
+					d.clearCloudBatch()
 				}
 				d.status = "云端分组已保存"
 			}

@@ -139,11 +139,11 @@ func (d *desktop) profileGroupCards(c *ui.Context, cardWidth float32, draftBlock
 			}
 			if cloud {
 				if dragged, ok := ui.Drop[cloudGroupDragID](card); ok && !d.busy && !draftBlocked && d.prepareConnectionNavigation() {
-					d.cloudGroupOperation("move", string(dragged), group)
+					d.moveDraggedCloudProfilesToGroup(string(dragged), group)
 				}
 			} else {
 				if dragged, ok := ui.Drop[profileID](card); ok && !d.busy && !draftBlocked && d.prepareConnectionNavigation() {
-					d.moveProfileToGroup(dragged, group)
+					d.moveDraggedProfilesToGroup(dragged, group)
 				}
 			}
 		}
@@ -204,28 +204,71 @@ func (d *desktop) createGroup() {
 }
 
 func (d *desktop) moveProfileToGroup(id profileID, group string) {
+	d.moveProfilesToGroup([]profileID{id}, group, false)
+}
+
+func (d *desktop) moveDraggedProfilesToGroup(id profileID, group string) {
+	ids := []profileID{id}
+	selected := d.checkedProfiles[id]
+	if selected {
+		ids = nil
+		for checked, yes := range d.checkedProfiles {
+			if yes {
+				ids = append(ids, checked)
+			}
+		}
+	}
+	d.moveProfilesToGroup(ids, group, selected)
+}
+
+func (d *desktop) moveProfilesToGroup(ids []profileID, group string, clearSelection bool) {
 	if d.busy || !d.groupExists(group) {
+		return
+	}
+	wanted := make(map[profileID]bool, len(ids))
+	for _, id := range ids {
+		if id == "" || wanted[id] {
+			d.status = "选择无效，请重新选择主机。"
+			return
+		}
+		wanted[id] = true
+	}
+	if len(wanted) == 0 {
 		return
 	}
 	original := d.profiles
 	items := append([]profile(nil), original...)
+	found, changed := 0, 0
 	for i := range items {
-		if items[i].ID != id {
+		if !wanted[items[i].ID] {
 			continue
 		}
-		if items[i].Group == group {
-			return
+		found++
+		if items[i].Group != group {
+			items[i].Group = group
+			changed++
 		}
-		items[i].Group = group
-		d.profiles = items
-		if err := d.saveProfiles(); err != nil {
-			d.profiles = original
-			d.status = "连接未移动：" + err.Error()
-		} else {
-			d.status = "连接已移动到分组：" + group
-		}
+	}
+	if found != len(wanted) {
+		d.status = "部分主机已不存在，请重新选择。"
 		return
 	}
+	if changed == 0 {
+		d.status = "所选主机已在该分组。"
+		return
+	}
+	d.profiles = items
+	if err := d.saveProfiles(); err != nil {
+		d.profiles = original
+		d.status = "连接未移动：" + err.Error()
+		return
+	}
+	if clearSelection {
+		d.checkedProfiles = nil
+		d.profileSelectionAnchor = ""
+		d.confirmProfileBatchDelete = false
+	}
+	d.status = fmt.Sprintf("已将 %d 个连接移动到分组：%s", changed, group)
 }
 
 // Renaming or removing a group updates the whole subtree in one store write.

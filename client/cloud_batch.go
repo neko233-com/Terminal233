@@ -11,6 +11,7 @@ import (
 
 func (d *desktop) clearCloudBatch() {
 	d.checkedCloud = nil
+	d.cloudSelectionAnchor = ""
 	d.confirmCloudBatchDelete = false
 }
 

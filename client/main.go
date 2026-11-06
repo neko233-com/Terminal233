@@ -99,8 +99,10 @@ type desktop struct {
 	profileAutoAt                                                                           time.Time
 	confirmProfileDelete                                                                    profileID
 	checkedProfiles                                                                         map[profileID]bool
+	profileSelectionAnchor                                                                  profileID
 	confirmProfileBatchDelete                                                               bool
 	checkedCloud                                                                            map[string]cloudAccount
+	cloudSelectionAnchor                                                                    string
 	confirmCloudBatchDelete                                                                 bool
 	cloudGroupSnapshot                                                                      cloudGroupSnapshot
 	cloudGroupsStale                                                                        bool
@@ -704,11 +706,11 @@ func (d *desktop) view(c *ui.Context) {
 									}
 									if isCloudGroups {
 										if dragged, ok := ui.Drop[cloudGroupDragID](button); ok && !d.busy && d.prepareConnectionNavigation() {
-											d.cloudGroupOperation("move", string(dragged), name)
+											d.moveDraggedCloudProfilesToGroup(string(dragged), name)
 										}
 									} else {
 										if dragged, ok := ui.Drop[profileID](button); ok && !d.busy && d.prepareConnectionNavigation() {
-											d.moveProfileToGroup(dragged, name)
+											d.moveDraggedProfilesToGroup(dragged, name)
 										}
 									}
 								})
@@ -1116,7 +1118,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.109"
+const version = "0.3.110"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

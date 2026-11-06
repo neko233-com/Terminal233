@@ -413,6 +413,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 			}
 			if ui.Button(c.Key("profile-batch-clear"), "清除勾选").Clicked() {
 				d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
+				d.profileSelectionAnchor = ""
 			}
 		})
 		if d.confirmProfileBatchDelete {
@@ -502,6 +503,12 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				return a < b
 			})
 		}
+		visibleIDs := make([]profileID, 0, len(items))
+		for _, item := range items {
+			if d.profileVisible(item) {
+				visibleIDs = append(visibleIDs, item.ID)
+			}
+		}
 		for _, item := range items {
 			if d.profileSource == "cloud" {
 				break
@@ -529,10 +536,10 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 						ui.Text(c, p.Settings.User+"@"+p.Settings.Host+":"+p.Settings.Port).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 					})
 				})
-				if d.selectedProfile == string(p.ID) {
+				if d.selectedProfile == string(p.ID) || d.checkedProfiles[p.ID] {
 					row = row.Background(c.Theme().SurfacePressed).BorderWidth(1).BorderColor(c.Theme().Accent)
 				}
-				if !d.profileRecent && d.profileSort == "" {
+				if !d.busy {
 					row = row.Drag(p.ID)
 				}
 				blockedByEditor := draftBlocked
@@ -568,7 +575,8 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 						d.status = "已复制地址：" + p.Label
 					}
 				})
-				if row.DoubleClicked() && !blockedByEditor {
+				mods := row.ClickModifiers()
+				if row.DoubleClicked() && mods&(ui.Cmd|ui.Shift) == 0 && !blockedByEditor {
 					if d.prepareConnectionNavigation() {
 						if current, ok := d.currentProfile(p.ID); ok {
 							d.openProfileConnection(current)
@@ -577,15 +585,21 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				} else if row.Clicked() {
 					if blockedByEditor {
 						d.status = "请先保存或关闭当前主机详情。"
+					} else if mods&(ui.Cmd|ui.Shift) != 0 {
+						if d.closeConnectionForNavigation() {
+							d.selectLocalProfilesModified(p.ID, visibleIDs, mods)
+						}
 					} else if !d.prepareConnectionNavigation() {
 						// A failed save keeps the current editor and its error.
 					} else if d.editConnection {
+						d.profileSelectionAnchor = p.ID
 						if d.settingsFromCloud || d.selectedProfile != string(p.ID) {
 							if current, ok := d.currentProfile(p.ID); ok {
 								d.loadProfile(current)
 							}
 						}
 					} else {
+						d.profileSelectionAnchor = p.ID
 						d.selectedProfile = string(p.ID)
 						d.selectedCloudProfile = ""
 						d.confirmProfileDelete = ""
@@ -615,6 +629,11 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 					ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 						checked := d.checkedProfiles[p.ID]
 						if ui.Checkbox(c.Key("profile-check-"+string(p.ID)), &checked, "").Label("勾选本机连接：" + p.Label).Disabled(d.busy).Changed() {
+							if checked {
+								d.profileSelectionAnchor = p.ID
+							} else if d.profileSelectionAnchor == p.ID {
+								d.profileSelectionAnchor = ""
+							}
 							if d.checkedProfiles == nil {
 								d.checkedProfiles = make(map[profileID]bool)
 							}
@@ -722,6 +741,12 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				return a < b
 			})
 		}
+		visibleCloudIDs := make([]string, 0, len(accounts))
+		for _, account := range accounts {
+			if d.cloudAccountVisible(account) {
+				visibleCloudIDs = append(visibleCloudIDs, account.ID)
+			}
+		}
 		ui.Row(c).FillWidth().Wrap().Gap(10).AlignItems(ui.Start).Children(func() {
 			for _, entry := range accounts {
 				account := entry
@@ -741,7 +766,8 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 							ui.Text(c, account.Username+"@"+account.Host).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 						})
 					})
-					if d.selectedCloudProfile == account.ID {
+					_, isChecked := d.checkedCloud[account.ID]
+					if d.selectedCloudProfile == account.ID || isChecked {
 						row = row.Background(c.Theme().SurfacePressed).BorderWidth(1).BorderColor(c.Theme().Accent)
 					}
 					blockedByEditor := draftBlocked
@@ -752,20 +778,27 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 							}
 						}
 					})
-					if row.DoubleClicked() && !blockedByEditor {
+					mods := row.ClickModifiers()
+					if row.DoubleClicked() && mods&(ui.Cmd|ui.Shift) == 0 && !blockedByEditor {
 						if d.prepareConnectionNavigation() {
 							d.loadCloudAccount(account)
 						}
 					} else if row.Clicked() {
 						if blockedByEditor {
 							d.status = "请先保存或关闭当前主机详情。"
+						} else if mods&(ui.Cmd|ui.Shift) != 0 {
+							if d.closeConnectionForNavigation() {
+								d.selectCloudProfilesModified(account.ID, visibleCloudIDs, mods)
+							}
 						} else if !d.prepareConnectionNavigation() {
 							// A failed save keeps the current editor and its error.
 						} else if d.editConnection {
+							d.cloudSelectionAnchor = account.ID
 							if !d.settingsFromCloud || d.selectedCloudProfile != account.ID {
 								d.loadCloudAccount(account)
 							}
 						} else {
+							d.cloudSelectionAnchor = account.ID
 							d.selectedCloudProfile = account.ID
 							d.selectedProfile = ""
 							d.scheduleProfileInspector(c)
@@ -789,6 +822,11 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 						ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
 							_, checked := d.checkedCloud[account.ID]
 							if ui.Checkbox(c.Key("cloud-profile-check-"+account.ID), &checked, "").Label("勾选云端连接：" + account.Label).Disabled(d.busy || d.cloudListStale).Changed() {
+								if checked {
+									d.cloudSelectionAnchor = account.ID
+								} else if d.cloudSelectionAnchor == account.ID {
+									d.cloudSelectionAnchor = ""
+								}
 								d.checkCloudAccount(account, checked)
 							}
 							ui.Box(c).Grow(1)
@@ -898,6 +936,7 @@ func (d *desktop) copyCheckedProfiles() {
 	}
 	d.status = fmt.Sprintf("已复制 %d 个本机连接", count)
 	d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
+	d.profileSelectionAnchor = ""
 }
 
 func (d *desktop) deleteCheckedProfiles() {
@@ -926,6 +965,7 @@ func (d *desktop) deleteCheckedProfiles() {
 	}
 	d.confirmProfileDelete = ""
 	d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
+	d.profileSelectionAnchor = ""
 	d.status = fmt.Sprintf("已移除 %d 个本机连接", removed)
 }
 

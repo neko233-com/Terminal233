@@ -38,6 +38,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 	if err := profiles.loadProfiles(filepath.Join(configDir, "NekoSSH", "profiles.json")); err != nil {
 		t.Fatal(err)
 	}
+	profiles.profileGroups = []string{"batch-target"}
 	for i, settings := range []connectionSettings{a, b, c, bad} {
 		profiles.settings, profiles.active = settings, settings
 		profiles.selectedProfile, profiles.profileLabel = "", fmt.Sprintf("fixture-%d", i+1)
@@ -864,4 +865,29 @@ func TestDesktopRemotePanes(t *testing.T) {
 	press("terminal-search-close")
 	waitGone("terminal-search-input")
 	press("toggle-broadcast")
+	// Native Ctrl-click selection and dragging a selected host move the whole
+	// selection in one persisted update.
+	press("workspace-hosts-tab")
+	controlClick("profile-1")
+	controlClick("profile-2")
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "已勾选 2 个本机连接") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "已勾选 2 个本机连接") {
+		t.Fatal("native host multi-selection failed")
+	}
+	drag("profile-1", "group-card-batch-target")
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) {
+		var saved desktop
+		if saved.loadProfiles(filepath.Join(configDir, "NekoSSH", "profiles.json")) == nil && len(saved.profiles) >= 2 && saved.profiles[0].Group == "batch-target" && saved.profiles[1].Group == "batch-target" {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	var restoredProfiles desktop
+	if err := restoredProfiles.loadProfiles(filepath.Join(configDir, "NekoSSH", "profiles.json")); err != nil || len(restoredProfiles.profiles) < 2 || restoredProfiles.profiles[0].Group != "batch-target" || restoredProfiles.profiles[1].Group != "batch-target" {
+		t.Fatal("native batch drag did not persist", err)
+	}
 }
