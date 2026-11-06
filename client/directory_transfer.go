@@ -171,6 +171,13 @@ func copyPaneExpectedEntryContext(ctx context.Context, source *remoteShell, sour
 		return false, err
 	}
 	defer dst.close()
+	targetInfo, err := dst.stat(targetDir)
+	if err != nil {
+		return false, fmt.Errorf("无法读取目标目录：%w", err)
+	}
+	if !targetInfo.IsDir() || targetInfo.Mode()&os.ModeSymlink != 0 {
+		return false, errors.New("目标必须是普通目录，不能是链接或文件")
+	}
 	sourceRoot, targetRoot := src.join(sourceDir, name), dst.join(targetDir, name)
 	info, err := src.stat(sourceRoot)
 	if err != nil {

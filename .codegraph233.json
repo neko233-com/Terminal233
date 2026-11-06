@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "strategy": "generic",
+  "profile": "code",
+  "roots": [
+    {
+      "key": "client",
+      "path": "client",
+      "role": "frontend"
+    },
+    {
+      "key": "server",
+      "path": "server",
+      "role": "backend"
+    }
+  ],
+  "languages": [
+    "go"
+  ],
+  "exclude": [
+    "**/*_test.go",
+    "**/testdata/**",
+    "**/tools/**"
+  ],
+  "features": {
+    "code": true,
+    "type_deps": true,
+    "prefabs": false,
+    "shaders": false,
+    "assets": false,
+    "meta": false,
+    "config_tables": false,
+    "guid_map": false
+  }
+}

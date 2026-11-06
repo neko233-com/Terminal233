@@ -929,6 +929,9 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 							d.removeSelected()
 						}
 					})
+					if d.fileFolderDrop(c, row, true, f) {
+						return
+					}
 					if row.DoubleClicked() {
 						if f.IsDir {
 							d.openSessionDirectory(f, local)
@@ -1050,14 +1053,12 @@ func (d *desktop) fileDropView(c *ui.Context, local bool) {
 }
 
 func (d *desktop) handleFileDrop(files []string) {
-	if d.busy || d.fileSessionUnavailable() {
-		d.fileStatus = "请先连接后再上传"
-	} else if len(files) == 1 {
-		d.fileLocal = files[0]
-		d.transfer(true)
-	} else {
-		d.transferBatch(files)
+	target, ready := d.paneFolderTarget(true, "")
+	if !ready {
+		d.fileStatus = "请先连接并打开目标目录"
+		return
 	}
+	d.copyExternalFilesToFolder(files, target)
 }
 
 func (d *desktop) fileActionsView(c *ui.Context, local, compact bool) {

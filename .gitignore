@@ -154,3 +154,6 @@ forward-rules.json
 .forward-rules-*.tmp
 .local-import.journal
 .local-import-*.tmp
+
+# codegraph233 本地索引（勿提交）
+/.codegraph233/

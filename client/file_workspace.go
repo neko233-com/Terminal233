@@ -76,6 +76,11 @@ func (d *desktop) fileWorkspace(c *ui.Context, width float32) {
 				d.secondaryFilePaneView(c, -1)
 			}
 		})
+		if target, ready := d.paneFolderTarget(false, ""); ready {
+			if files := local.DroppedFiles(); len(files) > 0 {
+				d.copyExternalFilesToFolder(files, target)
+			}
+		}
 		if item, ok := ui.Drop[remotePaneDrag](local); ok {
 			if item.secondaryID != d.secondaryPane.sessionID {
 				d.fileStatus = "目标面板已改变，请重新选择文件"
@@ -295,6 +300,9 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 						}
 					}
 				})
+				if d.fileFolderDrop(c, row, false, f) {
+					return
+				}
 				if row.DoubleClicked() {
 					if f.IsDir {
 						d.requestLocalPane(filepath.Join(d.localPane.directory, f.Name), -1)

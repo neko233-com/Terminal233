@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -330,6 +331,9 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 						d.copySecondaryToRight(item)
 					}
 				})
+				if d.fileFolderDrop(c, row, false, f) {
+					return
+				}
 				if row.DoubleClicked() {
 					if f.IsDir {
 						d.requestSecondaryPane(path.Join(p.directory, f.Name), -1)
@@ -454,6 +458,13 @@ func (d *desktop) copyRightToSecondary(item remotePaneDrag) {
 	d.startPaneCopy(item.shell, item.directory, item.secondaryShell, item.secondaryDir, item.items, false)
 }
 func (d *desktop) startPaneCopy(src *remoteShell, srcDir string, dst *remoteShell, dstDir string, items []paneCopyItem, targetRight bool) {
+	d.startPaneCopySources(src, srcDir, dst, dstDir, items, targetRight, nil)
+}
+
+func (d *desktop) startPaneCopySources(src *remoteShell, srcDir string, dst *remoteShell, dstDir string, items []paneCopyItem, targetRight bool, sourceDirectories map[string]string) {
+	if d.busy || d.win == nil {
+		return
+	}
 	if len(items) == 0 || len(items) > maxBatchFiles {
 		d.fileStatus = "请选择有效的文件或目录"
 		return
@@ -462,6 +473,25 @@ func (d *desktop) startPaneCopy(src *remoteShell, srcDir string, dst *remoteShel
 	leftID, leftShell, leftDir, leftGeneration := d.secondaryPane.sessionID, d.secondaryPane.shell, d.secondaryPane.directory, d.secondaryPane.generation
 	localDir, localGeneration := d.localPane.directory, d.localPane.generation
 	items = append([]paneCopyItem(nil), items...)
+	// Per-item sources belong only to a native local-file drop, and are copied
+	// before the asynchronous worker starts so they cannot change under it.
+	sources := make(map[string]string, len(sourceDirectories))
+	for _, item := range items {
+		if sourceDirectories != nil {
+			directory := sourceDirectories[item.name]
+			if src != nil || !filepath.IsAbs(directory) {
+				d.fileStatus = "无效的本机源目录"
+				return
+			}
+			sources[item.name] = directory
+		}
+	}
+	sourceDirFor := func(item paneCopyItem) string {
+		if directory, ok := sources[item.name]; ok {
+			return directory
+		}
+		return srcDir
+	}
 	d.setBatchFailures(rightID, rightShell, nil)
 	d.busy, d.fileStatus = true, "正在传输…"
 	ctx, cancel := context.WithCancel(context.Background())
@@ -472,7 +502,7 @@ func (d *desktop) startPaneCopy(src *remoteShell, srcDir string, dst *remoteShel
 		var err error
 		var batch paneBatchResult
 		if len(items) == 1 {
-			partial, err = copyPaneExpectedEntryContext(ctx, src, srcDir, dst, dstDir, items[0].name, &items[0].directory, func(read int64) {
+			partial, err = copyPaneExpectedEntryContext(ctx, src, sourceDirFor(items[0]), dst, dstDir, items[0].name, &items[0].directory, func(read int64) {
 				d.win.Update(func() {
 					if ctx.Err() == nil && d.cancelTransfer != nil && d.transferSessionID == rightID {
 						d.transferProgress(rightID, rightShell, rightDir, read)
@@ -481,7 +511,7 @@ func (d *desktop) startPaneCopy(src *remoteShell, srcDir string, dst *remoteShel
 			})
 		} else {
 			batch = runPaneBatch(ctx, items, func(item paneCopyItem, report func(int64)) (bool, error) {
-				return copyPaneExpectedEntryContext(ctx, src, srcDir, dst, dstDir, item.name, &item.directory, report)
+				return copyPaneExpectedEntryContext(ctx, src, sourceDirFor(item), dst, dstDir, item.name, &item.directory, report)
 			}, func(index, total int, name string, read int64) {
 				d.win.Update(func() {
 					if ctx.Err() != nil || d.cancelTransfer == nil || d.transferSessionID != rightID {
