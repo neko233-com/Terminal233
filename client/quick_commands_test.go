@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net"
 	"os"
@@ -12,6 +13,41 @@ import (
 	"github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
 )
+
+func TestQuickCommandsMultilinePersistenceAndCompatibility(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commands.json")
+	d := &desktop{quickPath: path, quickName: "脚本", quickText: "echo one\r\necho two"}
+	if !d.saveQuickCommand() {
+		t.Fatal(d.quickStatus)
+	}
+	saved, err := readQuickCommandFile(path)
+	if err != nil || saved.Version != 2 || len(saved.Items) != 1 || saved.Items[0].Command != "echo one\necho two" {
+		t.Fatalf("multiline file: %#v, %v", saved, err)
+	}
+	// Keep the newer format even after deleting the last script: older clients
+	// must not silently overwrite a file they cannot fully understand.
+	_, err = updateQuickCommands(path, func([]quickCommand) ([]quickCommand, error) { return nil, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err = readQuickCommandFile(path)
+	if err != nil || saved.Version != 2 {
+		t.Fatalf("format downgraded: %#v, %v", saved, err)
+	}
+	bad := quickCommandFile{Version: 1, Items: []quickCommand{{ID: strings.Repeat("0", 32), Name: "script", Command: "echo one\necho two"}}}
+	data, _ := json.Marshal(bad)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readQuickCommands(path); err == nil {
+		t.Fatal("v1 file with multiline content accepted")
+	}
+	for _, command := range []string{"echo\tbad", "echo\rbad", "echo\x1bbad"} {
+		if _, err := newQuickCommand("bad", command); err == nil {
+			t.Fatalf("control character accepted: %q", command)
+		}
+	}
+}
 
 func TestQuickCommandsPersistAndRejectStaleEdits(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "commands.json")
@@ -78,9 +114,15 @@ func TestQuickCommandSendsOnlyToSelectedTerminal(t *testing.T) {
 	if _, err := aPeer.Read(make([]byte, 1)); err == nil {
 		t.Fatal("command was sent to another terminal")
 	}
-	d.sendQuickCommand(quickCommand{Name: "bad", Command: "pwd\nexit"}, true)
-	if !strings.Contains(d.quickStatus, "有效") {
-		t.Fatal("multiline command accepted")
+	d.sendQuickCommand(quickCommand{Name: "script", Command: "pwd\nwhoami"}, false)
+	if !strings.Contains(d.quickStatus, "多行脚本") {
+		t.Fatal("multiline insert was not blocked")
+	}
+	d.sendQuickCommand(quickCommand{Name: "script", Command: "pwd\nwhoami\n"}, true)
+	_ = bPeer.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf = make([]byte, len("pwd\rwhoami\r"))
+	if _, err := io.ReadFull(bPeer, buf); err != nil || string(buf) != "pwd\rwhoami\r" {
+		t.Fatalf("selected terminal received script %q: %v", buf, err)
 	}
 	view := ui.NewTester(d.view, 1200, 900)
 	if err := view.Click("快速命令"); err != nil {
@@ -89,7 +131,7 @@ func TestQuickCommandSendsOnlyToSelectedTerminal(t *testing.T) {
 	if err := view.Click("+ 新建命令"); err != nil {
 		t.Fatal(err)
 	}
-	if !view.HasText("单行命令") || !view.HasText("命令保存在本机明文文件中，请勿填写密码或令牌。") {
+	if !view.HasText("命令或脚本") || !view.HasText("命令保存在本机明文文件中，请勿填写密码或令牌。") {
 		t.Fatal("quick command editor or plaintext warning missing")
 	}
 	if !view.HasText("命令目标：相同名称（会话 2）") {
@@ -144,7 +186,7 @@ func TestQuickSideEditorOpensAndClosesAfterSaving(t *testing.T) {
 	defer term.Close()
 	d := &desktop{workspace: "terminal", term: term, quickOpen: true, quickPath: filepath.Join(t.TempDir(), "commands.json")}
 	view := ui.NewTester(d.view, 1280, 800)
-	if view.HasText("单行命令") {
+	if view.HasText("命令或脚本") {
 		t.Fatal("editor should start collapsed")
 	}
 	if err := view.Click("+ 新建命令"); err != nil {

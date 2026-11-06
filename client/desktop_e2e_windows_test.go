@@ -605,7 +605,8 @@ func TestDesktopNativeWindow(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	commandResult := filepath.Join(t.TempDir(), "quick-command-result.txt")
-	quickText := "Set-Content -LiteralPath '" + strings.ReplaceAll(commandResult, "'", "''") + "' -Value 'quick-command-ok'"
+	quickPath := strings.ReplaceAll(commandResult, "'", "''")
+	quickText := "Set-Content -LiteralPath '" + quickPath + "' -Value 'quick-command-ok'\nAdd-Content -LiteralPath '" + quickPath + "' -Value 'quick-command-line-two'"
 	call("act", map[string]any{"key": "quick-name", "action": "setValue", "text": "验证命令"})
 	call("act", map[string]any{"key": "quick-text", "action": "setValue", "text": quickText})
 	call("act", map[string]any{"key": "quick-save", "action": "press"})
@@ -650,12 +651,12 @@ func TestDesktopNativeWindow(t *testing.T) {
 	call("act", map[string]any{"key": quickRunKey, "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(commandResult); err == nil && strings.Contains(string(data), "quick-command-ok") {
+		if data, err := os.ReadFile(commandResult); err == nil && strings.Contains(string(data), "quick-command-ok") && strings.Contains(string(data), "quick-command-line-two") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if data, err := os.ReadFile(commandResult); err != nil || !strings.Contains(string(data), "quick-command-ok") {
+	if data, err := os.ReadFile(commandResult); err != nil || !strings.Contains(string(data), "quick-command-ok") || !strings.Contains(string(data), "quick-command-line-two") {
 		t.Fatal("quick command did not execute in the selected local terminal")
 	}
 	call("act", map[string]any{"key": "quick-toggle", "action": "press"})

@@ -40,36 +40,42 @@ func filterQuickCommands(items []quickCommand, query string) []quickCommand {
 }
 
 func validateQuickCommand(name, command string) error {
-	if !utf8.ValidString(name) || !utf8.ValidString(command) || strings.TrimSpace(name) == "" || strings.TrimSpace(command) == "" || len(name) > 120 || len(command) > 4096 || strings.IndexFunc(name, unicode.IsControl) >= 0 || strings.IndexFunc(command, unicode.IsControl) >= 0 {
-		return errors.New("请输入名称和单行命令；名称最多 120 字节，命令最多 4096 字节")
+	invalidControl := func(r rune) bool { return unicode.IsControl(r) && r != '\n' }
+	if !utf8.ValidString(name) || !utf8.ValidString(command) || strings.TrimSpace(name) == "" || strings.TrimSpace(command) == "" || len(name) > 120 || len(command) > 4096 || strings.IndexFunc(name, unicode.IsControl) >= 0 || strings.IndexFunc(command, invalidControl) >= 0 {
+		return errors.New("请输入名称和命令或脚本；名称最多 120 字节，内容最多 4096 字节，请使用空格缩进")
 	}
 	return nil
 }
 
 func readQuickCommands(path string) ([]quickCommand, error) {
+	saved, err := readQuickCommandFile(path)
+	return saved.Items, err
+}
+
+func readQuickCommandFile(path string) (quickCommandFile, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return quickCommandFile{Version: 1}, nil
 	}
 	if err != nil {
-		return nil, err
+		return quickCommandFile{}, err
 	}
 	if len(data) > 512<<10 {
-		return nil, errors.New("快速命令文件过大")
+		return quickCommandFile{}, errors.New("快速命令文件过大")
 	}
 	var saved quickCommandFile
-	if err := json.Unmarshal(data, &saved); err != nil || saved.Version != 1 || len(saved.Items) > maxQuickCommands {
-		return nil, errors.New("快速命令文件格式无效")
+	if err := json.Unmarshal(data, &saved); err != nil || (saved.Version != 1 && saved.Version != 2) || len(saved.Items) > maxQuickCommands {
+		return quickCommandFile{}, errors.New("快速命令文件格式无效")
 	}
 	seen := make(map[string]bool, len(saved.Items))
 	for _, item := range saved.Items {
 		id, err := hex.DecodeString(item.ID)
-		if err != nil || len(id) != 16 || seen[item.ID] || validateQuickCommand(item.Name, item.Command) != nil {
-			return nil, errors.New("快速命令文件内容无效")
+		if err != nil || len(id) != 16 || seen[item.ID] || validateQuickCommand(item.Name, item.Command) != nil || (saved.Version == 1 && strings.Contains(item.Command, "\n")) {
+			return quickCommandFile{}, errors.New("快速命令文件内容无效")
 		}
 		seen[item.ID] = true
 	}
-	return saved.Items, nil
+	return saved, nil
 }
 
 // Read and update under one lock so multiple windows do not lose each other's changes.
@@ -90,15 +96,20 @@ func updateQuickCommands(path string, update func([]quickCommand) ([]quickComman
 		return nil, errors.New("另一个窗口正在保存，请稍后重试")
 	}
 	defer lock.Unlock()
-	items, err := readQuickCommands(path)
+	saved, err := readQuickCommandFile(path)
 	if err != nil {
 		return nil, err
 	}
-	items, err = update(items)
+	items, err := update(saved.Items)
 	if err != nil {
 		return nil, err
 	}
-	data, err := json.MarshalIndent(quickCommandFile{Version: 1, Items: items}, "", "  ")
+	for _, item := range items {
+		if strings.Contains(item.Command, "\n") {
+			saved.Version = 2
+		}
+	}
+	data, err := json.MarshalIndent(quickCommandFile{Version: saved.Version, Items: items}, "", "  ")
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +139,7 @@ func updateQuickCommands(path string, update func([]quickCommand) ([]quickComman
 
 func newQuickCommand(name, command string) (quickCommand, error) {
 	name = strings.TrimSpace(name)
+	command = strings.ReplaceAll(command, "\r\n", "\n")
 	if err := validateQuickCommand(name, command); err != nil {
 		return quickCommand{}, err
 	}

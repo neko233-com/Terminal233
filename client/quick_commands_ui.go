@@ -3,7 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -90,15 +93,49 @@ func (d *desktop) sendQuickCommand(item quickCommand, execute bool) {
 	}
 	target := d.quickCommandTarget()
 	if execute {
-		d.term.Send([]byte(item.Command + "\r"))
+		d.term.Send([]byte(strings.ReplaceAll(strings.TrimSuffix(item.Command, "\n"), "\n", "\r") + "\r"))
 		d.quickStatus = "已向「" + target + "」提交命令并回车：" + item.Name
 	} else {
+		if strings.Contains(item.Command, "\n") {
+			d.quickStatus = "多行脚本请复制或运行；直接插入可能执行命令"
+			return
+		}
 		d.term.Paste(item.Command)
 		d.quickStatus = "已插入「" + target + "」，请检查后执行：" + item.Name
 	}
 	if d.workspace == "snippets" {
 		d.workspace = "terminal"
 		d.pendingTerminalFocus = d.currentSession
+	}
+}
+
+func (d *desktop) copyQuickCommand(item quickCommand) {
+	if err := mygo.Clipboard.Write(transfer.TextData(item.Command)); err != nil {
+		d.quickStatus = "复制失败：" + err.Error()
+		return
+	}
+	d.quickStatus = "已复制：" + item.Name
+}
+
+func quickCommandPreview(command string) string {
+	line, _, multiline := strings.Cut(command, "\n")
+	runes := []rune(line)
+	if len(runes) > 80 {
+		return string(runes[:80]) + "…"
+	}
+	if multiline {
+		return line + " …"
+	}
+	return line
+}
+
+func (d *desktop) quickInsertButton(c *ui.Context, key string, item quickCommand, unavailable bool) {
+	if strings.Contains(item.Command, "\n") {
+		if ui.Button(c.Key(key), "复制脚本").Disabled(d.quickEditorOpen).Clicked() {
+			d.copyQuickCommand(item)
+		}
+	} else if ui.Button(c.Key(key), "插入").Disabled(unavailable).Clicked() {
+		d.sendQuickCommand(item, false)
 	}
 }
 
@@ -120,7 +157,7 @@ func (d *desktop) quickCommandsView(c *ui.Context) {
 		ui.Text(c, "快速命令保存在本机明文文件中；请勿保存密码或令牌。发送目标为当前选中的会话，发送并回车会与当前输入行一起执行。 ").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 			ui.TextInput(c.Key("quick-name"), &d.quickName).Label("命令名称").Placeholder("例如查看磁盘").Grow(1)
-			ui.TextInput(c.Key("quick-text"), &d.quickText).Label("单行命令").Placeholder("例如 df -h").Grow(2)
+			ui.TextArea(c.Key("quick-text"), &d.quickText).Label("命令或脚本").Placeholder("例如 df -h").Height(90).Grow(2)
 			if ui.Button(c.Key("quick-save"), "保存命令").Clicked() {
 				d.saveQuickCommand()
 			}
@@ -147,10 +184,8 @@ func (d *desktop) quickCommandsView(c *ui.Context) {
 				for _, command := range visible {
 					item := command
 					ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, fmt.Sprintf("%s · %s", item.Name, item.Command)).Grow(1).Wrap()
-						if ui.Button(c.Key("quick-insert-"+item.ID), "插入").Disabled(terminalEnded(d.term)).Clicked() {
-							d.sendQuickCommand(item, false)
-						}
+						ui.Text(c, fmt.Sprintf("%s · %s", item.Name, quickCommandPreview(item.Command))).Grow(1).Wrap()
+						d.quickInsertButton(c, "quick-insert-"+item.ID, item, d.term == nil || terminalEnded(d.term))
 						if ui.Button(c.Key("quick-run-"+item.ID), "发送并回车").Disabled(terminalEnded(d.term)).Clicked() {
 							d.sendQuickCommand(item, true)
 						}
@@ -193,7 +228,7 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 		if d.quickEditorOpen {
 			ui.Text(c, "命令保存在本机明文文件中，请勿填写密码或令牌。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 			ui.TextInput(c.Key("quick-name"), &d.quickName).Label("命令名称").Placeholder("命令名称").FillWidth()
-			ui.TextInput(c.Key("quick-text"), &d.quickText).Label("单行命令").Placeholder("单行命令").FillWidth()
+			ui.TextArea(c.Key("quick-text"), &d.quickText).Label("命令或脚本").Placeholder("输入命令或多行脚本，使用空格缩进").Height(120).FillWidth()
 			ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 				if ui.PrimaryButton(c.Key("quick-save"), "保存命令").Clicked() && d.saveQuickCommand() {
 					d.quickEditorOpen = false
@@ -224,11 +259,9 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 			item := command
 			ui.Column(c).FillWidth().Padding(10).Gap(6).Background(c.Theme().Background).Radius(8).Children(func() {
 				ui.Text(c, item.Name).Bold().Wrap()
-				ui.Text(c, item.Command).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+				ui.Text(c, quickCommandPreview(item.Command)).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 				ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
-					if ui.Button(c.Key("quick-insert-"+item.ID), "插入").Disabled(d.term == nil || terminalEnded(d.term)).Clicked() {
-						d.sendQuickCommand(item, false)
-					}
+					d.quickInsertButton(c, "quick-insert-"+item.ID, item, d.term == nil || terminalEnded(d.term))
 					if ui.Button(c.Key("quick-run-"+item.ID), "发送并回车").Disabled(d.term == nil || terminalEnded(d.term)).Clicked() {
 						d.sendQuickCommand(item, true)
 					}
@@ -264,7 +297,7 @@ func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
 				button.Children(func() {
 					ui.Column(c).FillWidth().Gap(3).Children(func() {
 						ui.Text(c, item.Name).Bold().Wrap()
-						ui.Text(c, item.Command).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+						ui.Text(c, quickCommandPreview(item.Command)).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 					})
 				})
 				if button.Clicked() {
@@ -273,9 +306,7 @@ func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
 				if selected {
 					ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 						unavailable := d.quickEditorOpen || d.term == nil || terminalEnded(d.term)
-						if ui.Button(c.Key("snippet-insert-"+item.ID), "插入").Disabled(unavailable).Clicked() {
-							d.sendQuickCommand(item, false)
-						}
+						d.quickInsertButton(c, "snippet-insert-"+item.ID, item, unavailable)
 						if ui.Button(c.Key("snippet-run-"+item.ID), "发送并回车").Disabled(unavailable).Clicked() {
 							d.sendQuickCommand(item, true)
 						}
