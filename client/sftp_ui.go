@@ -808,6 +808,13 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 								}
 							}
 						}
+						if eligibleBatchFile(f) && menu.Item("用编辑器打开").Disabled(d.busy || d.fileSessionUnavailable()).Chosen() {
+							if local {
+								d.openLocalExternalEdit(d.fileDir, f.Name)
+							} else {
+								d.openExternalEdit(d.shell, d.fileDir, f.Name)
+							}
+						}
 						if eligibleBatchFile(f) {
 							label := "下载到…"
 							if local {
@@ -835,8 +842,16 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							d.removeSelected()
 						}
 					})
-					if row.DoubleClicked() && f.IsDir {
-						d.openSessionDirectory(f, local)
+					if row.DoubleClicked() {
+						if f.IsDir {
+							d.openSessionDirectory(f, local)
+						} else if eligibleBatchFile(f) {
+							if local {
+								d.openLocalExternalEdit(d.fileDir, f.Name)
+							} else {
+								d.openExternalEdit(d.shell, d.fileDir, f.Name)
+							}
+						}
 					} else if row.Clicked() {
 						selected, err := d.filePaneSelection.choose(f.Name, visible, row.ClickModifiers())
 						if err != nil {

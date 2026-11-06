@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
 )
@@ -68,6 +71,16 @@ func (d *desktop) settingsView(c *ui.Context, height float32) {
 					d.savePanelSizes()
 				}
 			})
+			ui.Text(c, "外部编辑器").FontSize(12).TextColor(c.Theme().TextMuted)
+			ui.Row(c).FillWidth().Gap(6).Children(func() {
+				ui.Text(c, filepath.Base(d.selectedEditor())).Grow(1).SingleLine()
+				if ui.Button(c.Key("choose-external-editor"), "选择…").Disabled(d.busy).Clicked() {
+					d.pickExternalEditor()
+				}
+			})
+			if ui.Button(c.Key("copy-edit-recovery-root"), "复制编辑副本所在目录").Tooltip("副本保存在临时目录中名称以 nekossh-edit- 开头的文件夹；需要时请手动清理。").Clicked() {
+				mygo.Clipboard.WriteText(os.TempDir())
+			}
 			if ui.Button(c.Key("shortcut-help-toggle"), "快捷键").Clicked() {
 				d.showShortcutHelp = !d.showShortcutHelp
 			}

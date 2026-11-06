@@ -56,6 +56,7 @@ func sameLocalDirectory(a, b string) bool {
 }
 
 func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
+	d.externalEditJobsView(c)
 	if !d.sidebarCollapsed {
 		width -= workspaceSidebarWidth(width)
 	}
@@ -283,6 +284,9 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 				}
 				row.ContextMenu(func(menu *ui.Menu) {
 					d.leftPaneContextMenu(menu, f.Name)
+					if eligibleBatchFile(f) && menu.Item("用编辑器打开").Disabled(d.busy || d.localPane.loading || !sameLocalDirectory(d.localPane.input, d.localPane.directory)).Chosen() {
+						d.openLocalExternalEdit(d.localPane.directory, f.Name)
+					}
 					if f.IsDir && menu.Item("打开目录").Disabled(d.localPane.loading).Chosen() {
 						d.requestLocalPane(filepath.Join(d.localPane.directory, f.Name), -1)
 					}
@@ -296,8 +300,12 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 						}
 					}
 				})
-				if row.DoubleClicked() && f.IsDir {
-					d.requestLocalPane(filepath.Join(d.localPane.directory, f.Name), -1)
+				if row.DoubleClicked() {
+					if f.IsDir {
+						d.requestLocalPane(filepath.Join(d.localPane.directory, f.Name), -1)
+					} else if eligibleBatchFile(f) && !d.localPane.loading && sameLocalDirectory(d.localPane.input, d.localPane.directory) {
+						d.openLocalExternalEdit(d.localPane.directory, f.Name)
+					}
 				} else if row.Clicked() {
 					selected, err := d.localPane.paneSelection.choose(f.Name, visible, row.ClickModifiers())
 					if err != nil {

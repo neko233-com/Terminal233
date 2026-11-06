@@ -119,6 +119,10 @@ type desktop struct {
 	filePaneSelection                                                                       paneSelection
 	localPane                                                                               localFilePane
 	leftPaneAction                                                                          leftPaneAction
+	externalEditorPath                                                                      string
+	externalEdits                                                                           []*externalEditJob
+	nextExternalEditID                                                                      int
+	showExternalEdits                                                                       bool
 	narrowFilePane                                                                          string
 	fileBatchErrors                                                                         []string
 	fileBatchDetails                                                                        bool
@@ -1043,7 +1047,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.95"
+const version = "0.3.96"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -1085,6 +1089,7 @@ func main() {
 			if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
 				d.flushProfileAutosave()
 			}
+			d.stopExternalEdits()
 			d.closeAllSessions()
 		})
 		d.startUpdateCheck()

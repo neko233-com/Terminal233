@@ -44,7 +44,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("nekossh-remote-panes-%d.sock", os.Getpid()))
 	t.Cleanup(func() { _ = os.Remove(socket) })
 	app := exec.Command(exe)
-	app.Env = append(os.Environ(), "MYGO_AUTOMATION="+socket, "APPDATA="+configDir, "XDG_CONFIG_HOME="+configDir)
+	app.Env = append(os.Environ(), "MYGO_AUTOMATION="+socket, "APPDATA="+configDir, "XDG_CONFIG_HOME="+configDir, "NEKOSSH_E2E_NO_EDITOR=1")
 	if err := app.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 			}
 			time.Sleep(30 * time.Millisecond)
 		}
-		t.Fatalf("control unavailable: %s", key)
+		t.Fatalf("control unavailable: %s; tree: %v", key, call("tree", nil))
 		return nil
 	}
 	press := func(key string) { waitKey(key); call("act", map[string]any{"key": key, "action": "press"}) }
@@ -138,6 +138,25 @@ func TestDesktopRemotePanes(t *testing.T) {
 			time.Sleep(30 * time.Millisecond)
 		}
 		t.Fatalf("selection did not settle: %s: %v", key, waitKey(key))
+	}
+	visibleBounds := func(key string) map[string]any {
+		t.Helper()
+		waitKey(key)
+		call("act", map[string]any{"key": key, "action": "scrollIntoView"})
+		var previous string
+		until := time.Now().Add(5 * time.Second)
+		for time.Now().Before(until) {
+			node := waitKey(key)
+			bounds := node["bounds"].(map[string]any)
+			current := fmt.Sprint(bounds)
+			if current == previous && !strings.Contains(fmt.Sprint(node["states"]), "offscreen") {
+				return bounds
+			}
+			previous = current
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("element did not settle on screen: %s", key)
+		return nil
 	}
 	connect := func(key, expected string) {
 		node := waitKey(key)
@@ -278,9 +297,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 	waitFile(filepath.Join(leftDir, "right.txt"), "right to left")
 	drag := func(sourceKey, targetKey string) {
 		t.Helper()
-		waitKey(sourceKey)
-		call("act", map[string]any{"key": sourceKey, "action": "scrollIntoView"})
-		source := waitKey(sourceKey)["bounds"].(map[string]any)
+		source := visibleBounds(sourceKey)
 		target := waitKey(targetKey)["bounds"].(map[string]any)
 		sx, sy := source["x"].(float64)+source["width"].(float64)/2, source["y"].(float64)+source["height"].(float64)/2
 		tx, ty := target["x"].(float64)+target["width"].(float64)/2, target["y"].(float64)+18
@@ -318,6 +335,13 @@ func TestDesktopRemotePanes(t *testing.T) {
 		t.Fatal(err)
 	}
 	setPath("local-pane-path", localPaneDir)
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "打开输入的目录后才能传输") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "打开输入的目录后才能传输") {
+		t.Fatal("local path change was not applied")
+	}
 	press("local-pane-open")
 	waitKey("local-pane-file-local-to-right")
 	press("local-pane-file-local-action.txt")
@@ -341,19 +365,83 @@ func TestDesktopRemotePanes(t *testing.T) {
 		t.Fatal("local file was not deleted")
 	}
 	press("local-pane-file-local-to-right")
+	waitSelected("local-pane-file-local-to-right")
 	waitKey("local-pane-open-selected")
 	press("local-pane-upload")
 	waitFile(filepath.Join(rightDir, "local-to-right", "nested", "data.txt"), "local to right pane")
 	press("file-right-to-local-pane")
+	waitSelected("file-right-to-local-pane")
 	waitKey("file-open-selected")
 	press("local-pane-download")
 	waitFile(filepath.Join(localPaneDir, "right-to-local-pane", "nested", "data.txt"), "right to local pane")
+	if err := os.WriteFile(filepath.Join(rightDir, "edit-roundtrip.txt"), []byte("initial"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	press("file-refresh")
+	// An external editor receives a local copy; saving uploads after the
+	// snapshot is stable and a conflicting remote change stops the monitor.
+	editBounds := visibleBounds("file-edit-roundtrip.txt")
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": editBounds["x"].(float64) + editBounds["width"].(float64)/2, "y": editBounds["y"].(float64) + editBounds["height"].(float64)/2}}})
+	editPath := fmt.Sprint(waitKey("external-edit-path-1")["value"])
+	editDir := filepath.Dir(editPath)
+	rel, relErr := filepath.Rel(os.TempDir(), editDir)
+	if relErr != nil || filepath.Dir(rel) != "." || !strings.HasPrefix(rel, "nekossh-edit-") {
+		t.Fatalf("unexpected test edit directory: %s", editDir)
+	}
+	t.Cleanup(func() { _ = os.Remove(editPath); _ = os.Remove(editDir) })
+	if err := os.WriteFile(editPath, []byte("edited locally"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	waitFile(filepath.Join(rightDir, "edit-roundtrip.txt"), "edited locally")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "已上传，继续监控") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "已上传，继续监控") {
+		t.Fatal("external edit upload did not settle")
+	}
+	if err := os.WriteFile(filepath.Join(rightDir, "edit-roundtrip.txt"), []byte("other writer"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(editPath, []byte("unsent edit"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "远程文件已变化") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "远程文件已变化") {
+		t.Fatal("external edit conflict did not stop monitoring")
+	}
+	waitFile(filepath.Join(rightDir, "edit-roundtrip.txt"), "other writer")
+	waitFile(editPath, "unsent edit")
+	press("external-edit-close-1")
 	press("secondary-picker")
 	press("secondary-session-2")
 	waitKey("secondary-path")
 	setPath("secondary-path", filepath.ToSlash(leftDir))
 	press("secondary-refresh")
 	waitKey("secondary-file-left.txt")
+	if err := os.WriteFile(filepath.Join(leftDir, "left-edit.txt"), []byte("left initial"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	press("secondary-refresh")
+	bounds := visibleBounds("secondary-file-left-edit.txt")
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": bounds["x"].(float64) + bounds["width"].(float64)/2, "y": bounds["y"].(float64) + bounds["height"].(float64)/2}}})
+	leftEditPath := fmt.Sprint(waitKey("external-edit-path-2")["value"])
+	leftEditDir := filepath.Dir(leftEditPath)
+	leftRel, leftRelErr := filepath.Rel(os.TempDir(), leftEditDir)
+	if leftRelErr != nil || filepath.Dir(leftRel) != "." || !strings.HasPrefix(leftRel, "nekossh-edit-") {
+		t.Fatalf("unexpected left edit directory: %s", leftEditDir)
+	}
+	t.Cleanup(func() { _ = os.Remove(leftEditPath); _ = os.Remove(leftEditDir) })
+	if err := os.WriteFile(leftEditPath, []byte("left edited"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	waitFile(filepath.Join(leftDir, "left-edit.txt"), "left edited")
+	press("external-edit-stop-2")
+	waitKey("external-edit-close-2")
+	press("external-edit-close-2")
 	// The right pane may also be a local session while the left stays remote.
 	press("local-terminal")
 	press("new-tab-local")

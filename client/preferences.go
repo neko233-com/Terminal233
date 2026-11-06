@@ -18,6 +18,7 @@ type workspacePreferences struct {
 	ShowFiles              bool    `json:"show_files"`
 	TerminalFontSize       int     `json:"terminal_font_size"`
 	TerminalTheme          string  `json:"terminal_theme,omitempty"`
+	ExternalEditor         string  `json:"external_editor,omitempty"`
 	SplitLayout            string  `json:"split_layout,omitempty"`
 	TerminalFilePercent    float32 `json:"terminal_file_percent,omitempty"`
 	SplitHorizontalPercent float32 `json:"split_horizontal_percent,omitempty"`
@@ -48,6 +49,9 @@ func readPreferences(path string) (workspacePreferences, error) {
 	if !validTerminalTheme(p.TerminalTheme) {
 		return p, errors.New("终端配色无效")
 	}
+	if p.ExternalEditor != "" && !validEditorPath(p.ExternalEditor) {
+		return p, errors.New("外部编辑器路径无效")
+	}
 	if p.SplitLayout != "" && p.SplitLayout != "side" && p.SplitLayout != "stacked" {
 		return p, errors.New("分屏布局无效")
 	}
@@ -66,6 +70,7 @@ func (d *desktop) loadPreferences(path string) error {
 		return err
 	}
 	d.lightTheme, d.sidebarCollapsed, d.showFilePanel = p.Light, p.SidebarCollapsed, p.ShowFiles
+	d.externalEditorPath = p.ExternalEditor
 	d.terminalFontSize = p.TerminalFontSize
 	d.splitLayout = p.SplitLayout
 	d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent

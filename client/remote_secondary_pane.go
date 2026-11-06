@@ -302,6 +302,9 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 				}
 				row.ContextMenu(func(menu *ui.Menu) {
 					d.leftPaneContextMenu(menu, f.Name)
+					if eligibleBatchFile(f) && menu.Item("用编辑器打开").Disabled(d.busy || p.loading || p.input != p.directory).Chosen() {
+						d.openExternalEdit(p.shell, p.directory, f.Name)
+					}
 					if f.IsDir && menu.Item("打开目录").Chosen() {
 						d.requestSecondaryPane(path.Join(p.directory, f.Name), -1)
 					}
@@ -309,8 +312,12 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 						d.copySecondaryToRight(item)
 					}
 				})
-				if row.DoubleClicked() && f.IsDir {
-					d.requestSecondaryPane(path.Join(p.directory, f.Name), -1)
+				if row.DoubleClicked() {
+					if f.IsDir {
+						d.requestSecondaryPane(path.Join(p.directory, f.Name), -1)
+					} else if eligibleBatchFile(f) {
+						d.openExternalEdit(p.shell, p.directory, f.Name)
+					}
 				} else if row.Clicked() {
 					selected, err := p.paneSelection.choose(f.Name, visible, row.ClickModifiers())
 					if err != nil {
