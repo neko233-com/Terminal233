@@ -112,7 +112,10 @@ type desktop struct {
 	quickOpen                                                                               bool
 	quickEditorOpen                                                                         bool
 	quickPath, quickName, quickText, quickStatus, quickConfirm, quickFilter, quickSelected  string
+	quickPackageID, quickPackageFilter, quickPackageName                                    string
+	quickPackageManaging, quickPackageConfirm                                               bool
 	quickCommands                                                                           []quickCommand
+	quickPackages                                                                           []quickPackage
 	quickEdit                                                                               *quickCommand
 	expectedFingerprint, changedFingerprint                                                 string
 	win                                                                                     *mygo.Window
@@ -944,7 +947,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.78"
+const version = "0.3.79"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -972,8 +975,11 @@ func main() {
 		d.quickStatus = "快速命令存储不可用：" + err.Error()
 	} else {
 		d.quickPath = filepath.Join(dir, "NekoSSH", "quick-commands.json")
-		if d.quickCommands, err = readQuickCommands(d.quickPath); err != nil {
+		var saved quickCommandFile
+		if saved, err = readQuickCommandFile(d.quickPath); err != nil {
 			d.quickStatus = "读取快速命令失败，原文件未覆盖：" + err.Error()
+		} else {
+			d.quickCommands, d.quickPackages = saved.Items, saved.Packages
 		}
 	}
 	mygo.Theme.SetSource(mygo.ThemeDark)

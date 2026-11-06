@@ -16,16 +16,24 @@ import (
 )
 
 const maxQuickCommands = 100
+const maxQuickPackages = 100
 
 type quickCommand struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Command string `json:"command"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Command   string `json:"command"`
+	PackageID string `json:"package_id,omitempty"`
+}
+
+type quickPackage struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type quickCommandFile struct {
-	Version int            `json:"version"`
-	Items   []quickCommand `json:"items"`
+	Version  int            `json:"version"`
+	Items    []quickCommand `json:"items"`
+	Packages []quickPackage `json:"packages,omitempty"`
 }
 
 func filterQuickCommands(items []quickCommand, query string) []quickCommand {
@@ -64,13 +72,26 @@ func readQuickCommandFile(path string) (quickCommandFile, error) {
 		return quickCommandFile{}, errors.New("快速命令文件过大")
 	}
 	var saved quickCommandFile
-	if err := json.Unmarshal(data, &saved); err != nil || (saved.Version != 1 && saved.Version != 2) || len(saved.Items) > maxQuickCommands {
+	if err := json.Unmarshal(data, &saved); err != nil || (saved.Version < 1 || saved.Version > 3) || len(saved.Items) > maxQuickCommands || len(saved.Packages) > maxQuickPackages || (saved.Version < 3 && len(saved.Packages) != 0) {
 		return quickCommandFile{}, errors.New("快速命令文件格式无效")
+	}
+	packageIDs := make(map[string]bool, len(saved.Packages))
+	for i, p := range saved.Packages {
+		id, err := hex.DecodeString(p.ID)
+		if err != nil || len(id) != 16 || packageIDs[p.ID] || p.Name != strings.TrimSpace(p.Name) || validateQuickPackageName(p.Name) != nil {
+			return quickCommandFile{}, errors.New("命令分组内容无效")
+		}
+		for _, previous := range saved.Packages[:i] {
+			if strings.EqualFold(previous.Name, p.Name) {
+				return quickCommandFile{}, errors.New("命令分组名称重复")
+			}
+		}
+		packageIDs[p.ID] = true
 	}
 	seen := make(map[string]bool, len(saved.Items))
 	for _, item := range saved.Items {
 		id, err := hex.DecodeString(item.ID)
-		if err != nil || len(id) != 16 || seen[item.ID] || validateQuickCommand(item.Name, item.Command) != nil || (saved.Version == 1 && strings.Contains(item.Command, "\n")) {
+		if err != nil || len(id) != 16 || seen[item.ID] || validateQuickCommand(item.Name, item.Command) != nil || (saved.Version == 1 && strings.Contains(item.Command, "\n")) || (item.PackageID != "" && (saved.Version < 3 || !packageIDs[item.PackageID])) {
 			return quickCommandFile{}, errors.New("快速命令文件内容无效")
 		}
 		seen[item.ID] = true
@@ -80,42 +101,58 @@ func readQuickCommandFile(path string) (quickCommandFile, error) {
 
 // Read and update under one lock so multiple windows do not lose each other's changes.
 func updateQuickCommands(path string, update func([]quickCommand) ([]quickCommand, error)) ([]quickCommand, error) {
+	saved, err := updateQuickCommandFile(path, func(saved *quickCommandFile) error {
+		items, err := update(saved.Items)
+		if err == nil {
+			saved.Items = items
+		}
+		return err
+	})
+	return saved.Items, err
+}
+
+func updateQuickCommandFile(path string, update func(*quickCommandFile) error) (quickCommandFile, error) {
 	if path == "" {
-		return nil, errors.New("快速命令存储不可用")
+		return quickCommandFile{}, errors.New("快速命令存储不可用")
 	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
+		return quickCommandFile{}, err
 	}
 	lock := flock.New(path + ".lock")
 	locked, err := lock.TryLock()
 	if err != nil {
-		return nil, err
+		return quickCommandFile{}, err
 	}
 	if !locked {
-		return nil, errors.New("另一个窗口正在保存，请稍后重试")
+		return quickCommandFile{}, errors.New("另一个窗口正在保存，请稍后重试")
 	}
 	defer lock.Unlock()
 	saved, err := readQuickCommandFile(path)
 	if err != nil {
-		return nil, err
+		return quickCommandFile{}, err
 	}
-	items, err := update(saved.Items)
-	if err != nil {
-		return nil, err
+	if err := update(&saved); err != nil {
+		return quickCommandFile{}, err
 	}
-	for _, item := range items {
+	for _, item := range saved.Items {
 		if strings.Contains(item.Command, "\n") {
-			saved.Version = 2
+			saved.Version = max(saved.Version, 2)
+		}
+		if item.PackageID != "" {
+			saved.Version = 3
 		}
 	}
-	data, err := json.MarshalIndent(quickCommandFile{Version: saved.Version, Items: items}, "", "  ")
+	if len(saved.Packages) > 0 {
+		saved.Version = 3
+	}
+	data, err := json.MarshalIndent(saved, "", "  ")
 	if err != nil {
-		return nil, err
+		return quickCommandFile{}, err
 	}
 	f, err := os.CreateTemp(dir, ".quick-commands-*.tmp")
 	if err != nil {
-		return nil, err
+		return quickCommandFile{}, err
 	}
 	defer os.Remove(f.Name())
 	if err = f.Chmod(0600); err == nil {
@@ -126,15 +163,15 @@ func updateQuickCommands(path string, update func([]quickCommand) ([]quickComman
 	}
 	closeErr := f.Close()
 	if err != nil {
-		return nil, err
+		return quickCommandFile{}, err
 	}
 	if closeErr != nil {
-		return nil, closeErr
+		return quickCommandFile{}, closeErr
 	}
 	if err = os.Rename(f.Name(), path); err != nil {
-		return nil, err
+		return quickCommandFile{}, err
 	}
-	return items, nil
+	return saved, nil
 }
 
 func newQuickCommand(name, command string) (quickCommand, error) {

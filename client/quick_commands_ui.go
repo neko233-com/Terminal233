@@ -15,12 +15,16 @@ func (d *desktop) reloadQuickCommands() {
 		d.quickStatus = "快速命令存储不可用"
 		return
 	}
-	items, err := readQuickCommands(d.quickPath)
+	saved, err := readQuickCommandFile(d.quickPath)
 	if err != nil {
 		d.quickStatus = "读取失败，原文件未覆盖：" + err.Error()
 		return
 	}
-	d.quickCommands, d.quickEdit, d.quickConfirm = items, nil, ""
+	d.quickCommands, d.quickPackages, d.quickEdit, d.quickConfirm = saved.Items, saved.Packages, nil, ""
+	d.quickPackageConfirm, d.quickPackageName = false, ""
+	if d.quickPackageFilter != "" && d.quickPackageFilter != "-" && quickPackageIndex(saved.Packages, d.quickPackageFilter) < 0 {
+		d.quickPackageFilter = ""
+	}
 	d.quickName, d.quickText = "", ""
 	d.quickStatus = "快速命令已刷新"
 }
@@ -32,30 +36,37 @@ func (d *desktop) saveQuickCommand() bool {
 		return false
 	}
 	expected := d.quickEdit
-	items, err := updateQuickCommands(d.quickPath, func(items []quickCommand) ([]quickCommand, error) {
+	item.PackageID = d.quickPackageID
+	saved, err := updateQuickCommandFile(d.quickPath, func(saved *quickCommandFile) error {
+		if item.PackageID != "" && quickPackageIndex(saved.Packages, item.PackageID) < 0 {
+			return errors.New("分组已被删除，请刷新后重试")
+		}
+		items := saved.Items
 		if expected == nil {
 			if len(items) >= maxQuickCommands {
-				return nil, errors.New("快速命令已达到 100 条")
+				return errors.New("快速命令已达到 100 条")
 			}
-			return append(items, item), nil
+			saved.Items = append(items, item)
+			return nil
 		}
 		for i, current := range items {
 			if current.ID == expected.ID {
 				if current != *expected {
-					return nil, errors.New("命令已在其他窗口修改，请刷新后重试")
+					return errors.New("命令已在其他窗口修改，请刷新后重试")
 				}
 				item.ID = current.ID
 				items[i] = item
-				return items, nil
+				saved.Items = items
+				return nil
 			}
 		}
-		return nil, errors.New("命令已被删除，请刷新后重试")
+		return errors.New("命令已被删除，请刷新后重试")
 	})
 	if err != nil {
 		d.quickStatus = "保存失败：" + err.Error()
 		return false
 	}
-	d.quickCommands, d.quickEdit, d.quickConfirm = items, nil, ""
+	d.quickCommands, d.quickPackages, d.quickEdit, d.quickConfirm = saved.Items, saved.Packages, nil, ""
 	d.quickName, d.quickText = "", ""
 	d.quickStatus = "快速命令已保存到本机"
 	d.quickSelected = item.ID
@@ -68,22 +79,24 @@ func (d *desktop) deleteQuickCommand(expected quickCommand) {
 		d.quickStatus = "再次点击确认删除：" + expected.Name
 		return
 	}
-	items, err := updateQuickCommands(d.quickPath, func(items []quickCommand) ([]quickCommand, error) {
+	saved, err := updateQuickCommandFile(d.quickPath, func(saved *quickCommandFile) error {
+		items := saved.Items
 		for i, current := range items {
 			if current.ID == expected.ID {
 				if current != expected {
-					return nil, errors.New("命令已在其他窗口修改，请刷新后重试")
+					return errors.New("命令已在其他窗口修改，请刷新后重试")
 				}
-				return append(items[:i], items[i+1:]...), nil
+				saved.Items = append(items[:i], items[i+1:]...)
+				return nil
 			}
 		}
-		return nil, errors.New("命令已被删除，请刷新后重试")
+		return errors.New("命令已被删除，请刷新后重试")
 	})
 	if err != nil {
 		d.quickStatus, d.quickConfirm = "删除失败："+err.Error(), ""
 		return
 	}
-	d.quickCommands, d.quickEdit, d.quickConfirm = items, nil, ""
+	d.quickCommands, d.quickPackages, d.quickEdit, d.quickConfirm = saved.Items, saved.Packages, nil, ""
 	d.quickName, d.quickText, d.quickStatus = "", "", "快速命令已删除"
 }
 
@@ -166,15 +179,55 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 			if ui.Button(c.Key("quick-new"), "+ 新建命令").Disabled(d.quickEditorOpen).Clicked() {
 				d.quickEditorOpen = true
 				d.quickEdit, d.quickName, d.quickText, d.quickConfirm = nil, "", "", ""
+				d.quickPackageManaging, d.quickPackageConfirm = false, false
+				d.quickPackageID = d.quickPackageFilter
+				if d.quickPackageID == "-" {
+					d.quickPackageID = ""
+				}
+			}
+			if ui.Button(c.Key("quick-packages"), "分组").Disabled(d.quickEditorOpen).Clicked() {
+				d.quickPackageManaging = !d.quickPackageManaging
+				d.quickPackageConfirm, d.quickPackageName = false, ""
 			}
 			if ui.Button(c.Key("quick-refresh"), "刷新").Disabled(d.quickEditorOpen).Clicked() {
 				d.reloadQuickCommands()
 			}
 		})
+		if len(d.quickPackages) > 0 && !d.quickEditorOpen {
+			label := quickPackageLabel(d.quickPackages, d.quickPackageFilter, true)
+			if ui.Select(c.Key("quick-package-filter"), &label, quickPackageLabels(d.quickPackages, true)).Label("筛选命令分组").FillWidth().Changed() {
+				d.quickPackageFilter = quickPackageForLabel(d.quickPackages, label, true)
+				d.quickPackageName, d.quickPackageConfirm = "", false
+			}
+		}
+		if d.quickPackageManaging && !d.quickEditorOpen {
+			ui.TextInput(c.Key("quick-package-name"), &d.quickPackageName).Label("分组名称").Placeholder("分组名称").FillWidth()
+			ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+				if ui.Button(c.Key("quick-package-add"), "新建分组").Clicked() {
+					d.saveQuickPackage(false)
+				}
+				if ui.Button(c.Key("quick-package-rename"), "重命名分组").Disabled(quickPackageIndex(d.quickPackages, d.quickPackageFilter) < 0).Clicked() {
+					d.saveQuickPackage(true)
+				}
+				label := "移除分组"
+				if d.quickPackageConfirm {
+					label = "确认移除分组"
+				}
+				if ui.Button(c.Key("quick-package-delete"), label).Disabled(quickPackageIndex(d.quickPackages, d.quickPackageFilter) < 0).Clicked() {
+					d.deleteQuickPackage()
+				}
+			})
+		}
 		if d.quickEditorOpen {
 			ui.Text(c, "命令保存在本机明文文件中，请勿填写密码或令牌。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 			ui.TextInput(c.Key("quick-name"), &d.quickName).Label("命令名称").Placeholder("命令名称").FillWidth()
 			ui.TextArea(c.Key("quick-text"), &d.quickText).Label("命令或脚本").Placeholder("输入命令或多行脚本，使用空格缩进").Height(120).FillWidth()
+			if len(d.quickPackages) > 0 {
+				label := quickPackageLabel(d.quickPackages, d.quickPackageID, false)
+				if ui.Select(c.Key("quick-package-edit"), &label, quickPackageLabels(d.quickPackages, false)).Label("片段分组").FillWidth().Changed() {
+					d.quickPackageID = quickPackageForLabel(d.quickPackages, label, false)
+				}
+			}
 			ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 				if ui.PrimaryButton(c.Key("quick-save"), "保存命令").Clicked() && d.saveQuickCommand() {
 					d.quickEditorOpen = false
@@ -193,7 +246,7 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 			return
 		}
 		ui.TextInput(c.Key("quick-filter"), &d.quickFilter).Label("搜索快速命令").Placeholder("搜索命令").FillWidth()
-		visible := filterQuickCommands(d.quickCommands, d.quickFilter)
+		visible := filterQuickCommands(filterQuickPackage(d.quickCommands, d.quickPackageFilter), d.quickFilter)
 		if len(visible) == 0 {
 			ui.Text(c, "没有匹配的快速命令").FontSize(12).TextColor(c.Theme().TextMuted)
 		}
@@ -219,6 +272,7 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 					if menu.Item("编辑").Disabled(d.quickEditorOpen).Chosen() {
 						d.quickSelected, d.quickEditorOpen = item.ID, true
 						d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
+						d.quickPackageID = item.PackageID
 					}
 					if menu.Item("删除…").Disabled(d.quickEditorOpen).Chosen() {
 						d.quickSelected = item.ID
@@ -268,6 +322,7 @@ func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
 				if button.DoubleClicked() && !d.quickEditorOpen {
 					d.quickSelected, d.quickEditorOpen = item.ID, true
 					d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
+					d.quickPackageID = item.PackageID
 				} else if button.Clicked() {
 					d.quickSelected, d.quickConfirm = item.ID, ""
 				}
@@ -281,6 +336,7 @@ func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
 						if ui.Button(c.Key("snippet-edit-"+item.ID), "编辑").Disabled(d.quickEditorOpen).Clicked() {
 							d.quickEditorOpen = true
 							d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
+							d.quickPackageID = item.PackageID
 						}
 						label := "删除"
 						if d.quickConfirm == item.ID {

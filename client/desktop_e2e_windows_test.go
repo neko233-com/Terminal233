@@ -123,6 +123,26 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "quick-new") || !strings.Contains(tree, "命令目标：未选择终端") {
 		t.Fatalf("snippet workspace not available before connecting: %s", tree)
 	}
+	call("act", map[string]any{"key": "quick-packages", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "quick-package-name") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "quick-package-name", "action": "setValue", "text": "测试分组"})
+	call("act", map[string]any{"key": "quick-package-add", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "分组 / 测试分组") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "分组 / 测试分组") {
+		t.Fatal("snippet group was not created")
+	}
 	call("act", map[string]any{"key": "quick-new", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -198,6 +218,33 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprint(call("tree")), "snippet-select-"+snippetID) {
 		t.Fatal("confirmed snippet deletion did not complete")
+	}
+	call("act", map[string]any{"key": "quick-packages", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "quick-package-delete") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "quick-package-delete", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "确认移除分组") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "quick-package-delete", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "分组已移除") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "分组已移除") {
+		t.Fatal("confirmed snippet group removal did not complete")
 	}
 	navigate("nav-cloud")
 	deadline = time.Now().Add(5 * time.Second)
