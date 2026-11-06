@@ -20,12 +20,16 @@ func TestDesktopRemotePanes(t *testing.T) {
 	a.Fingerprint = af
 	b, bf, _ := testSSHServer(t)
 	b.Fingerprint = bf
+	b.Host = "localhost"
+	c, cf, attempts := testSSHServer(t)
+	bad := c
+	bad.Fingerprint, bad.Password = cf, "incorrect-test-password"
 	configDir := t.TempDir()
 	var profiles desktop
 	if err := profiles.loadProfiles(filepath.Join(configDir, "NekoSSH", "profiles.json")); err != nil {
 		t.Fatal(err)
 	}
-	for i, settings := range []connectionSettings{a, b} {
+	for i, settings := range []connectionSettings{a, b, c, bad} {
 		profiles.settings, profiles.active = settings, settings
 		profiles.selectedProfile, profiles.profileLabel = "", fmt.Sprintf("fixture-%d", i+1)
 		if err := profiles.saveCurrentProfile(); err != nil {
@@ -117,13 +121,19 @@ func TestDesktopRemotePanes(t *testing.T) {
 		call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": bounds["x"].(float64) + bounds["width"].(float64)/2, "y": bounds["y"].(float64) + bounds["height"].(float64)/2}}})
 		waitKey(expected)
 	}
-	connect("profile-1", "session-1")
-	press("workspace-hosts-tab")
-	connect("profile-2", "session-2")
+	connect("profile-2", "session-1")
 	press("workspace-hosts-tab")
 	press("nav-files")
 	press("secondary-picker")
-	press("secondary-session-1")
+	waitKey("secondary-search")
+	call("act", map[string]any{"key": "secondary-search", "action": "setValue", "text": "fixture-1"})
+	press("secondary-profile-1")
+	waitKey("session-2")
+	waitKey("secondary-path")
+	rightPicker := waitKey("file-session-picker-toggle")
+	if !strings.Contains(fmt.Sprint(rightPicker["description"]), "alice@localhost") {
+		t.Fatal("connecting left host changed the right session")
+	}
 	leftDir, rightDir := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(leftDir, "left.txt"), []byte("left to right"), 0600); err != nil {
 		t.Fatal(err)
@@ -196,4 +206,56 @@ func TestDesktopRemotePanes(t *testing.T) {
 	press("file-local-upload.txt")
 	press("secondary-copy-left")
 	waitFile(filepath.Join(leftDir, "local-upload.txt"), "local to remote")
+	// A host without a locally trusted key must stop for verification, then
+	// return to the left panel without replacing the existing right session.
+	press("secondary-picker")
+	waitKey("secondary-search")
+	call("act", map[string]any{"key": "secondary-search", "action": "setValue", "text": "fixture-3"})
+	press("secondary-profile-3")
+	waitKey("connect")
+	if attempts.Load() != 0 {
+		t.Fatal("credentials were sent before host inspection")
+	}
+	press("connect")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) {
+		if strings.Contains(fmt.Sprint(call("tree", nil)), cf) {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), cf) || attempts.Load() != 0 {
+		t.Fatal("new left host key was not verified before authentication")
+	}
+	press("connect")
+	waitKey("session-4")
+	waitKey("secondary-path")
+	currentDir := waitKey("remote-dir")
+	if !strings.EqualFold(fmt.Sprint(currentDir["value"]), localDir) {
+		t.Fatal("new left host changed the right local directory")
+	}
+	// A failed authentication keeps the left-panel intent for a retry.
+	press("secondary-picker")
+	waitKey("secondary-search")
+	call("act", map[string]any{"key": "secondary-search", "action": "setValue", "text": "fixture-4"})
+	press("secondary-profile-4")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) {
+		if strings.Contains(fmt.Sprint(call("tree", nil)), "连接失败") {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "连接失败") {
+		t.Fatal("failed left authentication did not remain in the editor")
+	}
+	call("act", map[string]any{"key": "password", "action": "setValue", "text": "test-password"})
+	call("tree", nil)
+	press("connect")
+	waitKey("session-5")
+	waitKey("secondary-path")
+	currentDir = waitKey("remote-dir")
+	if !strings.EqualFold(fmt.Sprint(currentDir["value"]), localDir) {
+		t.Fatal("left retry changed the right directory")
+	}
 }

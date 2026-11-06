@@ -28,6 +28,44 @@ type secondaryPaneDrag struct {
 	generation                uint64
 }
 
+func (d *desktop) clearSecondaryConnectIntent() {
+	d.secondaryConnectPending = false
+	d.secondaryPreviousID, d.secondaryPreviousShell, d.secondaryPreviousTerm = 0, nil, nil
+}
+
+func (d *desktop) beginSecondaryConnection() bool {
+	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
+		return false
+	}
+	if !d.prepareConnectionNavigation() {
+		d.fileStatus = d.status
+		return false
+	}
+	d.secondaryConnectPending = true
+	d.secondaryPreviousID, d.secondaryPreviousShell, d.secondaryPreviousTerm = d.currentSession, d.shell, d.term
+	d.fileReturnAfterConnect, d.showSecondaryFilePicker = true, false
+	return true
+}
+
+func (d *desktop) openSecondaryProfile(id profileID) {
+	if !d.beginSecondaryConnection() {
+		return
+	}
+	if p, ok := d.currentProfile(id); ok {
+		d.openProfileConnection(p)
+		return
+	}
+	d.fileReturnAfterConnect = false
+	d.clearSecondaryConnectIntent()
+	d.fileStatus = "连接已不存在，请重新选择。"
+}
+
+func (d *desktop) openSecondaryCloudAccount(account cloudAccount) {
+	if d.beginSecondaryConnection() {
+		d.loadCloudAccount(account)
+	}
+}
+
 func (d *desktop) secondarySession() *workspaceSession {
 	for _, s := range d.sessions {
 		if s.id == d.secondaryPane.sessionID && s.shell == d.secondaryPane.shell && s.shell != nil && s.term != nil && !terminalEnded(s.term) {
@@ -77,23 +115,70 @@ func (d *desktop) secondaryFilePicker(c *ui.Context) {
 	button := ui.Button(c.Key("secondary-picker"), label+" ▾").Label("选择左侧文件主机").Tooltip("选择左侧文件主机").Disabled(d.busy)
 	if button.Clicked() {
 		d.showSecondaryFilePicker = !d.showSecondaryFilePicker
+		if d.showSecondaryFilePicker {
+			d.secondaryFileSearch = ""
+		}
 	}
 	ui.PopoverBase(c, button, &d.showSecondaryFilePicker, func(panel ui.Element) {
 		panel.AttachTo(button, ui.AnchorBottomStart, ui.AnchorTopStart).Margin(4, 0, 0, 0).Children(func() {
-			ui.Column(c).Width(280).Padding(10).Gap(4).Background(c.Theme().SurfaceHover).Radius(8).Children(func() {
-				if ui.Button(c.Key("secondary-local"), "本机").Label("左侧使用本机文件").FillWidth().Justify(ui.Start).Clicked() {
-					d.selectSecondarySession(0)
-				}
-				for _, session := range d.sessions {
-					s := session
-					if s.shell == nil || s.term == nil || terminalEnded(s.term) {
-						continue
+			ui.Column(c).Width(300).Padding(10).Gap(6).Background(c.Theme().SurfaceHover).Radius(8).Children(func() {
+				ui.TextInput(c.Key("secondary-search"), &d.secondaryFileSearch).Label("搜索左侧文件主机").Placeholder("搜索主机或会话").FillWidth()
+				query := strings.ToLower(strings.TrimSpace(d.secondaryFileSearch))
+				matches := func(s string) bool { return query == "" || strings.Contains(strings.ToLower(s), query) }
+				ui.Scroll(c.Key("secondary-picker-list")).Label("左侧文件主机列表").Height(240).FillWidth().Children(func() {
+					shown := 0
+					if matches("本机 local") {
+						shown++
+						if ui.Button(c.Key("secondary-local"), "本机").Label("左侧使用本机文件").FillWidth().Justify(ui.Start).Clicked() {
+							d.selectSecondarySession(0)
+						}
 					}
-					label := fmt.Sprintf("%s · 会话 %d", s.label, s.id)
-					if ui.Button(c.Key(fmt.Sprintf("secondary-session-%d", s.id)), label).Label("左侧文件会话：" + label).FillWidth().Justify(ui.Start).Clicked() {
-						d.selectSecondarySession(s.id)
+					for _, session := range d.sessions {
+						s := session
+						if s.shell == nil || s.term == nil || terminalEnded(s.term) || !matches(s.label) {
+							continue
+						}
+						shown++
+						label := fmt.Sprintf("%s · 会话 %d", s.label, s.id)
+						if ui.Button(c.Key(fmt.Sprintf("secondary-session-%d", s.id)), label).Label("左侧文件会话：" + label).FillWidth().Justify(ui.Start).Clicked() {
+							d.selectSecondarySession(s.id)
+						}
 					}
-				}
+					blocked := d.connectionNavigationBlocked() || len(d.sessions) >= maxWorkspaceSessions
+					for _, profile := range d.profiles {
+						p := profile
+						name := p.Label
+						if name == "" {
+							name = p.Settings.User + "@" + p.Settings.Host
+						}
+						if !matches(name + " " + p.Settings.Host + " " + p.Settings.User + " " + p.Group) {
+							continue
+						}
+						shown++
+						if ui.Button(c.Key("secondary-profile-"+string(p.ID)), name+" · 本机").Label("左侧主机：" + name + " · 本机").FillWidth().Justify(ui.Start).Disabled(blocked).Clicked() {
+							d.openSecondaryProfile(p.ID)
+						}
+					}
+					if d.cloud != nil {
+						for _, entry := range d.accounts {
+							a := entry
+							name := a.Label
+							if name == "" {
+								name = a.Username + "@" + a.Host
+							}
+							if !matches(name + " " + a.Host + " " + a.Username) {
+								continue
+							}
+							shown++
+							if ui.Button(c.Key("secondary-cloud-"+a.ID), name+" · 云端").Label("左侧主机：" + name + " · 云端").FillWidth().Justify(ui.Start).Disabled(blocked).Clicked() {
+								d.openSecondaryCloudAccount(a)
+							}
+						}
+					}
+					if shown == 0 {
+						ui.Text(c, "没有匹配的主机").FontSize(12).TextColor(c.Theme().TextMuted)
+					}
+				})
 			})
 		})
 	})

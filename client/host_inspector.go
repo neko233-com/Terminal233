@@ -99,6 +99,7 @@ func (d *desktop) closeConnectionEditor() bool {
 	d.showKeyOptions = false
 	d.showConnectionTools = false
 	d.fileReturnAfterConnect = false
+	d.clearSecondaryConnectIntent()
 	d.connectionDraft, d.connectionDraftSet, d.confirmDiscardConnection = connectionDraft{}, false, false
 	d.profileAutoDirty, d.profileAutoAt = false, time.Time{}
 	d.settings.Password, d.settings.Passphrase = "", ""

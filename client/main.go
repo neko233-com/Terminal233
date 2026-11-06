@@ -41,6 +41,11 @@ type desktop struct {
 	showFileSessionPicker, fileReturnAfterConnect                                           bool
 	showSecondaryFilePicker                                                                 bool
 	secondaryPane                                                                           secondaryRemotePane
+	secondaryFileSearch                                                                     string
+	secondaryConnectPending                                                                 bool
+	secondaryPreviousID                                                                     int
+	secondaryPreviousShell                                                                  *remoteShell
+	secondaryPreviousTerm                                                                   *terminal.Terminal
 	fileSessionSearch                                                                       string
 	sidebarCollapsed                                                                        bool
 	terminalNavigationOpen                                                                  bool
@@ -338,8 +343,12 @@ func (d *desktop) connect() {
 				return
 			}
 			showFiles := returnToFiles && d.fileReturnAfterConnect && d.workspace == "connections"
+			showSecondary := showFiles && d.secondaryConnectPending
+			previousID, previousShell, previousTerm := d.secondaryPreviousID, d.secondaryPreviousShell, d.secondaryPreviousTerm
 			d.fileReturnAfterConnect = false
+			d.clearSecondaryConnectIntent()
 			d.addSession(term, shell, settings, settings.User+"@"+settings.Host)
+			newSessionID := d.currentSession
 			d.editConnection = false
 			d.connectionDraft, d.connectionDraftSet, d.confirmDiscardConnection = connectionDraft{}, false, false
 			for _, session := range d.sessions {
@@ -349,7 +358,22 @@ func (d *desktop) connect() {
 					break
 				}
 			}
-			d.refreshFiles()
+			if showSecondary {
+				refreshPrevious := false
+				for _, previous := range d.sessions {
+					if previous.id == previousID && previous.shell == previousShell && previous.term == previousTerm && previous.term != nil && !terminalEnded(previous.term) {
+						d.activateSessionWithRefresh(previousID, false)
+						refreshPrevious, previous.refreshPending = previous.refreshPending, false
+						break
+					}
+				}
+				d.selectSecondarySession(newSessionID)
+				if d.currentSession == newSessionID || refreshPrevious || d.files == nil {
+					d.refreshFilesAfter(d.fileStatus)
+				}
+			} else {
+				d.refreshFiles()
+			}
 			d.status = "已连接"
 			for i, p := range d.profiles {
 				if string(p.ID) == profileID && p.Settings.Host == settings.Host && p.Settings.Port == settings.Port && p.Settings.User == settings.User {
@@ -364,6 +388,9 @@ func (d *desktop) connect() {
 			d.workspace = "terminal"
 			if showFiles {
 				d.workspace, d.narrowFilePane = "files", "session"
+				if showSecondary {
+					d.narrowFilePane = "local"
+				}
 			}
 		})
 	}()
@@ -377,6 +404,7 @@ func (d *desktop) view(c *ui.Context) {
 	}
 	if d.workspace != "connections" && d.workspace != "" {
 		d.fileReturnAfterConnect = false
+		d.clearSecondaryConnectIntent()
 	}
 	if !d.profileInspectorAt.IsZero() && !d.editConnection && (d.workspace == "" || d.workspace == "connections") {
 		if delay := time.Until(d.profileInspectorAt); delay > 0 {
@@ -1013,7 +1041,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.91"
+const version = "0.3.92"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

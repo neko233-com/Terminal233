@@ -117,6 +117,10 @@ func (d *desktop) saveSessionState() {
 }
 
 func (d *desktop) activateSession(id int) {
+	d.activateSessionWithRefresh(id, true)
+}
+
+func (d *desktop) activateSessionWithRefresh(id int, refresh bool) {
 	if !d.canSwitchSession() {
 		return
 	}
@@ -148,12 +152,12 @@ func (d *desktop) activateSession(id int) {
 		d.terminalSearchOpen, d.terminalSearchText = s.terminalSearchOpen, s.terminalSearchText
 		d.workspace = "terminal"
 		d.status = "当前会话：" + s.label
-		if s.refreshPending && !d.fileSessionUnavailable() && !d.busy && d.win != nil {
+		if refresh && s.refreshPending && !d.fileSessionUnavailable() && !d.busy && d.win != nil {
 			s.refreshPending = false
 			d.refreshFilesAfter(d.fileStatus)
 			return
 		}
-		if d.showFilePanel && !d.fileSessionUnavailable() && d.shell == nil && d.files == nil && d.fileStatus == "" && d.win != nil {
+		if refresh && d.showFilePanel && !d.fileSessionUnavailable() && d.shell == nil && d.files == nil && d.fileStatus == "" && d.win != nil {
 			d.refreshFiles()
 		}
 		return

@@ -83,3 +83,71 @@ func TestSecondaryPaneIgnoresLateDirectoryReads(t *testing.T) {
 		t.Fatal("current directory result was not applied")
 	}
 }
+
+func TestSecondarySavedHostKeepsRightSessionAndProtectsDraft(t *testing.T) {
+	d, path := navigationFixture(t)
+	rightShell, rightTerm := &remoteShell{}, &terminal.Terminal{}
+	d.workspace, d.currentSession, d.shell, d.term = "files", 7, rightShell, rightTerm
+	d.sessions = []*workspaceSession{{id: 7, label: "right", shell: rightShell, term: rightTerm, fileDir: "/right"}}
+	d.localPane = localFilePane{initialized: true, directory: t.TempDir()}
+	d.profileLabel, d.profileAutoDirty = "edited", true
+	d.openSecondaryProfile("2")
+	if !d.secondaryConnectPending || !d.fileReturnAfterConnect || d.secondaryPreviousID != 7 || d.secondaryPreviousShell != rightShell || d.secondaryPreviousTerm != rightTerm || d.workspace != "connections" || d.selectedProfile != "2" {
+		t.Fatal("saved host did not retain the right session or open its editor")
+	}
+	var reopened desktop
+	if err := reopened.loadProfiles(path); err != nil {
+		t.Fatal(err)
+	}
+	if reopened.profiles[0].Label != "edited" {
+		t.Fatal("opening a left host lost the previous local draft")
+	}
+	if !d.closeConnectionEditor() || d.secondaryConnectPending || d.fileReturnAfterConnect {
+		t.Fatal("cancelled editor retained a left-panel connection intent")
+	}
+}
+
+func TestSecondaryCloudHostRequiresKeyVerification(t *testing.T) {
+	d := &desktop{workspace: "files", cloud: &cloudClient{}, accounts: []cloudAccount{{ID: "one", Label: "cloud", Host: "cloud.example", Port: 22, Username: "alice", HostKeyFingerprint: "SHA256:untrusted"}}}
+	d.openSecondaryCloudAccount(d.accounts[0])
+	if !d.secondaryConnectPending || !d.fileReturnAfterConnect || d.workspace != "connections" || !d.settingsFromCloud || d.expectedFingerprint != "SHA256:untrusted" || d.fingerprint != "" || d.trustedProfileFingerprint() != "" {
+		t.Fatal("cloud host bypassed explicit host key verification")
+	}
+}
+
+func TestLeavingConnectionFlowCancelsSecondaryIntent(t *testing.T) {
+	d, _ := navigationFixture(t)
+	d.workspace = "files"
+	d.openSecondaryProfile("2")
+	if !d.secondaryConnectPending {
+		t.Fatal("left connection intent was not recorded")
+	}
+	d.workspace = "cloud"
+	view := ui.NewTester(d.view, 1280, 900)
+	view.Frame()
+	if d.secondaryConnectPending || d.fileReturnAfterConnect || d.secondaryPreviousID != 0 || d.secondaryPreviousShell != nil || d.secondaryPreviousTerm != nil {
+		t.Fatal("leaving the connection flow retained a stale return target")
+	}
+}
+
+func TestSecondaryPickerSearchesSavedHosts(t *testing.T) {
+	d, _ := navigationFixture(t)
+	d.workspace, d.editConnection = "files", false
+	d.localPane = localFilePane{initialized: true, directory: t.TempDir()}
+	view := ui.NewTester(d.view, 1280, 900)
+	if err := view.Click("选择左侧文件主机"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.Click("搜索左侧文件主机"); err != nil {
+		t.Fatal(err)
+	}
+	view.Type("two.example")
+	if !view.HasText("左侧主机：two · 本机") || view.HasText("左侧主机：one · 本机") {
+		t.Fatal("saved host search did not filter the picker")
+	}
+	view.TypeKey(ui.Cmd, ui.KeyA, "")
+	view.Type("no-such-host")
+	if !view.HasText("没有匹配的主机") {
+		t.Fatal("empty search has no feedback")
+	}
+}
