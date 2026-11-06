@@ -83,6 +83,7 @@ func (d *desktop) leftPaneToolbar(c *ui.Context) {
 	if terminalActionButton(c, "left-pane-filter-toggle", "筛选左侧文件", searchIcon, *show || filter != "", false).Clicked() {
 		*show = !*show
 	}
+	d.leftPaneOptions(c)
 	if terminalActionButton(c, "left-pane-mkdir", "在左侧新建目录", plusIcon, false, d.busy || !ready).Clicked() {
 		d.beginLeftAction("mkdir", "")
 	}
@@ -92,6 +93,59 @@ func (d *desktop) leftPaneToolbar(c *ui.Context) {
 	if terminalActionButton(c, "left-pane-delete", "删除左侧所选项", trashIcon, false, d.busy || !ready || selected == "" || count > 1).Clicked() {
 		d.beginLeftAction("delete", selected)
 	}
+}
+
+// The two left-pane modes keep their own ordering and visibility settings.
+func (d *desktop) leftPaneOptions(c *ui.Context) {
+	order, descending, hidden := &d.localPane.sortOrder, &d.localPane.sortDescending, &d.localPane.hideDotfiles
+	selected, selection := &d.localPane.selected, &d.localPane.paneSelection
+	if d.secondaryPane.sessionID != 0 {
+		order, descending, hidden = &d.secondaryPane.sortOrder, &d.secondaryPane.sortDescending, &d.secondaryPane.hideDotfiles
+		selected, selection = &d.secondaryPane.selected, &d.secondaryPane.paneSelection
+	}
+	button := terminalActionButton(c, "left-pane-options", "左侧文件选项", moreIcon, d.showLeftPaneOptions, false)
+	if button.Clicked() {
+		d.showLeftPaneOptions = !d.showLeftPaneOptions
+	}
+	ui.PopoverBase(c, button, &d.showLeftPaneOptions, func(panel ui.Element) {
+		panel.AttachTo(button, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() {
+			ui.Column(c).Width(180).Padding(8).Gap(4).Background(c.Theme().SurfaceHover).Radius(8).Children(func() {
+				for _, column := range []struct{ key, label string }{{"name", "按名称"}, {"size", "按大小"}, {"time", "按修改时间"}} {
+					label := column.label
+					if *order == column.key || (*order == "" && column.key == "name") {
+						if *descending {
+							label += " ↓"
+						} else {
+							label += " ↑"
+						}
+					}
+					if ui.Button(c.Key("left-pane-sort-"+column.key), label).Label("左侧" + label).FillWidth().Height(32).BorderWidth(0).Justify(ui.Start).Clicked() {
+						if *order == column.key || (*order == "" && column.key == "name") {
+							*descending = !*descending
+						} else {
+							*order, *descending = column.key, false
+						}
+						d.showLeftPaneOptions = false
+					}
+				}
+				label := "隐藏点文件"
+				if *hidden {
+					label = "显示点文件"
+				}
+				if ui.Button(c.Key("left-pane-toggle-dotfiles"), label).Label("左侧" + label).FillWidth().Height(32).BorderWidth(0).Justify(ui.Start).Clicked() {
+					*hidden = !*hidden
+					*selection = paneSelection{}
+					if *hidden && strings.HasPrefix(*selected, ".") {
+						*selected = ""
+					}
+					if *hidden && strings.HasPrefix(d.leftPaneAction.name, ".") {
+						d.leftPaneAction = leftPaneAction{}
+					}
+					d.showLeftPaneOptions = false
+				}
+			})
+		})
+	})
 }
 
 func (d *desktop) leftPaneContextMenu(menu *ui.Menu, name string) {

@@ -37,7 +37,7 @@ type desktop struct {
 	terminalLightTheme, terminalDarkTheme                                                   *terminal.Theme
 	showFilePanel                                                                           bool
 	showFileTools                                                                           bool
-	showFileFilter, showFileOptions                                                         bool
+	showFileFilter, showFileOptions, showLeftPaneOptions                                    bool
 	showFileSessionPicker, fileReturnAfterConnect                                           bool
 	showSecondaryFilePicker                                                                 bool
 	secondaryPane                                                                           secondaryRemotePane
@@ -1183,7 +1183,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.119"
+const version = "0.3.120"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

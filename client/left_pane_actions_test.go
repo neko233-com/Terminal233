@@ -119,6 +119,106 @@ func TestLeftPaneFilterClearsSelectionAndKeepsOtherPane(t *testing.T) {
 	}
 }
 
+func TestLeftPaneOptionsSortAndHideIndependently(t *testing.T) {
+	dir := t.TempDir()
+	d := &desktop{workspace: "files", term: &terminal.Terminal{}, currentSession: 1, fileDir: dir,
+		files: []remoteFile{{Name: "right-visible"}}, localPane: localFilePane{initialized: true, directory: dir, input: dir, hideDotfiles: true, files: []remoteFile{{Name: "small", Size: 1}, {Name: "large", Size: 20}, {Name: ".secret", Size: 10}}}}
+	v := ui.NewTester(d.view, 1280, 900)
+	if v.HasText(".secret") || !v.HasText("right-visible") {
+		t.Fatal("left hidden-file setting affected the wrong pane")
+	}
+	if err := v.Click("左侧文件选项"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Click("左侧显示点文件"); err != nil {
+		t.Fatal(err)
+	}
+	if !v.HasText(".secret") {
+		t.Fatal("show hidden files did not update the list")
+	}
+	if err := v.Click(".secret"); err != nil {
+		t.Fatal(err)
+	}
+	d.beginLeftAction("delete", ".secret")
+	if err := v.Click("左侧文件选项"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Click("左侧隐藏点文件"); err != nil {
+		t.Fatal(err)
+	}
+	if v.HasText(".secret") || d.localPane.selected != "" || d.leftPaneAction.kind != "" {
+		t.Fatal("hidden selection or action remained active")
+	}
+	// A context-menu action can refer to a different row than the selection.
+	d.localPane.hideDotfiles = false
+	d.localPane.selected = "small"
+	d.beginLeftAction("delete", ".secret")
+	if err := v.Click("左侧文件选项"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Click("左侧隐藏点文件"); err != nil {
+		t.Fatal(err)
+	}
+	if d.leftPaneAction.kind != "" || d.localPane.selected != "small" {
+		t.Fatal("hidden context action survived or visible selection was lost")
+	}
+	if err := v.Click("左侧文件选项"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Click("左侧按大小"); err != nil {
+		t.Fatal(err)
+	}
+	if d.localPane.sortOrder != "size" || d.localPane.sortDescending {
+		t.Fatal("size sort not applied")
+	}
+	small, _ := v.Find("small")
+	large, _ := v.Find("large")
+	if small.Y >= large.Y {
+		t.Fatal("ascending size order not reflected in the list")
+	}
+	if err := v.Click("左侧文件选项"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Click("左侧按大小 ↑"); err != nil {
+		t.Fatal(err)
+	}
+	small, _ = v.Find("small")
+	large, _ = v.Find("large")
+	if !d.localPane.sortDescending || small.Y <= large.Y {
+		t.Fatal("descending size order not reflected in the list")
+	}
+	if d.fileSort != "" || d.fileHideDotfiles {
+		t.Fatal("left options changed the right pane")
+	}
+}
+
+func TestLeftPaneOptionsBelongToSelectedHost(t *testing.T) {
+	dir := t.TempDir()
+	shell := &remoteShell{}
+	term := &terminal.Terminal{}
+	d := &desktop{workspace: "files", term: &terminal.Terminal{}, currentSession: 1, fileDir: dir,
+		sessions:      []*workspaceSession{{id: 2, shell: shell, term: term}},
+		localPane:     localFilePane{initialized: true, directory: dir, input: dir, hideDotfiles: true, sortOrder: "time", files: []remoteFile{{Name: ".local"}}},
+		secondaryPane: secondaryRemotePane{sessionID: 2, shell: shell, directory: "/home", input: "/home", files: []remoteFile{{Name: ".remote"}}}}
+	v := ui.NewTester(d.view, 1280, 900)
+	if !v.HasText(".remote") {
+		t.Fatal("remote pane did not keep its own visibility")
+	}
+	if err := v.Click("左侧文件选项"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Click("左侧隐藏点文件"); err != nil {
+		t.Fatal(err)
+	}
+	if v.HasText(".remote") || !d.secondaryPane.hideDotfiles || d.localPane.sortOrder != "time" {
+		t.Fatal("remote options affected local pane")
+	}
+	d.selectSecondarySession(0)
+	if v.HasText(".local") || !d.localPane.hideDotfiles || d.localPane.sortOrder != "time" {
+		t.Fatal("local options were lost when switching panes")
+	}
+}
+
 func TestRightPaneFilterClearsBatchSelection(t *testing.T) {
 	dir := t.TempDir()
 	d := &desktop{workspace: "files", term: &terminal.Terminal{}, currentSession: 1, fileDir: dir, files: []remoteFile{{Name: "alpha"}, {Name: "beta"}}, localPane: localFilePane{initialized: true, directory: dir, input: dir}}
@@ -141,5 +241,22 @@ func TestRightPaneFilterClearsBatchSelection(t *testing.T) {
 	v.Type("alpha")
 	if len(d.filePaneSelection.names) != 0 || d.selectedFile != "" {
 		t.Fatal("filter retained hidden selection")
+	}
+}
+
+func TestRightPaneHidingDotfilesClearsHiddenBatchItems(t *testing.T) {
+	dir := t.TempDir()
+	d := &desktop{workspace: "files", term: &terminal.Terminal{}, currentSession: 1, fileDir: dir,
+		files: []remoteFile{{Name: ".hidden"}, {Name: "visible"}}, fileChecked: map[string]bool{".hidden": true, "visible": true}, fileCheckedDir: dir,
+		localPane: localFilePane{initialized: true, directory: dir, input: dir}}
+	v := ui.NewTester(d.view, 1280, 900)
+	if err := v.Click("排序与显示"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Click("隐藏点文件"); err != nil {
+		t.Fatal(err)
+	}
+	if d.fileChecked[".hidden"] || !d.fileChecked["visible"] || v.HasText(".hidden") {
+		t.Fatalf("hiding dotfiles kept a hidden batch item: checked=%v hidden=%v state=%v", d.fileChecked, v.HasText(".hidden"), d.fileHideDotfiles)
 	}
 }

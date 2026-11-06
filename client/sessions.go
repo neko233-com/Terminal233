@@ -165,7 +165,7 @@ func (d *desktop) addSession(term *terminal.Terminal, shell *remoteShell, active
 		term.SetTheme(d.terminalLightTheme, d.terminalDarkTheme)
 	}
 	d.nextSession++
-	s := &workspaceSession{id: d.nextSession, label: label, term: term, shell: shell, active: active}
+	s := &workspaceSession{id: d.nextSession, label: label, term: term, shell: shell, active: active, fileHideDotfiles: true}
 	d.bindTerminalBroadcast(s)
 	if shell != nil {
 		s.fileDir = "."

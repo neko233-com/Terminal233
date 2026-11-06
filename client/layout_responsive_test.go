@@ -9,6 +9,29 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func TestLeftFileToolbarFitsBothLayouts(t *testing.T) {
+	for _, size := range [][2]int{{640, 480}, {1280, 800}} {
+		dir := t.TempDir()
+		d := &desktop{workspace: "files", localPane: localFilePane{initialized: true, directory: dir, input: dir}}
+		v := ui.NewTester(d.view, size[0], size[1])
+		for _, label := range []string{"选择左侧文件主机", "筛选左侧文件", "左侧文件选项", "在左侧新建目录", "重命名左侧所选项", "删除左侧所选项"} {
+			r, ok := v.Find(label)
+			if !ok || r.X < 0 || r.X+r.W > float32(size[0]) || r.Y < 0 || r.Y+r.H > float32(size[1]) {
+				t.Errorf("%s inaccessible at %dx%d: %+v", label, size[0], size[1], r)
+			}
+		}
+		if err := v.Click("左侧文件选项"); err != nil {
+			t.Fatal(err)
+		}
+		for _, label := range []string{"左侧按名称 ↑", "左侧按大小", "左侧按修改时间", "左侧隐藏点文件"} {
+			r, ok := v.Find(label)
+			if !ok || r.X < 0 || r.X+r.W > float32(size[0]) || r.Y < 0 || r.Y+r.H > float32(size[1]) {
+				t.Errorf("%s inaccessible at %dx%d: %+v", label, size[0], size[1], r)
+			}
+		}
+	}
+}
+
 func TestCompactConnectionListKeepsFirstConnectionVisible(t *testing.T) {
 	d := &desktop{workspace: "connections", profiles: []profile{{ID: "1", Label: "small-window-test", Settings: connectionSettings{Host: "example.test", Port: "22", User: "alice"}}}}
 	view := ui.NewTester(d.view, 640, 480)

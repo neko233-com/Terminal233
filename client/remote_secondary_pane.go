@@ -17,10 +17,13 @@ type secondaryRemotePane struct {
 	shell                              *remoteShell
 	directory, input, selected, status string
 	filter                             string
-	showFilter                         bool
+	showFilter, sortDescending         bool
+	sortOrder                          string
+	hideDotfiles                       bool
 	files                              []remoteFile
 	history                            fileHistory
 	loading                            bool
+	loadingDirectory                   string
 	generation                         uint64
 	paneSelection                      paneSelection
 }
@@ -85,6 +88,7 @@ func (d *desktop) selectSecondarySession(id int) {
 		return
 	}
 	d.showSecondaryFilePicker = false
+	d.showLeftPaneOptions = false
 	if id == 0 {
 		d.secondaryPane = secondaryRemotePane{generation: d.secondaryPane.generation + 1}
 		return
@@ -103,7 +107,7 @@ func (d *desktop) selectSecondarySession(id int) {
 		if strings.TrimSpace(dir) == "" {
 			dir = "."
 		}
-		d.secondaryPane = secondaryRemotePane{sessionID: id, shell: s.shell, directory: dir, input: dir, generation: d.secondaryPane.generation + 1}
+		d.secondaryPane = secondaryRemotePane{sessionID: id, shell: s.shell, directory: dir, input: dir, generation: d.secondaryPane.generation + 1, hideDotfiles: true}
 		d.requestSecondaryPane(dir, -1)
 		return
 	}
@@ -199,7 +203,7 @@ func (d *desktop) requestSecondaryPane(dir string, historyIndex int) {
 		return
 	}
 	p := &d.secondaryPane
-	p.input, p.loading, p.status = dir, true, "正在读取目录…"
+	p.input, p.loading, p.loadingDirectory, p.status = dir, true, dir, "正在读取目录…"
 	p.generation++
 	generation, id, shell := p.generation, p.sessionID, p.shell
 	go func() {
@@ -214,6 +218,7 @@ func (d *desktop) finishSecondaryPaneLoad(generation uint64, id int, shell *remo
 		return
 	}
 	p.loading = false
+	p.loadingDirectory = ""
 	if err != nil {
 		p.input = p.directory
 		p.status = "读取目录失败：" + err.Error()
@@ -225,6 +230,19 @@ func (d *desktop) finishSecondaryPaneLoad(generation uint64, id int, shell *remo
 	p.directory, p.input, p.files, p.selected = dir, dir, files, ""
 	p.paneSelection = paneSelection{}
 	p.status = fmt.Sprintf("%d 个条目", len(files))
+}
+
+func (d *desktop) secondaryPaneInputChanged() {
+	p := &d.secondaryPane
+	p.selected = ""
+	p.paneSelection = paneSelection{}
+	if p.loading && p.input != p.loadingDirectory {
+		p.generation++
+		p.loading, p.loadingDirectory = false, ""
+	}
+	if !p.loading && p.input != p.directory {
+		p.status = "打开输入的目录后才能传输。"
+	}
 }
 
 func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
@@ -246,17 +264,7 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 		if ui.Button(c.Key("secondary-parent"), "↑").Label("左侧上一级目录").Tooltip("上一级").Width(36).Disabled(d.busy || p.loading).Clicked() {
 			d.requestSecondaryPane(path.Dir(p.directory), -1)
 		}
-		ui.TextInput(c.Key("secondary-path"), &p.input).Label("左侧远程目录").Placeholder("远程目录路径").OnChange(func() {
-			p.selected = ""
-			p.paneSelection = paneSelection{}
-			if p.loading {
-				p.generation++
-				p.loading = false
-			}
-			if p.input != p.directory {
-				p.status = "打开输入的目录后才能传输。"
-			}
-		}).OnSubmit(func() { d.requestSecondaryPane(p.input, -1) }).Grow(1)
+		ui.TextInput(c.Key("secondary-path"), &p.input).Label("左侧远程目录").Placeholder("远程目录路径").OnChange(d.secondaryPaneInputChanged).OnSubmit(func() { d.requestSecondaryPane(p.input, -1) }).Grow(1)
 		if ui.Button(c.Key("secondary-refresh"), "↻").Label("打开左侧目录").Tooltip("打开或刷新目录").Width(36).Disabled(d.busy).Clicked() {
 			d.requestSecondaryPane(p.input, -1)
 		}
@@ -275,7 +283,7 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 		ui.Text(c, "名称").Grow(1).FontSize(12).TextColor(c.Theme().TextMuted)
 		ui.Text(c, "大小").Width(70).FontSize(12).TextColor(c.Theme().TextMuted)
 	})
-	visible := displayedFiles(p.files, p.filter, "name", false, false)
+	visible := displayedFiles(p.files, p.filter, p.sortOrder, p.sortDescending, p.hideDotfiles)
 	ui.Scroll(c.Key("secondary-list")).Label("左侧远程文件列表").Height(listHeight).FillWidth().Children(func() {
 		for _, entry := range visible {
 			f := entry

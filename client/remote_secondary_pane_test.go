@@ -84,6 +84,24 @@ func TestSecondaryPaneIgnoresLateDirectoryReads(t *testing.T) {
 	}
 }
 
+func TestSecondaryPanePathEventKeepsMatchingPendingRead(t *testing.T) {
+	shell := &remoteShell{}
+	d := &desktop{sessions: []*workspaceSession{{id: 1, shell: shell, term: &terminal.Terminal{}}}, secondaryPane: secondaryRemotePane{sessionID: 1, shell: shell, directory: "/old", input: "/new", loading: true, loadingDirectory: "/new", generation: 2, status: "正在读取目录…"}}
+	d.secondaryPaneInputChanged()
+	if !d.secondaryPane.loading || d.secondaryPane.generation != 2 || d.secondaryPane.status != "正在读取目录…" {
+		t.Fatal("matching path event invalidated the pending read")
+	}
+	d.secondaryPane.input = "/other"
+	d.secondaryPaneInputChanged()
+	if d.secondaryPane.loading || d.secondaryPane.generation != 3 {
+		t.Fatal("changed path did not invalidate the pending read")
+	}
+	d.finishSecondaryPaneLoad(2, 1, shell, "/new", -1, []remoteFile{{Name: "stale"}}, nil)
+	if d.secondaryPane.directory != "/old" || len(d.secondaryPane.files) != 0 {
+		t.Fatal("stale read changed the pane")
+	}
+}
+
 func TestSecondarySavedHostKeepsRightSessionAndProtectsDraft(t *testing.T) {
 	d, path := navigationFixture(t)
 	rightShell, rightTerm := &remoteShell{}, &terminal.Terminal{}

@@ -17,10 +17,13 @@ import (
 type localFilePane struct {
 	directory, input, selected, status string
 	filter                             string
-	showFilter                         bool
+	showFilter, sortDescending         bool
+	sortOrder                          string
+	hideDotfiles                       bool
 	files                              []remoteFile
 	history                            fileHistory
 	initialized, loading               bool
+	loadingDirectory                   string
 	generation                         uint64
 	paneSelection                      paneSelection
 }
@@ -158,6 +161,7 @@ func (d *desktop) initializeLocalPane() {
 		return
 	}
 	d.localPane.initialized = true
+	d.localPane.hideDotfiles = true
 	dir, err := os.UserHomeDir()
 	if err != nil || dir == "" {
 		d.localPane.status = "无法找到本机用户目录，请输入目录路径。"
@@ -176,7 +180,7 @@ func (d *desktop) requestLocalPane(dir string, historyIndex int) {
 		return
 	}
 	dir = filepath.Clean(dir)
-	d.localPane.input, d.localPane.loading = dir, true
+	d.localPane.input, d.localPane.loading, d.localPane.loadingDirectory = dir, true, dir
 	d.localPane.status = "正在读取本机目录…"
 	d.localPane.generation++
 	generation := d.localPane.generation
@@ -192,6 +196,7 @@ func (d *desktop) finishLocalPaneLoad(generation uint64, dir string, historyInde
 		return
 	}
 	d.localPane.loading = false
+	d.localPane.loadingDirectory = ""
 	if err != nil {
 		d.localPane.input = d.localPane.directory
 		d.localPane.status = "读取本机目录失败：" + err.Error()
@@ -213,6 +218,19 @@ func (d *desktop) navigateLocalPane(offset int) {
 	}
 }
 
+func (d *desktop) localPaneInputChanged() {
+	p := &d.localPane
+	p.selected = ""
+	p.paneSelection = paneSelection{}
+	if p.loading && !sameLocalDirectory(p.input, p.loadingDirectory) {
+		p.generation++
+		p.loading, p.loadingDirectory = false, ""
+	}
+	if !p.loading && !sameLocalDirectory(p.input, p.directory) {
+		p.status = "打开输入的目录后才能传输。"
+	}
+}
+
 func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 	d.initializeLocalPane()
 	ui.Row(c).FillWidth().Height(36).AlignItems(ui.Center).Children(func() { d.secondaryFilePicker(c); d.leftPaneToolbar(c) })
@@ -228,17 +246,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 		if ui.Button(c.Key("local-pane-parent"), "↑").Label("本机上一级目录").Tooltip("上一级").Width(36).Disabled(d.localPane.directory == "").Clicked() {
 			d.requestLocalPane(filepath.Dir(d.localPane.directory), -1)
 		}
-		ui.TextInput(c.Key("local-pane-path"), &d.localPane.input).Label("本机目录").Placeholder("本机绝对目录路径").OnChange(func() {
-			d.localPane.selected = ""
-			d.localPane.paneSelection = paneSelection{}
-			if d.localPane.loading {
-				d.localPane.generation++
-				d.localPane.loading = false
-			}
-			if !sameLocalDirectory(d.localPane.input, d.localPane.directory) {
-				d.localPane.status = "打开输入的目录后才能传输。"
-			}
-		}).OnSubmit(func() { d.requestLocalPane(d.localPane.input, -1) }).Grow(1)
+		ui.TextInput(c.Key("local-pane-path"), &d.localPane.input).Label("本机目录").Placeholder("本机绝对目录路径").OnChange(d.localPaneInputChanged).OnSubmit(func() { d.requestLocalPane(d.localPane.input, -1) }).Grow(1)
 		if ui.Button(c.Key("local-pane-open"), "↻").Label("打开本机目录").Tooltip("打开或刷新目录").Width(36).Clicked() {
 			d.requestLocalPane(d.localPane.input, -1)
 		}
@@ -257,7 +265,7 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 		ui.Text(c, "名称").Grow(1).FontSize(12).TextColor(c.Theme().TextMuted)
 		ui.Text(c, "大小").Width(70).FontSize(12).TextColor(c.Theme().TextMuted)
 	})
-	visible := displayedFiles(d.localPane.files, d.localPane.filter, "name", false, false)
+	visible := displayedFiles(d.localPane.files, d.localPane.filter, d.localPane.sortOrder, d.localPane.sortDescending, d.localPane.hideDotfiles)
 	ui.Scroll(c.Key("local-pane-list")).Label("本机文件列表").Height(listHeight).FillWidth().Children(func() {
 		for _, entry := range visible {
 			f := entry

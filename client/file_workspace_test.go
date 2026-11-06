@@ -204,3 +204,22 @@ func TestLocalPaneIgnoresLateReadsAndPreservesLastGoodDirectory(t *testing.T) {
 		t.Fatal("failed navigation lost the last good directory")
 	}
 }
+
+func TestLocalPanePathEventKeepsMatchingPendingRead(t *testing.T) {
+	dir := t.TempDir()
+	pending := filepath.Join(dir, "new")
+	d := &desktop{localPane: localFilePane{directory: dir, input: pending, loading: true, loadingDirectory: pending, generation: 2, status: "正在读取本机目录…"}}
+	d.localPaneInputChanged()
+	if !d.localPane.loading || d.localPane.generation != 2 || d.localPane.status != "正在读取本机目录…" {
+		t.Fatal("matching path event invalidated the pending read")
+	}
+	d.localPane.input = filepath.Join(dir, "other")
+	d.localPaneInputChanged()
+	if d.localPane.loading || d.localPane.generation != 3 {
+		t.Fatal("changed path did not invalidate the pending read")
+	}
+	d.finishLocalPaneLoad(2, pending, -1, []remoteFile{{Name: "stale"}}, nil)
+	if d.localPane.directory != dir || len(d.localPane.files) != 0 {
+		t.Fatal("stale read changed the pane")
+	}
+}

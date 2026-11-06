@@ -209,6 +209,9 @@ func TestDesktopRemotePanes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(leftDir, "left.txt"), []byte("left to right"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(leftDir, ".hidden-fixture"), []byte("hidden"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(rightDir, "right.txt"), []byte("right to left"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +247,25 @@ func TestDesktopRemotePanes(t *testing.T) {
 	setPath("secondary-path", filepath.ToSlash(leftDir))
 	press("secondary-refresh")
 	waitKey("secondary-file-left.txt")
+	waitGone("secondary-file-.hidden-fixture")
+	press("left-pane-options")
+	press("left-pane-toggle-dotfiles")
+	waitKey("secondary-file-.hidden-fixture")
+	press("left-pane-options")
+	if capturePath := os.Getenv("NEKOSSH_TEST_CAPTURE"); capturePath != "" {
+		result := call("capture", nil)["result"].(map[string]any)
+		png, err := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(capturePath, png, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	press("left-pane-sort-size")
+	press("left-pane-options")
+	press("left-pane-toggle-dotfiles")
+	waitGone("secondary-file-.hidden-fixture")
 	setPath("remote-dir", filepath.ToSlash(rightDir))
 	press("file-refresh")
 	waitKey("file-right.txt")

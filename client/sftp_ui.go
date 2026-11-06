@@ -716,6 +716,13 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			if ui.Button(c.Key("file-toggle-dotfiles"), label).Clicked() {
 				d.fileHideDotfiles = !d.fileHideDotfiles
 				d.filePaneSelection = paneSelection{}
+				if d.fileHideDotfiles {
+					for name := range d.fileChecked {
+						if strings.HasPrefix(name, ".") {
+							delete(d.fileChecked, name)
+						}
+					}
+				}
 				if d.fileHideDotfiles && strings.HasPrefix(d.selectedFile, ".") {
 					d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""
 				}
