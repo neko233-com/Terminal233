@@ -1838,18 +1838,34 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "profile-1") || strings.Contains(tree, "profile-local-terminal") {
 		t.Fatalf("saved connection missing from search: %s", tree)
 	}
-	result = call("tree")["result"].(map[string]any)
-	var profileBounds map[string]any
-	for _, value := range result["nodes"].([]any) {
-		node := value.(map[string]any)
-		if node["key"] == "profile-1" {
-			profileBounds, _ = node["bounds"].(map[string]any)
-			break
+	profileBoundsForClick := func() map[string]any {
+		t.Helper()
+		call("act", map[string]any{"key": "profile-1", "action": "scrollIntoView"})
+		var previous string
+		until := time.Now().Add(5 * time.Second)
+		for time.Now().Before(until) {
+			result := call("tree")["result"].(map[string]any)
+			for _, value := range result["nodes"].([]any) {
+				node := value.(map[string]any)
+				if node["key"] != "profile-1" || strings.Contains(fmt.Sprint(node["states"]), "offscreen") {
+					continue
+				}
+				bounds, ok := node["bounds"].(map[string]any)
+				if !ok {
+					continue
+				}
+				current := fmt.Sprint(bounds)
+				if current == previous {
+					return bounds
+				}
+				previous = current
+			}
+			time.Sleep(50 * time.Millisecond)
 		}
+		t.Fatal("saved connection did not settle on screen")
+		return nil
 	}
-	if profileBounds == nil {
-		t.Fatal("saved connection bounds missing")
-	}
+	profileBounds := profileBoundsForClick()
 	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": profileBounds["x"].(float64) + profileBounds["width"].(float64)/2, "y": profileBounds["y"].(float64) + profileBounds["height"].(float64)/2}}})
 	// A double-click uses the protected password and the previously verified
 	// host key without asking for the password again.
@@ -2020,18 +2036,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "profile-1") {
 		t.Fatalf("profile missing after editing: %s", tree)
 	}
-	result = call("tree")["result"].(map[string]any)
-	profileBounds = nil
-	for _, value := range result["nodes"].([]any) {
-		node := value.(map[string]any)
-		if node["key"] == "profile-1" {
-			profileBounds, _ = node["bounds"].(map[string]any)
-			break
-		}
-	}
-	if profileBounds == nil {
-		t.Fatal("key profile bounds missing")
-	}
+	profileBounds = profileBoundsForClick()
 	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": profileBounds["x"].(float64) + profileBounds["width"].(float64)/2, "y": profileBounds["y"].(float64) + profileBounds["height"].(float64)/2}}})
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -2042,7 +2047,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !strings.Contains(tree, "session-5") || attempts.Load() != 4 {
-		t.Fatalf("key profile did not connect from the list: %s", tree)
+		t.Fatalf("key profile did not connect from the list (authentication attempts: %d): %s", attempts.Load(), tree)
 	}
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
