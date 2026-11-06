@@ -1432,6 +1432,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	waitPaneAction("local-pane-file-pane-drag.txt")
 	waitPaneAction("file-refresh")
+	call("act", map[string]any{"key": "local-pane-file-pane-drag.txt", "action": "scrollIntoView"})
 	dragTree := call("tree")["result"].(map[string]any)
 	var sourceBounds, targetBounds map[string]any
 	for _, value := range dragTree["nodes"].([]any) {
@@ -1465,6 +1466,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("dual-pane drag upload failed: %s", fmt.Sprint(call("tree")))
 	}
 	waitPaneAction("file-batch-existing.txt")
+	call("act", map[string]any{"key": "file-batch-existing.txt", "action": "scrollIntoView"})
 	dragTree = call("tree")["result"].(map[string]any)
 	sourceBounds, targetBounds = nil, nil
 	for _, value := range dragTree["nodes"].([]any) {

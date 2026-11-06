@@ -115,6 +115,19 @@ func TestDesktopRemotePanes(t *testing.T) {
 		return nil
 	}
 	press := func(key string) { waitKey(key); call("act", map[string]any{"key": key, "action": "press"}) }
+	setPath := func(key, value string) {
+		t.Helper()
+		waitKey(key)
+		call("act", map[string]any{"key": key, "action": "setValue", "text": value})
+		until := time.Now().Add(5 * time.Second)
+		for time.Now().Before(until) {
+			if strings.EqualFold(fmt.Sprint(waitKey(key)["value"]), value) {
+				return
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+		t.Fatalf("directory input %s did not update", key)
+	}
 	connect := func(key, expected string) {
 		node := waitKey(key)
 		bounds := node["bounds"].(map[string]any)
@@ -169,10 +182,10 @@ func TestDesktopRemotePanes(t *testing.T) {
 		}
 	}
 	waitKey("secondary-path")
-	call("act", map[string]any{"key": "secondary-path", "action": "setValue", "text": filepath.ToSlash(leftDir)})
+	setPath("secondary-path", filepath.ToSlash(leftDir))
 	press("secondary-refresh")
 	waitKey("secondary-file-left.txt")
-	call("act", map[string]any{"key": "remote-dir", "action": "setValue", "text": filepath.ToSlash(rightDir)})
+	setPath("remote-dir", filepath.ToSlash(rightDir))
 	press("file-refresh")
 	waitKey("file-right.txt")
 	press("secondary-file-left.txt")
@@ -260,7 +273,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 	press("secondary-picker")
 	press("secondary-local")
 	waitKey("local-pane-path")
-	call("act", map[string]any{"key": "local-pane-path", "action": "setValue", "text": localPaneDir})
+	setPath("local-pane-path", localPaneDir)
 	press("local-pane-open")
 	waitKey("local-pane-file-local-to-right")
 	press("local-pane-file-local-to-right")
@@ -274,7 +287,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 	press("secondary-picker")
 	press("secondary-session-2")
 	waitKey("secondary-path")
-	call("act", map[string]any{"key": "secondary-path", "action": "setValue", "text": filepath.ToSlash(leftDir)})
+	setPath("secondary-path", filepath.ToSlash(leftDir))
 	press("secondary-refresh")
 	waitKey("secondary-file-left.txt")
 	// The right pane may also be a local session while the left stays remote.
@@ -294,7 +307,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitKey("remote-dir")
-	call("act", map[string]any{"key": "remote-dir", "action": "setValue", "text": localDir})
+	setPath("remote-dir", localDir)
 	press("file-refresh")
 	waitKey("file-local-upload.txt")
 	press("secondary-file-left.txt")
