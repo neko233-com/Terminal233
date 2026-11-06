@@ -799,4 +799,46 @@ func TestDesktopRemotePanes(t *testing.T) {
 		waitKey("terminal-search-next")
 		press("terminal-search-close")
 	}
+	// Real-time input in focus mode is sent to the other workspace terminals.
+	press("toggle-broadcast")
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(waitKey("toggle-broadcast")["description"]), "关闭广播输入") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(waitKey("toggle-broadcast")["description"]), "关闭广播输入") {
+		t.Fatal("broadcast did not enable")
+	}
+	result := call("tree", nil)["result"].(map[string]any)
+	var terminalID string
+	for _, entry := range result["nodes"].([]any) {
+		node := entry.(map[string]any)
+		if node["label"] == "终端：fixture-2" {
+			terminalID, _ = node["id"].(string)
+			break
+		}
+	}
+	if terminalID == "" {
+		t.Fatal("focused broadcast terminal not found")
+	}
+	call("act", map[string]any{"id": terminalID, "action": "focus"})
+	call("input", map[string]any{"events": []any{map[string]any{"type": "text", "text": "echo NEKO_BROADCAST_TEST"}, map[string]any{"type": "key", "key": "Enter"}}})
+	for _, session := range []string{"16", "17"} {
+		press("group-focus-" + session)
+		waitSelected("group-focus-" + session)
+		press("terminal-search-toggle")
+		setPath("terminal-search-input", "NEKO_BROADCAST_TEST")
+		waitKey("terminal-search-next")
+		press("terminal-search-close")
+	}
+	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_BROADCAST"); capturePath != "" {
+		result := call("capture", nil)["result"].(map[string]any)
+		png, decodeErr := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if writeErr := os.WriteFile(capturePath, png, 0600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	press("toggle-broadcast")
 }

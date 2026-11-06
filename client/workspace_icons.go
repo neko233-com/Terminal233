@@ -24,6 +24,7 @@ var (
 	editIcon        = workspaceIcon(`<path d="m4 20 4-.8L19 8a2.1 2.1 0 0 0-3-3L5 16zM14 7l3 3"/>`)
 	trashIcon       = workspaceIcon(`<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"/>`)
 	plusIcon        = workspaceIcon(`<path d="M12 4v16M4 12h16"/>`)
+	broadcastIcon   = workspaceIcon(`<circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 12h10M7 11l10-5M7 13l10 5"/>`)
 	closeIcon       = workspaceIcon(`<path d="m6 6 12 12M18 6 6 18"/>`)
 	settingsIcon    = workspaceIcon(`<path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M19 5l-1.4 1.4M6.4 17.6 5 19"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="7"/>`)
 	moreIcon        = workspaceIcon(`<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>`)

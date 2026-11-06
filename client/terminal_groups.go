@@ -15,6 +15,7 @@ type terminalGroup struct {
 	members                   []int
 	focused                   int
 	grid                      bool
+	broadcast                 bool
 	showAdd                   bool
 	renameOpen                bool
 	renameDraft, renameStatus string
@@ -190,6 +191,7 @@ func (d *desktop) detachGroupSession(id int) int {
 	if g == nil {
 		return 0
 	}
+	g.broadcast = false
 	index := 0
 	for i, member := range g.members {
 		if member == id {
@@ -262,6 +264,7 @@ func (d *desktop) addTerminalGroupMember(group *terminalGroup, id int) error {
 	if !found {
 		return errors.New("会话已结束或不存在")
 	}
+	group.broadcast = false
 	group.members = append(group.members, id)
 	group.focused = id
 	d.selectSession(id)

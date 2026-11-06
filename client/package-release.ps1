@@ -20,6 +20,8 @@ try {
     & task build:server:linux-amd64 build:server:linux-arm64
     if ($LASTEXITCODE -ne 0) { throw 'Linux server build failed.' }
 } finally { Pop-Location }
+$clientExe = Join-Path $repo 'build\release-windows\windows-amd64\Terminal233.exe'
+if ((& $clientExe --verify-broadcast | Out-String).Trim() -ne 'broadcast-input: available' -or $LASTEXITCODE -ne 0) { throw 'Packaged broadcast support verification failed.' }
 foreach ($target in @(
     @{ Path='build\release-windows\windows-amd64\Terminal233.exe'; OS='windows'; Arch='amd64' },
     @{ Path='build\linux-amd64\terminal233-server'; OS='linux'; Arch='amd64' },

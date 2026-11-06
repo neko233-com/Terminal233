@@ -8,12 +8,12 @@ tasks:
   test:
     desc: 运行正在迁移的 Go 客户端与同步服务测试
     cmds:
-      - go -C client test -p 1 -count 1 ./...
+      - go run client/tools/mygooverlay/main.go go -C client test -p 1 -count 1 ./...
       - go -C server test -p 1 -count 1 ./...
   build:client:
     desc: 编译 MyGo 原生客户端
     cmds:
-      - go -C client tool mygo build -skip-installer -o ../build/mygo
+      - go run client/tools/mygooverlay/main.go go -C client tool mygo build -skip-installer -o ../build/mygo
   build:server:
     desc: 编译同步服务
     cmds:
@@ -33,7 +33,7 @@ tasks:
   package:windows:local:
     desc: 生成未签名 Windows 安装包
     cmds:
-      - go -C client tool mygo build -platform windows/amd64 -o ../build/release-windows
+      - go run client/tools/mygooverlay/main.go go -C client tool mygo build -platform windows/amd64 -o ../build/release-windows
   build:server:linux-amd64:
     desc: 构建 Linux amd64 同步服务
     env:

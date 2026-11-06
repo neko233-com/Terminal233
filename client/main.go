@@ -766,6 +766,16 @@ func (d *desktop) view(c *ui.Context) {
 							d.toggleSplit()
 						}
 						if group := d.terminalGroupFor(d.currentSession); group != nil {
+							broadcastLabel := "广播输入到工作区"
+							if group.broadcast {
+								broadcastLabel = "关闭广播输入"
+							}
+							if terminalActionButton(c, "toggle-broadcast", broadcastLabel, broadcastIcon, group.broadcast, d.busy || len(group.members) < 2).Clicked() {
+								d.toggleGroupBroadcast(group)
+							}
+							if group.broadcast {
+								ui.Text(c, fmt.Sprintf("广播 · %d", len(group.members))).FontSize(12).TextColor(t.Accent)
+							}
 							d.groupAddButton(c, group)
 						}
 						label := "打开文件面板"
@@ -1079,14 +1089,23 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.102"
+const version = "0.3.103"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
 	showVersion := flag.Bool("version", false, "显示版本")
+	checkBroadcast := flag.Bool("verify-broadcast", false, "检查广播输入构建支持")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("Terminal233 " + version)
+		return
+	}
+	if *checkBroadcast {
+		if _, ok := any((*terminal.Terminal)(nil)).(broadcastTerminal); !ok {
+			fmt.Fprintln(os.Stderr, "broadcast-input: unavailable")
+			os.Exit(1)
+		}
+		fmt.Println("broadcast-input: available")
 		return
 	}
 	d := &desktop{settings: connectionSettings{Port: "22"}, cloudURL: defaultCloudURL, forwardLocalPort: "0", forwardHost: "127.0.0.1", teamInviteHours: "24", teamInviteUses: "1"}

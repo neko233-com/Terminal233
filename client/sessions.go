@@ -166,6 +166,7 @@ func (d *desktop) addSession(term *terminal.Terminal, shell *remoteShell, active
 	}
 	d.nextSession++
 	s := &workspaceSession{id: d.nextSession, label: label, term: term, shell: shell, active: active}
+	d.bindTerminalBroadcast(s)
 	if shell != nil {
 		s.fileDir = "."
 	} else {

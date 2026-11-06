@@ -26,6 +26,7 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	temp := t.TempDir()
 	serverBinary := filepath.Join(temp, "sync-server.exe")
 	buildServer := exec.Command("go", "-C", "../server", "build", "-p", "1", "-o", serverBinary, "./cmd/server")
+	buildServer.Env = append(os.Environ(), "GOFLAGS=-p=1") // The server is a separate module.
 	if output, err := buildServer.CombinedOutput(); err != nil {
 		t.Fatalf("build server: %v %s", err, output)
 	}

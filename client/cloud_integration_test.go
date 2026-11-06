@@ -32,6 +32,7 @@ func TestCloudAgainstGoServer(t *testing.T) {
 		binary += ".exe"
 	}
 	build := exec.Command("go", "-C", "../server", "build", "-p", "1", "-o", binary, "./cmd/server")
+	build.Env = append(os.Environ(), "GOFLAGS=-p=1") // The server is a separate module.
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build server: %v %s", err, output)
 	}

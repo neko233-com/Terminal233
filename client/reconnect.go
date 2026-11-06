@@ -53,6 +53,10 @@ func (d *desktop) reconnectCurrentSession() {
 				// A new terminal has no old scrollback; discard its old search.
 				s.terminalSearchOpen, s.terminalSearchText = false, ""
 				s.term, s.shell, s.files, s.refreshPending = term, shell, nil, false
+				if group := d.terminalGroupFor(s.id); group != nil {
+					group.broadcast = false
+				}
+				d.bindTerminalBroadcast(s)
 				s.selectedFile, s.fileStatus = "", ""
 				s.lastTerminalDir = ""
 				if d.currentSession == id {
