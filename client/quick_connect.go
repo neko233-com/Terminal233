@@ -99,6 +99,7 @@ func (d *desktop) openQuickConnection() {
 	d.cloudFormSources = nil
 	d.cloudFormVersions = nil
 	d.quickConnect, d.profileGroup, d.profileLabel, d.profileTags, d.selectedProfile = "", "", "", "", ""
+	d.profileIdentityID = ""
 	d.fingerprint, d.expectedFingerprint = "", ""
 	d.changedFingerprint = ""
 	d.editConnection = true

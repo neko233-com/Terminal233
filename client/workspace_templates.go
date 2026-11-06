@@ -246,18 +246,6 @@ func updateWorkspaceTemplates(filename string, update func(*workspaceTemplatesFi
 	return saved, nil
 }
 
-func profileCredential(p profile) (connectionSettings, error) {
-	s := p.Settings
-	if p.EncryptedCredentials != "" {
-		password, passphrase, err := unprotectProfileCredentials(p.EncryptedCredentials, p.Settings)
-		if err != nil {
-			return connectionSettings{}, errors.New("无法解锁保存的主机凭据")
-		}
-		s.Password, s.Passphrase = password, passphrase
-	}
-	return s, nil
-}
-
 func profileMatchesEntry(p profile, e workspaceTemplateEntry) bool {
 	s := p.Settings
 	return p.Label == e.Label && p.Group == e.Group && s.Host == e.Host && s.Port == e.Port && s.User == e.User && s.KeyPath == e.KeyPath && s.Fingerprint == e.Fingerprint
@@ -307,8 +295,8 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 				if p.Settings.Host != e.Host || p.Settings.Port != e.Port || p.Settings.User != e.User || p.Settings.KeyPath != e.KeyPath || p.Settings.Fingerprint != e.Fingerprint {
 					continue
 				}
-				credentials, err := profileCredential(p)
-				durable := p.EncryptedCredentials != "" || (credentials.KeyPath != "" && credentials.Passphrase == "")
+				credentials, err := d.profileCredential(p)
+				durable := p.IdentityID != "" || p.EncryptedCredentials != "" || (credentials.KeyPath != "" && credentials.Passphrase == "")
 				if err == nil && durable && credentials.Password == s.active.Password && credentials.Passphrase == s.active.Passphrase && (credentials.KeyPath != "" || credentials.Password != "") {
 					candidates = append(candidates, p)
 				}

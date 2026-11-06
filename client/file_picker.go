@@ -119,6 +119,8 @@ func (d *desktop) pickLocalPath(kind string) {
 		}
 	case "key":
 		title, defaultPath = "选择 SSH 私钥", d.settings.KeyPath
+	case "identity-key":
+		title, defaultPath = "选择身份私钥", d.identityDraft.KeyPath
 	case "backup-open":
 		title, defaultPath = "选择加密备份", d.adminBackupPath
 	case "backup-save":
@@ -182,6 +184,10 @@ func (d *desktop) applyPickedPath(kind, selected string, err error) {
 		}
 		d.settings.KeyPath = selected
 		d.confirmDiscardConnection = false
+	case "identity-key":
+		if d.identityEditing != "" {
+			d.identityDraft.KeyPath = selected
+		}
 	case "backup-open", "backup-save":
 		d.adminBackupPath, d.adminConfirmRestore = selected, false
 	case "archive-open", "archive-save":

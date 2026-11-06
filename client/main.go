@@ -75,6 +75,11 @@ type desktop struct {
 	confirmCloudDelete                                                                      string
 	confirmCloudDeleteVersion                                                               string
 	profiles                                                                                []profile
+	identities                                                                              []savedIdentity
+	profileIdentityID                                                                       string
+	identityDraft                                                                           identityDraft
+	identityEditing, identityConfirmDelete                                                  string
+	identityStatus                                                                          string
 	profileGroups                                                                           []string
 	foldedGroups                                                                            map[string]bool
 	cloudFoldedGroups                                                                       map[string]bool
@@ -572,6 +577,11 @@ func (d *desktop) view(c *ui.Context) {
 						if navigationButton(c, "nav-snippets", "命令片段", d.workspace == "snippets").Clicked() {
 							d.workspace = "snippets"
 						}
+						if navigationButton(c, "nav-identities", "身份", d.workspace == "identities").Clicked() {
+							if d.closeConnectionForNavigation() {
+								d.workspace = "identities"
+							}
+						}
 						if navigationButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
 							d.workspace = "cloud"
 						}
@@ -904,6 +914,8 @@ func (d *desktop) view(c *ui.Context) {
 							d.forwardView(c)
 						case "snippets":
 							ui.Column(c).FillWidth().MaxWidth(680).Children(func() { d.quickCommandsSideView(c) })
+						case "identities":
+							d.identityView(c)
 						case "cloud":
 							ui.Text(c, "云端工作区").FontSize(22).Bold()
 							d.cloudView(c)
@@ -994,34 +1006,41 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 			ui.Text(c, "端口").FontSize(12).TextColor(c.Theme().TextMuted)
 			ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("22").OnChange(resetFingerprint).Width(78)
 		})
-		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "用户").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
-			ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint).Grow(1)
-		})
-		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "密码").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
-			ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().OnChange(markDraftChanged).Grow(1)
-		})
-		keyExpanded := d.showKeyOptions || d.settings.KeyPath != "" || d.settings.Passphrase != ""
-		if !keyExpanded {
-			if ui.Button(c.Key("key-options-toggle"), "使用私钥…").Clicked() {
-				d.showKeyOptions = true
-			}
+		if !d.settingsFromCloud {
+			d.identitySelector(c, markMetadataChanged)
+		}
+		if d.profileIdentityID != "" && !d.settingsFromCloud {
+			ui.Text(c, "用户名及凭据来自所选身份").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		} else {
-			if d.settings.KeyPath != "" {
-				ui.Text(c, "已配置私钥，连接时优先使用私钥。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-			}
-			ui.Text(c, "私钥文件（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
-			ui.Row(c).FillWidth().Gap(10).AlignItems(ui.End).Children(func() {
-				ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）").OnChange(markMetadataChanged).Grow(1)
-				if ui.Button(c.Key("pick-key"), "选择私钥文件…").Disabled(d.busy).Clicked() {
-					d.pickLocalPath("key")
-				}
+			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "用户").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
+				ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint).Grow(1)
 			})
-			ui.Text(c, "私钥口令（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
-			ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password().OnChange(markDraftChanged).FillWidth()
-			if ui.Button(c.Key("key-options-close"), "收起私钥选项").Disabled(d.settings.KeyPath != "" || d.settings.Passphrase != "").Tooltip("清空私钥和口令后可收起").Clicked() {
-				d.showKeyOptions = false
+			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "密码").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
+				ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().OnChange(markDraftChanged).Grow(1)
+			})
+			keyExpanded := d.showKeyOptions || d.settings.KeyPath != "" || d.settings.Passphrase != ""
+			if !keyExpanded {
+				if ui.Button(c.Key("key-options-toggle"), "使用私钥…").Clicked() {
+					d.showKeyOptions = true
+				}
+			} else {
+				if d.settings.KeyPath != "" {
+					ui.Text(c, "已配置私钥，连接时优先使用私钥。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+				}
+				ui.Text(c, "私钥文件（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
+				ui.Row(c).FillWidth().Gap(10).AlignItems(ui.End).Children(func() {
+					ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）").OnChange(markMetadataChanged).Grow(1)
+					if ui.Button(c.Key("pick-key"), "选择私钥文件…").Disabled(d.busy).Clicked() {
+						d.pickLocalPath("key")
+					}
+				})
+				ui.Text(c, "私钥口令（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
+				ui.TextInput(c.Key("passphrase"), &d.settings.Passphrase).Label("私钥口令").Placeholder("私钥口令（可选）").Password().OnChange(markDraftChanged).FillWidth()
+				if ui.Button(c.Key("key-options-close"), "收起私钥选项").Disabled(d.settings.KeyPath != "" || d.settings.Passphrase != "").Tooltip("清空私钥和口令后可收起").Clicked() {
+					d.showKeyOptions = false
+				}
 			}
 		}
 	})
@@ -1124,7 +1143,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.112"
+const version = "0.3.113"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

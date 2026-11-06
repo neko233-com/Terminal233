@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gofrs/flock"
 )
@@ -19,12 +20,14 @@ type diskProfile struct {
 	Favorite                                             bool     `json:",omitempty"`
 	LastConnected                                        int64    `json:",omitempty"`
 	Tags                                                 []string `json:",omitempty"`
+	IdentityID, IdentityBinding                          string   `json:",omitempty"`
 }
 
 type diskProfiles struct {
-	Version int
-	Items   []diskProfile
-	Groups  []string `json:",omitempty"`
+	Version    int
+	Items      []diskProfile
+	Groups     []string        `json:",omitempty"`
+	Identities []savedIdentity `json:",omitempty"`
 }
 
 func (d *desktop) loadProfiles(path string) error {
@@ -34,6 +37,7 @@ func (d *desktop) loadProfiles(path string) error {
 		d.confirmProfileDelete = ""
 		d.checkedProfiles, d.confirmProfileBatchDelete = nil, false
 		d.profiles, d.nextProfileID = nil, 0
+		d.identities = nil
 		d.profileGroups, d.confirmGroupDelete = nil, false
 		d.profileFormat, d.foldedGroups = 1, nil
 		d.profilePath = path
@@ -52,8 +56,23 @@ func (d *desktop) loadProfiles(path string) error {
 	if err := json.Unmarshal(data, &saved); err != nil {
 		return fmt.Errorf("连接列表格式无效：%w", err)
 	}
-	if saved.Version < 1 || saved.Version > 4 || len(saved.Items) > 10000 || len(saved.Groups) > 10000 {
+	if saved.Version < 1 || saved.Version > 5 || len(saved.Items) > 10000 || len(saved.Groups) > 10000 || len(saved.Identities) > maxSavedIdentities || (saved.Version < 5 && len(saved.Identities) != 0) {
 		return errors.New("连接列表版本或数量无效")
+	}
+	identityByID := make(map[string]savedIdentity, len(saved.Identities))
+	for _, identity := range saved.Identities {
+		if err := validateSavedIdentity(identity); err != nil {
+			return err
+		}
+		if _, exists := identityByID[identity.ID]; exists {
+			return errors.New("身份标识重复")
+		}
+		for _, prior := range identityByID {
+			if strings.EqualFold(prior.Name, identity.Name) {
+				return errors.New("身份名称重复")
+			}
+		}
+		identityByID[identity.ID] = identity
 	}
 	profiles := make([]profile, 0, len(saved.Items))
 	for i, p := range saved.Items {
@@ -67,9 +86,16 @@ func (d *desktop) loadProfiles(path string) error {
 		if (saved.Version < 4 && len(p.Tags) > 0) || !validStoredProfileTags(p.Tags) {
 			return errors.New("连接标签格式无效")
 		}
-		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Settings: settings, EncryptedCredentials: p.EncryptedCredentials})
+		if p.IdentityID != "" || p.IdentityBinding != "" {
+			identity, exists := identityByID[p.IdentityID]
+			if saved.Version < 5 || !exists || p.IdentityBinding == "" || len(p.IdentityBinding) > 65536 || p.EncryptedCredentials != "" || settings.User != identity.User || settings.KeyPath != identity.KeyPath {
+				return errors.New("主机身份引用无效")
+			}
+		}
+		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Settings: settings, EncryptedCredentials: p.EncryptedCredentials, IdentityID: p.IdentityID, IdentityBinding: p.IdentityBinding})
 	}
 	d.profiles, d.nextProfileID, d.profilePath = profiles, len(profiles), path
+	d.identities = saved.Identities
 	d.profileSelectionAnchor = ""
 	d.profileGroups, d.confirmGroupDelete = saved.Groups, false
 	d.profileFormat, d.foldedGroups = saved.Version, nil
@@ -94,7 +120,10 @@ func (d *desktop) saveProfiles() error {
 	if d.profileFormat >= 3 {
 		version = d.profileFormat
 	}
-	saved := diskProfiles{Version: version, Items: make([]diskProfile, 0, len(d.profiles)), Groups: d.profileGroups}
+	saved := diskProfiles{Version: version, Items: make([]diskProfile, 0, len(d.profiles)), Groups: d.profileGroups, Identities: d.identities}
+	if len(d.identities) > 0 {
+		version = max(version, 5)
+	}
 	for _, p := range d.profiles {
 		s := p.Settings
 		if p.EncryptedCredentials != "" {
@@ -104,9 +133,12 @@ func (d *desktop) saveProfiles() error {
 			return errors.New("连接标签格式无效")
 		}
 		if len(p.Tags) > 0 {
-			version = 4
+			version = max(version, 4)
 		}
-		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint, EncryptedCredentials: p.EncryptedCredentials})
+		if p.IdentityID != "" {
+			version = max(version, 5)
+		}
+		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint, EncryptedCredentials: p.EncryptedCredentials, IdentityID: p.IdentityID, IdentityBinding: p.IdentityBinding})
 	}
 	saved.Version = version
 	data, err := json.MarshalIndent(saved, "", "  ")

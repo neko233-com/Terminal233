@@ -21,13 +21,14 @@ func workspaceSidebarWidth(width float32) float32 {
 }
 
 type profile struct {
-	ID                   profileID
-	Group, Label         string
-	Tags                 []string
-	Favorite             bool
-	LastConnected        int64
-	Settings             connectionSettings
-	EncryptedCredentials string
+	ID                          profileID
+	Group, Label                string
+	Tags                        []string
+	Favorite                    bool
+	LastConnected               int64
+	Settings                    connectionSettings
+	EncryptedCredentials        string
+	IdentityID, IdentityBinding string
 }
 
 func (d *desktop) addProfile() error {
@@ -58,7 +59,7 @@ func (d *desktop) addProfile() error {
 		if safe.Fingerprint == "" && old.Settings.Host == safe.Host && old.Settings.Port == safe.Port && old.Settings.User == safe.User {
 			safe.Fingerprint = old.Settings.Fingerprint
 		}
-		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: label, Tags: tags, Favorite: old.Favorite, LastConnected: old.LastConnected, Settings: safe, EncryptedCredentials: old.EncryptedCredentials}
+		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: label, Tags: tags, Favorite: old.Favorite, LastConnected: old.LastConnected, Settings: safe, EncryptedCredentials: old.EncryptedCredentials, IdentityID: old.IdentityID, IdentityBinding: old.IdentityBinding}
 		return nil
 	}
 	d.nextProfileID++
@@ -102,14 +103,12 @@ func (d *desktop) loadProfile(p profile) {
 	d.cloudFormSources = nil
 	d.cloudFormVersions = nil
 	d.settings = p.Settings
+	d.profileIdentityID = p.IdentityID
 	d.profileSecretError = false
-	if p.EncryptedCredentials != "" {
-		password, passphrase, err := unprotectProfileCredentials(p.EncryptedCredentials, p.Settings)
-		if err != nil {
-			d.profileSecretError = true
-		} else {
-			d.settings.Password, d.settings.Passphrase = password, passphrase
-		}
+	if settings, err := d.profileCredential(p); err != nil {
+		d.profileSecretError = true
+	} else {
+		d.settings = settings
 	}
 	d.profileGroup = p.Group
 	d.profileLabel = p.Label
@@ -217,6 +216,7 @@ func (d *desktop) profileView(c *ui.Context) {
 					return
 				}
 				d.settings = connectionSettings{Port: "22"}
+				d.profileIdentityID = ""
 				d.profileTagsCaretPending, d.profileGroupCaretPending = false, false
 				d.profileSecretError = false
 				d.showKeyOptions = false
@@ -928,6 +928,7 @@ func (d *desktop) copyCheckedProfiles() {
 		p.Favorite, p.LastConnected = false, 0
 		p.Settings.Password, p.Settings.Passphrase = "", ""
 		p.EncryptedCredentials = ""
+		p.IdentityID, p.IdentityBinding = "", ""
 		items = append(items, p)
 	}
 	d.profiles = items

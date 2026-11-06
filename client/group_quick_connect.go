@@ -76,7 +76,7 @@ func (d *desktop) groupQuickTargets(group string, cloud bool) ([]workspaceRestor
 			if !groupWithin(p.Group, group) {
 				continue
 			}
-			settings, err := profileCredential(p)
+			settings, err := d.profileCredential(p)
 			if err == nil {
 				_, err = settings.address()
 			}

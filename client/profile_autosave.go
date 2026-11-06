@@ -14,7 +14,7 @@ const profileAutosaveDelay = 800 * time.Millisecond
 // erase that host's independently stored credentials.
 func (d *desktop) clearCloudFormCredentials() {
 	for _, p := range d.profiles {
-		if string(p.ID) == d.selectedProfile && p.EncryptedCredentials != "" {
+		if string(p.ID) == d.selectedProfile && (p.EncryptedCredentials != "" || p.IdentityID != "") {
 			d.profileSecretError = true
 			break
 		}
@@ -30,10 +30,22 @@ func (d *desktop) saveCurrentProfile() error {
 	if d.profileSecretError {
 		return errors.New("无法解锁原凭据，请重新输入密码或口令后保存")
 	}
-	var protected string
+	var protected, binding string
 	var err error
 	if d.profilePath != "" {
-		protected, err = protectProfileCredentials(d.settings)
+		if d.profileIdentityID != "" {
+			i, ok := d.identityByID(d.profileIdentityID)
+			if !ok || d.settings.User != i.User || d.settings.KeyPath != i.KeyPath {
+				return errors.New("身份已更改，请重新选择")
+			}
+			password, phrase, unlockErr := identityCredentials(i)
+			if unlockErr != nil || password != d.settings.Password || phrase != d.settings.Passphrase {
+				return errors.New("身份凭据已更改，请重新选择")
+			}
+			binding, err = sealIdentityBinding(d.settings, i.ID)
+		} else {
+			protected, err = protectProfileCredentials(d.settings)
+		}
 		if err != nil {
 			return err
 		}
@@ -59,6 +71,7 @@ func (d *desktop) saveCurrentProfile() error {
 		for i := range d.profiles {
 			if string(d.profiles[i].ID) == d.selectedProfile {
 				d.profiles[i].EncryptedCredentials = protected
+				d.profiles[i].IdentityID, d.profiles[i].IdentityBinding = d.profileIdentityID, binding
 				break
 			}
 		}

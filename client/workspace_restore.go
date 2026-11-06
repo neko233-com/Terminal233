@@ -64,7 +64,7 @@ func (d *desktop) resolveWorkspace(w savedWorkspace) ([]workspaceRestoreTarget, 
 			if len(matches) != 1 {
 				return nil, fmt.Errorf("第 %d 个本机主机已修改或不存在，请重新保存工作区", i+1)
 			}
-			settings, err := profileCredential(matches[0])
+			settings, err := d.profileCredential(matches[0])
 			if err != nil {
 				return nil, fmt.Errorf("第 %d 个主机：%w", i+1, err)
 			}

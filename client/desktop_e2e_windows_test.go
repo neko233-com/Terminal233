@@ -2300,4 +2300,104 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "分组连接完成：1 个已连接") || attempts.Load() != beforeAttempts+1 {
 		t.Fatal("native group quick connection failed")
 	}
+	// Create an encrypted reusable identity and attach it to a new host.
+	navigate("nav-identities")
+	call("act", map[string]any{"key": "identity-new", "action": "press"})
+	for key, value := range map[string]string{"identity-name": "测试身份", "identity-user": settings.User, "identity-password": settings.Password} {
+		call("act", map[string]any{"key": key, "action": "setValue", "text": value})
+	}
+	call("act", map[string]any{"key": "identity-save", "action": "press"})
+	var identityID string
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, readErr := os.ReadFile(filepath.Join(configDir, "NekoSSH", "profiles.json"))
+		var disk diskProfiles
+		if readErr == nil && json.Unmarshal(data, &disk) == nil && len(disk.Identities) == 1 {
+			if strings.Contains(string(data), settings.Password) {
+				t.Fatal("identity password persisted as plaintext")
+			}
+			identityID = disk.Identities[0].ID
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if identityID == "" {
+		t.Fatal("identity was not saved")
+	}
+	navigate("nav-connections")
+	call("act", map[string]any{"key": "connection-new", "action": "press"})
+	call("act", map[string]any{"key": "host", "action": "setValue", "text": settings.Host})
+	call("act", map[string]any{"key": "port", "action": "setValue", "text": settings.Port})
+	call("act", map[string]any{"key": "host-identity", "action": "press"})
+	var identityX, identityY float64
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["label"] == "身份 · 测试身份" {
+				bounds := node["bounds"].(map[string]any)
+				identityX = bounds["x"].(float64) + bounds["width"].(float64)/2
+				identityY = bounds["y"].(float64) + bounds["height"].(float64)/2
+				break
+			}
+		}
+		if identityX != 0 && identityY != 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if identityX == 0 || identityY == 0 {
+		t.Fatal("identity selection option missing")
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "x": identityX, "y": identityY}}})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, readErr := os.ReadFile(filepath.Join(configDir, "NekoSSH", "profiles.json"))
+		var disk diskProfiles
+		if readErr == nil && json.Unmarshal(data, &disk) == nil {
+			for _, item := range disk.Items {
+				if item.IdentityID == identityID && item.IdentityBinding != "" {
+					identityX = -1
+					break
+				}
+			}
+		}
+		if identityX == -1 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if identityX != -1 {
+		t.Fatal("host identity association was not saved")
+	}
+	var identities desktop
+	if err := identities.loadProfiles(filepath.Join(configDir, "NekoSSH", "profiles.json")); err != nil {
+		t.Fatal(err)
+	}
+	resolved := false
+	for _, p := range identities.profiles {
+		if p.IdentityID == identityID {
+			s, err := identities.profileCredential(p)
+			if err == nil && s.Password == settings.Password {
+				resolved = true
+			}
+		}
+	}
+	if !resolved {
+		t.Fatal("saved host did not resolve its shared identity")
+	}
+	beforeAttempts = attempts.Load()
+	call("act", map[string]any{"key": "connect", "action": "press"})
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && attempts.Load() == beforeAttempts {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "确认指纹并连接") {
+			call("act", map[string]any{"key": "connect", "action": "press"})
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if attempts.Load() != beforeAttempts+1 {
+		t.Fatal("shared identity did not authenticate to the isolated SSH fixture")
+	}
 }
