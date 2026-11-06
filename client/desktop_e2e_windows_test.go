@@ -81,6 +81,21 @@ func TestDesktopNativeWindow(t *testing.T) {
 		}
 		return answer
 	}
+	navigate := func(key string) {
+		t.Helper()
+		if !strings.Contains(fmt.Sprint(call("tree")), "key:"+key+" ") {
+			call("act", map[string]any{"key": "toggle-sidebar", "action": "press"})
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Contains(fmt.Sprint(call("tree")), "key:"+key+" ") {
+				call("act", map[string]any{"key": key, "action": "press"})
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("navigation control %s did not appear", key)
+	}
 	var windows map[string]any
 	for time.Now().Before(deadline) {
 		windows = call("windows")
@@ -184,7 +199,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if strings.Contains(fmt.Sprint(call("tree")), "snippet-select-"+snippetID) {
 		t.Fatal("confirmed snippet deletion did not complete")
 	}
-	call("act", map[string]any{"key": "nav-cloud", "action": "press"})
+	navigate("nav-cloud")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -208,7 +223,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "team-register") || !strings.Contains(tree, "team-invite-input") {
 		t.Fatal("invitation registration form did not open")
 	}
-	call("act", map[string]any{"key": "nav-files", "action": "press"})
+	navigate("nav-files")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if strings.Contains(fmt.Sprint(call("tree")), "files-open-connections") {
@@ -293,7 +308,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if attempts.Load() != 1 {
 		t.Fatalf("authentication attempts: %d", attempts.Load())
 	}
-	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	navigate("nav-terminal")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if strings.Contains(fmt.Sprint(call("tree")), "toggle-split") {
@@ -343,7 +358,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "CPU 50.0%") || !strings.Contains(tree, "KiB/s") {
 		t.Fatalf("SSH monitor rates did not update: %s", tree)
 	}
-	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	navigate("nav-connections")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -355,7 +370,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "profile-search") {
 		t.Fatal("could not leave terminal workspace")
 	}
-	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	navigate("nav-terminal")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -383,7 +398,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 		}
 	}()
 	_, targetPort, _ := net.SplitHostPort(forwardTarget.Addr().String())
-	call("act", map[string]any{"key": "nav-forward", "action": "press"})
+	navigate("nav-forward")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -441,7 +456,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatal("stopped forward still listening")
 	}
 	// Simulate a dropped SSH shell and reconnect the same tab.
-	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	navigate("nav-terminal")
 	deadline = time.Now().Add(5 * time.Second)
 	var sshTerminalID string
 	for time.Now().Before(deadline) {
@@ -486,7 +501,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "已重新连接") || attempts.Load() != 2 {
 		t.Fatalf("reconnect failed: %s", tree)
 	}
-	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	navigate("nav-connections")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -668,7 +683,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	call("act", map[string]any{"id": localTerminalID, "action": "focus"})
 	command := "Set-Location -LiteralPath '" + strings.ReplaceAll(followDir, "'", "''") + "'"
 	call("input", map[string]any{"events": []any{map[string]any{"type": "text", "text": command}, map[string]any{"type": "key", "key": "Enter"}}})
-	call("act", map[string]any{"key": "nav-files", "action": "press"})
+	navigate("nav-files")
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1004,7 +1019,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	call("act", map[string]any{"key": "file-back", "action": "press"})
 	waitDirectory(localDirectory, "renamed.txt")
-	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	navigate("nav-terminal")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1069,7 +1084,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "当前会话：alice@") {
 		t.Fatalf("could not activate SSH tab for transfer: %s", tree)
 	}
-	call("act", map[string]any{"key": "nav-files", "action": "press"})
+	navigate("nav-files")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1382,7 +1397,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(transferDir, "background.bin")); !os.IsNotExist(err) {
 		t.Fatalf("background cancellation left an output file: %v", err)
 	}
-	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	navigate("nav-terminal")
 	deadline = time.Now().Add(5 * time.Second)
 	sshTabReady := false
 	for time.Now().Before(deadline) {
@@ -1416,7 +1431,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "当前会话：alice@") {
 		t.Fatal("could not return to the SSH tab after cancelling the transfer")
 	}
-	call("act", map[string]any{"key": "nav-files", "action": "press"})
+	navigate("nav-files")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1428,7 +1443,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "传输已取消") {
 		t.Fatalf("cancelled result was not kept on the original session: %s", tree)
 	}
-	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	navigate("nav-terminal")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1564,7 +1579,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if strings.Contains(tree, "session-1") || !strings.Contains(tree, "session-2") || !strings.Contains(tree, "session-3") {
 		t.Fatalf("closing inactive SSH tab changed other sessions: %s", tree)
 	}
-	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	navigate("nav-connections")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1659,7 +1674,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	// Save a key path on the already trusted profile, then connect from the
 	// list. The test server accepts only the temporary public key above.
-	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	navigate("nav-connections")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1700,7 +1715,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "连接已保存") {
 		t.Fatalf("key profile was not saved: %s", tree)
 	}
-	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	navigate("nav-connections")
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

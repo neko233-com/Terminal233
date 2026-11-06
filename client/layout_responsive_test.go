@@ -126,6 +126,42 @@ func TestTerminalToolbarUsesAccessibleCompactActions(t *testing.T) {
 	}
 }
 
+func TestTerminalFocusLayoutKeepsNavigationAndPreference(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	for _, size := range [][2]int{{640, 480}, {1280, 800}} {
+		d := &desktop{workspace: "terminal", term: term, currentSession: 1, sessions: []*workspaceSession{{id: 1, label: "local", term: term}}}
+		view := ui.NewTester(d.view, size[0], size[1])
+		terminalRect, ok := view.Find("Terminal")
+		if !ok || terminalRect.X > 1 || view.HasText("工作区") {
+			t.Fatalf("terminal should start with the sidebar hidden: %+v", terminalRect)
+		}
+		if err := view.Click("展开侧栏"); err != nil {
+			t.Fatal(err)
+		}
+		if !view.HasText("工作区") || d.sidebarCollapsed || !d.terminalNavigationOpen {
+			t.Fatal("terminal navigation did not open independently of the saved sidebar preference")
+		}
+		if err := view.Click("收起侧栏"); err != nil {
+			t.Fatal(err)
+		}
+		if d.sidebarCollapsed || d.terminalNavigationOpen || view.HasText("工作区") {
+			t.Fatal("closing terminal navigation changed the saved sidebar preference")
+		}
+		if err := view.Click("主机"); err != nil {
+			t.Fatal(err)
+		}
+		if d.workspace != "connections" || !view.HasText("工作区") {
+			t.Fatal("hosts tab did not restore normal navigation")
+		}
+	}
+}
+
 func TestWideWorkspaceTabsSwitchBetweenHostsAndSession(t *testing.T) {
 	left, right := net.Pipe()
 	defer right.Close()
@@ -206,6 +242,9 @@ func TestSplitLayoutChoiceAndPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := ui.NewTester(d.view, 1500, 900)
+	if err := view.Click("展开侧栏"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("终端设置"); err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,7 @@
 {
   "name": "Terminal233",
   "identifier": "com.neko233.terminal233",
-  "version": "0.3.73",
+  "version": "0.3.74",
   "windows": {
     "installDirName": "nekossh",
     "installerInclude": "installer.nsh"

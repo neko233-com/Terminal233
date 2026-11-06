@@ -34,6 +34,7 @@ type desktop struct {
 	showFileSessionPicker, fileReturnAfterConnect                                           bool
 	fileSessionSearch                                                                       string
 	sidebarCollapsed                                                                        bool
+	terminalNavigationOpen                                                                  bool
 	sessions                                                                                []*workspaceSession
 	currentSession, nextSession, splitSession, splitFirstSession, splitFocusedSession       int
 	pendingTerminalFocus                                                                    int
@@ -193,6 +194,13 @@ func terminalActionButton(c *ui.Context, key, label string, icon *ui.SVG, active
 	return button
 }
 
+func (d *desktop) sidebarVisible() bool {
+	if d.workspace == "terminal" && d.term != nil {
+		return d.terminalNavigationOpen
+	}
+	return !d.sidebarCollapsed
+}
+
 func (d *desktop) workspaceShortcuts(c *ui.Context) {
 	mods := ui.Cmd | ui.Shift
 	switch {
@@ -327,6 +335,9 @@ func (d *desktop) connect() {
 
 func (d *desktop) view(c *ui.Context) {
 	d.workspaceShortcuts(c)
+	if d.workspace != "terminal" {
+		d.terminalNavigationOpen = false
+	}
 	if d.workspace != "connections" && d.workspace != "" {
 		d.fileReturnAfterConnect = false
 	}
@@ -353,7 +364,6 @@ func (d *desktop) view(c *ui.Context) {
 		d.followReportedDirectory(false)
 	}
 	width, height := c.Size()
-	compactAuxiliaryPanels := height < 650 || (width < 940 && height < 1000)
 	if d.lightTheme {
 		c.SetTheme(workspaceLightTheme)
 	} else {
@@ -364,20 +374,26 @@ func (d *desktop) view(c *ui.Context) {
 		ui.Row(c).FillWidth().Padding(10, 16).Gap(12).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 			ui.Text(c, "NekoSSH").FontSize(20).Bold()
 			sidebarLabel := "收起侧栏"
-			if d.sidebarCollapsed {
+			if !d.sidebarVisible() {
 				sidebarLabel = "展开侧栏"
 			}
 			if ui.Button(c.Key("toggle-sidebar"), "☰").Label(sidebarLabel).Tooltip(sidebarLabel).Width(38).Clicked() {
-				d.sidebarCollapsed = !d.sidebarCollapsed
-				d.savePreference("sidebar", d.sidebarCollapsed)
+				if d.workspace == "terminal" && d.term != nil {
+					d.terminalNavigationOpen = !d.terminalNavigationOpen
+				} else {
+					d.sidebarCollapsed = !d.sidebarCollapsed
+					d.savePreference("sidebar", d.sidebarCollapsed)
+				}
 			}
 			if d.preferencesStatus != "" {
 				ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).Wrap()
 			}
-			if width >= 1100 && len(d.sessions) > 0 {
+			if len(d.sessions) > 0 {
 				if workspaceButton(c, "workspace-hosts-tab", "主机", d.workspace == "" || d.workspace == "connections").Clicked() {
 					d.workspace = "connections"
 				}
+			}
+			if width >= 1100 && len(d.sessions) > 0 {
 				ui.ScrollHorizontal(c).Grow(1).Gap(6).Children(func() { d.sessionTabs(c) })
 			} else {
 				ui.Box(c).Grow(1)
@@ -390,13 +406,19 @@ func (d *desktop) view(c *ui.Context) {
 				d.lightTheme = !d.lightTheme
 				d.savePreference("light", d.lightTheme)
 			}
-			ui.Button(c.Key("local-terminal"), "本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
-			if ui.Button(c.Key("disconnect"), "关闭当前会话").Disabled(d.busy || d.term == nil).Clicked() {
+			terminalActionButton(c, "local-terminal", "本机终端", plusIcon, false, d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
+			if terminalActionButton(c, "disconnect", "关闭当前会话", closeIcon, false, d.busy || d.term == nil).Clicked() {
 				d.closeCurrentSession()
 			}
 		})
+		showSidebar := d.sidebarVisible()
+		workspaceWidth := width
+		if showSidebar {
+			workspaceWidth -= workspaceSidebarWidth(width)
+		}
+		compactAuxiliaryPanels := height < 650 || (workspaceWidth < 940 && height < 1000)
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
-			if !d.sidebarCollapsed {
+			if showSidebar {
 				ui.Scroll(c).Width(workspaceSidebarWidth(width)).FillHeight().Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
 					ui.Column(c).Padding(16).Gap(8).Children(func() {
 						ui.Text(c, "工作区").FontSize(12).TextColor(t.TextMuted)
@@ -702,7 +724,7 @@ func (d *desktop) view(c *ui.Context) {
 							})
 						})
 					} else {
-						sideQuick := d.quickOpen && width >= 1100 && !compactAuxiliaryPanels
+						sideQuick := d.quickOpen && workspaceWidth >= 1100 && !compactAuxiliaryPanels
 						if d.monitorCancel != nil {
 							if width < 900 {
 								ui.ScrollHorizontal(c).Height(20).FillWidth().Children(func() { ui.Text(c, d.monitorStatus).FontSize(12) })
@@ -737,11 +759,11 @@ func (d *desktop) view(c *ui.Context) {
 						}
 						if sideQuick {
 							ui.Row(c).Grow(1).FillWidth().Children(func() {
-								ui.Column(c).Grow(1).FillHeight().Children(func() { d.terminalMainView(c, width-340, compactAuxiliaryPanels) })
+								ui.Column(c).Grow(1).FillHeight().Children(func() { d.terminalMainView(c, workspaceWidth-340, compactAuxiliaryPanels) })
 								ui.Scroll(c.Key("quick-side-scroll")).Label("快速命令面板").Width(340).FillHeight().Shrink(0).Background(t.Surface).BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() { d.quickCommandsSideView(c) })
 							})
 						} else {
-							d.terminalMainView(c, width, compactAuxiliaryPanels)
+							d.terminalMainView(c, workspaceWidth, compactAuxiliaryPanels)
 						}
 					}
 					return
@@ -922,7 +944,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.73"
+const version = "0.3.74"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

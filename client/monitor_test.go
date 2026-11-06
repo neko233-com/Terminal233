@@ -200,6 +200,9 @@ func TestMonitorStopsWhenLeavingTerminalWorkspace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &desktop{workspace: "terminal", term: term, currentSession: 1, monitorSession: 1, monitorCancel: cancel, monitorStatus: "old", sessions: []*workspaceSession{{id: 1, label: "test", term: term}}}
 	view := ui.NewTester(d.view, 1200, 900)
+	if err := view.Click("展开侧栏"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("云同步与团队"); err != nil {
 		t.Fatal(err)
 	}

@@ -152,6 +152,9 @@ func TestTerminalThemesPersistAndApplyToExistingAndNewSessions(t *testing.T) {
 	if color.R != workspaceTheme.Background.R || color.G != workspaceTheme.Background.G || color.B != workspaceTheme.Background.B {
 		t.Fatal("follow-interface theme did not apply to the existing terminal")
 	}
+	if err := view.Click("展开侧栏"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("终端设置"); err != nil {
 		t.Fatal(err)
 	}

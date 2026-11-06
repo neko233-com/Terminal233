@@ -21,6 +21,8 @@ var (
 	searchIcon      = workspaceIcon(`<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>`)
 	splitIcon       = workspaceIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>`)
 	monitorIcon     = workspaceIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M5 13h3l2-4 3 7 2-4h4"/>`)
+	plusIcon        = workspaceIcon(`<path d="M12 4v16M4 12h16"/>`)
+	closeIcon       = workspaceIcon(`<path d="m6 6 12 12M18 6 6 18"/>`)
 	navigationIcons = map[string]*ui.SVG{
 		"nav-connections": serverIcon,
 		"nav-terminal":    terminalIcon,
