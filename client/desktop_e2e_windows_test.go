@@ -674,7 +674,25 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatal("double-click did not stop saved rule")
 	}
 	call("act", map[string]any{"key": "forward-rule-delete-" + savedRule.ID, "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "确认删除") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	call("act", map[string]any{"key": "forward-rule-delete-" + savedRule.ID, "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		file, readErr := readForwardRules(filepath.Join(configDir, "NekoSSH", "forward-rules.json"))
+		if readErr == nil && len(file.Items) == 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if file, readErr := readForwardRules(filepath.Join(configDir, "NekoSSH", "forward-rules.json")); readErr != nil || len(file.Items) != 0 {
+		t.Fatal("saved rule was not deleted")
+	}
 	call("act", map[string]any{"key": "forward-temporary-toggle", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -720,12 +738,12 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "转发已停止") {
+		if strings.Contains(tree, "转发已停止") && !strings.Contains(tree, "key:forward-stop-0 ") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "转发已停止") {
+	if !strings.Contains(tree, "转发已停止") || strings.Contains(tree, "key:forward-stop-0 ") {
 		t.Fatalf("forward did not stop: %s", tree)
 	}
 	if conn, dialErr := net.DialTimeout("tcp", address, time.Second); dialErr == nil {
@@ -2418,20 +2436,27 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		result := call("tree")["result"].(map[string]any)
-		ready := false
+		ready, open := false, false
 		for _, value := range result["nodes"].([]any) {
 			node := value.(map[string]any)
+			if node["key"] == "identity-name" {
+				open = true
+			}
 			if node["key"] == "identity-new" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
 				ready = true
-				break
 			}
 		}
-		if ready {
+		if open {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		if ready {
+			call("act", map[string]any{"key": "identity-new", "action": "press"})
+		}
+		time.Sleep(150 * time.Millisecond)
 	}
-	call("act", map[string]any{"key": "identity-new", "action": "press"})
+	if !strings.Contains(fmt.Sprint(call("tree")), "key:identity-name ") {
+		t.Fatal("identity editor did not open")
+	}
 	for key, value := range map[string]string{"identity-name": "测试身份", "identity-user": settings.User, "identity-password": settings.Password} {
 		call("act", map[string]any{"key": key, "action": "setValue", "text": value})
 	}
