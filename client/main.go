@@ -348,7 +348,13 @@ func (d *desktop) view(c *ui.Context) {
 				d.savePreference("sidebar", d.sidebarCollapsed)
 			}
 			if d.preferencesStatus != "" {
-				ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).Grow(1).Wrap()
+				ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).Wrap()
+			}
+			if width >= 1100 && len(d.sessions) > 0 {
+				if workspaceButton(c, "workspace-hosts-tab", "主机", d.workspace == "" || d.workspace == "connections").Clicked() {
+					d.workspace = "connections"
+				}
+				ui.ScrollHorizontal(c).Grow(1).Gap(6).Children(func() { d.sessionTabs(c) })
 			} else {
 				ui.Box(c).Grow(1)
 			}
@@ -573,43 +579,8 @@ func (d *desktop) view(c *ui.Context) {
 			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
 				if d.workspace == "terminal" {
-					closeSessionID := 0
-					var moveSessionFrom, moveSessionTo sessionDragID
-					ui.ScrollHorizontal(c).FillWidth().Padding(8, 12).Gap(6).Children(func() {
-						for index, session := range d.sessions {
-							s := session
-							index := index
-							ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
-								tab := workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), s.id == d.currentSession).Disabled(!d.canSwitchSession()).Drag(sessionDragID(s.id))
-								tab.ContextMenu(func(menu *ui.Menu) {
-									if menu.Item("向左移动").Disabled(index == 0).Chosen() {
-										moveSessionFrom, moveSessionTo = sessionDragID(s.id), sessionDragID(d.neighborSession(s.id, -1))
-									}
-									if menu.Item("向右移动").Disabled(index == len(d.sessions)-1).Chosen() {
-										moveSessionFrom, moveSessionTo = sessionDragID(s.id), sessionDragID(d.neighborSession(s.id, 1))
-									}
-									if menu.Item("关闭会话").Disabled(d.busy).Chosen() {
-										closeSessionID = s.id
-									}
-								})
-								if tab.Clicked() {
-									d.selectSession(s.id)
-								}
-								if dragged, ok := ui.Drop[sessionDragID](tab); ok {
-									moveSessionFrom, moveSessionTo = dragged, sessionDragID(s.id)
-								}
-								if ui.Button(c.Key(fmt.Sprintf("session-close-%d", s.id)), "×").Label("关闭会话：" + s.label).Disabled(d.busy).Clicked() {
-									closeSessionID = s.id
-								}
-							})
-						}
-					})
-					if moveSessionFrom != 0 {
-						d.moveSession(int(moveSessionFrom), int(moveSessionTo))
-						c.Invalidate()
-					}
-					if closeSessionID != 0 {
-						d.closeSession(closeSessionID)
+					if width < 1100 {
+						ui.ScrollHorizontal(c).FillWidth().Padding(8, 12).Gap(6).Children(func() { d.sessionTabs(c) })
 					}
 					ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Padding(12, 18).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 						if width >= 900 {
@@ -920,7 +891,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.67"
+const version = "0.3.68"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

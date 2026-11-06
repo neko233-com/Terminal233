@@ -94,6 +94,30 @@ func TestWideTerminalPlacesQuickCommandsBesideTerminal(t *testing.T) {
 	}
 }
 
+func TestWideWorkspaceTabsSwitchBetweenHostsAndSession(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{workspace: "connections", term: term, currentSession: 1, sessions: []*workspaceSession{{id: 1, label: "local", term: term}}}
+	view := ui.NewTester(d.view, 1280, 800)
+	if err := view.Click("local"); err != nil {
+		t.Fatal(err)
+	}
+	if d.workspace != "terminal" || !view.Focused("Terminal") {
+		t.Fatal("session tab should open and focus the terminal")
+	}
+	if err := view.Click("主机"); err != nil {
+		t.Fatal(err)
+	}
+	if d.workspace != "connections" {
+		t.Fatal("hosts tab should return to the host workspace")
+	}
+}
+
 func TestTerminalFilePanelResizesByPointerAndKeyboard(t *testing.T) {
 	left, peer := net.Pipe()
 	defer peer.Close()
