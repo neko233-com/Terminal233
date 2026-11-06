@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -9,6 +10,7 @@ import (
 func (d *desktop) sessionTabs(c *ui.Context) {
 	closeSessionID, closeGroupID, disbandGroupID := 0, 0, 0
 	var moveFrom, moveTo sessionDragID
+	var splitFrom, splitTo sessionDragID
 	tabs := d.terminalTopTabs()
 	for index, entry := range tabs {
 		tabInfo := entry
@@ -16,7 +18,7 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 		ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
 			if g := tabInfo.group; g != nil {
 				active := d.workspace == "terminal" && d.terminalGroupFor(d.currentSession) == g
-				tab := workspaceButton(c, fmt.Sprintf("group-tab-%d", g.id), g.name, active).Label("工作区：" + g.name).Disabled(!d.canSwitchSession()).Drag(sessionDragID(tabInfo.representative))
+				tab := workspaceButton(c, fmt.Sprintf("group-tab-%d", g.id), g.name, active).Label("工作区：" + g.name).Tooltip("拖入终端加入分屏；拖到边缘调整顺序").Disabled(!d.canSwitchSession()).Drag(sessionDragID(tabInfo.representative))
 				tab.ContextMenu(func(menu *ui.Menu) {
 					if menu.Item("向左移动").Disabled(index == 0).Chosen() {
 						moveFrom, moveTo = sessionDragID(tabInfo.representative), sessionDragID(tabs[index-1].representative)
@@ -60,7 +62,11 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 					}
 				}
 				if dragged, ok := ui.Drop[sessionDragID](tab); ok {
-					moveFrom, moveTo = dragged, sessionDragID(tabInfo.representative)
+					if tabDropCenter(tab) && d.canSplitTabDrop(int(dragged), tabInfo.representative) {
+						splitFrom, splitTo = dragged, sessionDragID(tabInfo.representative)
+					} else {
+						moveFrom, moveTo = dragged, sessionDragID(tabInfo.representative)
+					}
 				}
 				if d.workspaceGroupDirty(g) {
 					if ui.Button(c.Key(fmt.Sprintf("group-save-%d", g.id)), "●").Label("保存工作区：" + g.name).Tooltip("保存工作区").Width(24).Height(30).Padding(0).BorderWidth(0).Background(c.Theme().Background).TextColor(c.Theme().TextMuted).Disabled(d.busy).Clicked() {
@@ -84,7 +90,7 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 			}
 			s := tabInfo.sessions[0]
 			active := s.id == d.currentSession && ((s.fileOnly && d.workspace == "files") || (!s.fileOnly && d.workspace == "terminal"))
-			tab := workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), active).Disabled(!d.canSwitchSession()).Drag(sessionDragID(s.id))
+			tab := workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), active).Label("会话标签：" + sessionDisplayLabel(s)).Tooltip("拖入终端创建分屏；拖到边缘调整顺序").Disabled(!d.canSwitchSession()).Drag(sessionDragID(s.id))
 			tab.ContextMenu(func(menu *ui.Menu) {
 				if menu.Item("向左移动").Disabled(index == 0).Chosen() {
 					moveFrom, moveTo = sessionDragID(s.id), sessionDragID(tabs[index-1].representative)
@@ -101,7 +107,11 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 				d.selectSession(s.id)
 			}
 			if dragged, ok := ui.Drop[sessionDragID](tab); ok {
-				moveFrom, moveTo = dragged, sessionDragID(s.id)
+				if tabDropCenter(tab) && d.canSplitTabDrop(int(dragged), s.id) {
+					splitFrom, splitTo = dragged, sessionDragID(s.id)
+				} else {
+					moveFrom, moveTo = dragged, sessionDragID(s.id)
+				}
 			}
 			if ui.Button(c.Key(fmt.Sprintf("session-close-%d", s.id)), "×").Label("关闭会话：" + s.label).Disabled(d.busy).Clicked() {
 				closeSessionID = s.id
@@ -118,6 +128,10 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 				d.closeNewTab()
 			}
 		})
+	}
+	if splitFrom != 0 {
+		d.splitTabs(int(splitFrom), int(splitTo))
+		c.Invalidate()
 	}
 	if moveFrom != 0 {
 		d.moveSession(int(moveFrom), int(moveTo))
@@ -142,4 +156,77 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 			d.workspace = "new-tab"
 		}
 	}
+}
+
+// A drop on the middle of a terminal tab creates a split workspace; its
+// edges retain tab reordering. This avoids adding extra visible controls.
+func tabDropCenter(tab ui.Element) bool {
+	x, _, over := tab.PointerPosition()
+	width := tab.Bounds().W
+	return over && width > 0 && x >= width*0.2 && x <= width*0.8
+}
+
+func (d *desktop) canSplitTabDrop(from, to int) bool {
+	if d.busy || from == to || d.terminalGroupFor(from) != nil {
+		return false
+	}
+	var source, target *workspaceSession
+	for _, s := range d.sessions {
+		if s.id == from {
+			source = s
+		}
+		if s.id == to {
+			target = s
+		}
+	}
+	return source != nil && target != nil && source.term != nil && target.term != nil && !terminalEnded(source.term) && !terminalEnded(target.term)
+}
+
+func (d *desktop) splitTabs(from, to int) {
+	if !d.canSplitTabDrop(from, to) {
+		return
+	}
+	if g := d.terminalGroupFor(to); g != nil {
+		if len(g.members) >= maxWorkspaceSessions {
+			d.status = "工作区终端数量已达上限"
+			return
+		}
+		if err := d.addTerminalGroupMember(g, from); err != nil {
+			d.status = err.Error()
+			return
+		}
+		g.grid = true
+		d.workspace = "terminal"
+		d.pendingTerminalFocus = from
+		return
+	}
+	name := "工作区"
+	used := func(candidate string) bool {
+		for _, g := range d.terminalGroups {
+			if strings.EqualFold(g.name, candidate) {
+				return true
+			}
+		}
+		for _, w := range d.workspaceTemplates {
+			if strings.EqualFold(w.Name, candidate) {
+				return true
+			}
+		}
+		for _, w := range d.cloudWorkspaceSnapshot.Items {
+			if strings.EqualFold(w.Name, candidate) {
+				return true
+			}
+		}
+		return false
+	}
+	for n := 2; used(name); n++ {
+		name = fmt.Sprintf("工作区 %d", n)
+	}
+	if err := d.createTerminalGroup(name, []int{to, from}, to, true); err != nil {
+		d.status = err.Error()
+		return
+	}
+	d.selectSession(to)
+	d.workspace = "terminal"
+	d.pendingTerminalFocus = to
 }
