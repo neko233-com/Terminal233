@@ -106,16 +106,31 @@ func (d *desktop) profileGroupCards(c *ui.Context, cardWidth float32, draftBlock
 		return
 	}
 	ui.Text(c, "分组").FontSize(13).TextColor(c.Theme().TextMuted)
-	ui.Row(c).FillWidth().Wrap().Gap(10).Children(func() {
+	ui.Row(c).FillWidth().Wrap().Gap(d.hostLayoutGap()).Children(func() {
 		for _, name := range children {
 			group := name
 			card := ui.Button(c.Key("group-card-"+group), "").Label("打开分组：" + group).Tooltip(group).Width(cardWidth).Height(66).Padding(10).Gap(10).Justify(ui.Start).Background(c.Theme().Surface).BorderWidth(0).Radius(10).Disabled(d.busy || draftBlocked)
+			if d.hostListView {
+				card = card.Height(46).Padding(8, 12).Radius(6).Background(ui.Transparent)
+				if card.Hovered() {
+					card = card.Background(c.Theme().SurfaceHover)
+				}
+			}
 			card.Children(func() {
-				ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() { ui.Icon(c, fileIcon).Width(19).Height(19).TextColor(c.Theme().AccentText) })
-				ui.Column(c).Grow(1).Gap(3).Children(func() {
-					ui.Text(c, groupLeaf(group)).FontSize(14).Bold().SingleLine()
-					ui.Text(c, fmt.Sprintf("%d 个连接", counts[group])).FontSize(12).TextColor(c.Theme().TextMuted)
-				})
+				size, glyph := float32(38), float32(19)
+				if d.hostListView {
+					size, glyph = 28, 16
+				}
+				ui.Box(c).Width(size).Height(size).Shrink(0).Radius(8).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() { ui.Icon(c, fileIcon).Width(glyph).Height(glyph).TextColor(c.Theme().AccentText) })
+				if d.hostListView {
+					ui.Text(c, groupLeaf(group)).FontSize(13).Grow(1).SingleLine().Tooltip(group)
+					ui.Text(c, fmt.Sprintf("%d 个连接", counts[group])).FontSize(12).TextColor(c.Theme().TextMuted).Width(76).TextAlign(ui.End)
+				} else {
+					ui.Column(c).Grow(1).Gap(3).Children(func() {
+						ui.Text(c, groupLeaf(group)).FontSize(14).Bold().SingleLine()
+						ui.Text(c, fmt.Sprintf("%d 个连接", counts[group])).FontSize(12).TextColor(c.Theme().TextMuted)
+					})
+				}
 			})
 			card.ContextMenu(func(menu *ui.Menu) {
 				if menu.Item("快速连接").Disabled(d.busy || draftBlocked || counts[group] == 0).Chosen() {

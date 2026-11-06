@@ -537,6 +537,50 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if secretErr != nil || password != settings.Password {
 		t.Fatal("native editor credential cannot be restored")
 	}
+	call("act", map[string]any{"key": "host-layout-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "key:host-list-header-local ") && strings.Contains(tree, "切换为网格视图") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "key:host-list-header-local ") {
+		t.Fatalf("native host list layout did not appear: %s", tree)
+	}
+	listRowWidth := float64(0)
+	for _, entry := range call("tree")["result"].(map[string]any)["nodes"].([]any) {
+		node := entry.(map[string]any)
+		if node["key"] == "profile-1" {
+			listRowWidth = node["bounds"].(map[string]any)["width"].(float64)
+		}
+	}
+	if listRowWidth < 600 {
+		t.Fatalf("native host row did not fill the list: %v", listRowWidth)
+	}
+	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_HOST_LIST"); capturePath != "" {
+		capture := call("capture")["result"].(map[string]any)
+		pixels, err := base64.StdEncoding.DecodeString(fmt.Sprint(capture["png"]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(capturePath, pixels, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call("act", map[string]any{"key": "host-layout-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if !strings.Contains(tree, "key:host-list-header-local ") && strings.Contains(tree, "切换为列表视图") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if strings.Contains(tree, "key:host-list-header-local ") {
+		t.Fatal("native grid layout did not return")
+	}
 	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_WORKSPACE"); capturePath != "" {
 		capture := call("capture")["result"].(map[string]any)
 		pixels, err := base64.StdEncoding.DecodeString(fmt.Sprint(capture["png"]))

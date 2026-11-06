@@ -19,17 +19,19 @@ func TestWorkspaceVisualReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, state := range []struct {
-		name                    string
-		width, height           int
-		light, inspector, empty bool
+		name                          string
+		width, height                 int
+		light, inspector, empty, list bool
 	}{
-		{"hosts-dark", 1200, 760, false, false, false}, {"hosts-light", 1200, 760, true, false, false},
-		{"hosts-wide", 1600, 900, false, false, false}, {"hosts-compact", 640, 760, false, false, false},
-		{"host-inspector", 1400, 900, false, true, false},
-		{"hosts-empty-dark", 1200, 760, false, false, true}, {"hosts-empty-light", 1200, 760, true, false, true}, {"hosts-empty-compact", 640, 480, false, false, true},
+		{"hosts-dark", 1200, 760, false, false, false, false}, {"hosts-light", 1200, 760, true, false, false, false},
+		{"hosts-wide", 1600, 900, false, false, false, false}, {"hosts-compact", 640, 760, false, false, false, false},
+		{"host-inspector", 1400, 900, false, true, false, false},
+		{"hosts-empty-dark", 1200, 760, false, false, true, false}, {"hosts-empty-light", 1200, 760, true, false, true, false}, {"hosts-empty-compact", 640, 480, false, false, true, false},
+		{"hosts-list-dark", 1200, 760, false, false, false, true}, {"hosts-list-light", 1200, 760, true, false, false, true},
+		{"hosts-list-compact", 640, 760, false, false, false, true}, {"hosts-list-inspector", 1400, 900, false, true, false, true},
 	} {
 		t.Run(state.name, func(t *testing.T) {
-			d := &desktop{workspace: "connections", lightTheme: state.light, railExpanded: true}
+			d := &desktop{workspace: "connections", lightTheme: state.light, railExpanded: true, hostListView: state.list}
 			for i, p := range []struct{ name, host, group string }{
 				{"Production API", "api.example.invalid", "Production"},
 				{"Database", "db.example.invalid", "Production"},
@@ -65,6 +67,30 @@ func TestWorkspaceVisualReview(t *testing.T) {
 			}
 			if closeErr != nil {
 				t.Fatal(closeErr)
+			}
+		})
+	}
+	for _, light := range []bool{false, true} {
+		name := "cloud-list-dark"
+		if light {
+			name = "cloud-list-light"
+		}
+		t.Run(name, func(t *testing.T) {
+			d := &desktop{workspace: "connections", lightTheme: light, railExpanded: true, hostListView: true, profileSource: "cloud", cloud: &cloudClient{}, accounts: []cloudAccount{
+				{ID: "one", Label: "Production API", Host: "api.example.invalid", Port: 22, Username: "devops"},
+				{ID: "two", Label: "Database", Host: "db.example.invalid", Port: 2222, Username: "database"},
+			}}
+			v := ui.NewTester(d.view, 1200, 760)
+			if _, ok := v.Find("云端主机列表列标题"); !ok {
+				t.Fatal("cloud list header unavailable")
+			}
+			f, err := os.Create(filepath.Join(root, name+".png"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			if err := png.Encode(f, v.Image()); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

@@ -251,7 +251,20 @@ func (d *desktop) profileView(c *ui.Context) {
 			if more.Clicked() {
 				d.showCompactProfileTools = !d.showCompactProfileTools
 			}
+			ui.Box(c).Grow(1)
+			layoutLabel, layoutIcon := "切换为列表视图", listViewIcon
+			if d.hostListView {
+				layoutLabel, layoutIcon = "切换为网格视图", gridViewIcon
+			}
+			if terminalActionButton(c, "host-layout-toggle", layoutLabel, layoutIcon, false, false).Clicked() {
+				d.hostListView = !d.hostListView
+				d.savePreference("host-list-view", d.hostListView)
+				c.Invalidate()
+			}
 		})
+		if d.hostListView {
+			cardWidth = width - 48
+		}
 		if d.hostEntryVisible() {
 			d.hostEntryView(c, width)
 			return
@@ -366,11 +379,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 					}
 				}
 				if ui.Button(c.Key("profile-sort-"+column.key), label).Disabled(d.profileRecent).Clicked() {
-					if d.profileSort == column.key {
-						d.profileSortDescending = !d.profileSortDescending
-					} else {
-						d.profileSort, d.profileSortDescending = column.key, false
-					}
+					d.toggleHostSort(column.key)
 				}
 			}
 			if ui.Button(c.Key("profile-sort-custom"), "自定义顺序").Disabled(d.profileRecent || d.profileSort == "").Clicked() {
@@ -452,19 +461,22 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 	}
 	showLocal := len(d.profileTagFilters) == 0 && d.profileSource != "cloud" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
 		(query == "" || strings.Contains("本机终端 local terminal powershell", query))
-	ui.Text(c, "主机").FontSize(13).TextColor(c.Theme().TextMuted)
+	if d.profileSource != "cloud" {
+		ui.Text(c, "主机").FontSize(13).TextColor(c.Theme().TextMuted)
+		d.hostListHeader(c, cardWidth, "local")
+	}
 	var moveFrom, moveTo profileID
 	shown := 0
-	ui.Row(c).FillWidth().Wrap().Gap(10).AlignItems(ui.Start).Children(func() {
+	ui.Row(c).FillWidth().Wrap().Gap(d.hostLayoutGap()).AlignItems(ui.Start).Children(func() {
 		if showLocal {
 			button := ui.Button(c.Key("profile-local-terminal"), "").Label("打开本机终端").Tooltip("打开本机终端").Width(cardWidth).Height(66).Padding(14).Gap(12).Justify(ui.Start).Background(c.Theme().Surface).BorderWidth(0).Radius(10).Disabled(d.busy || d.terminalLimitReached())
-			button.Children(func() {
-				ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().SurfacePressed).AlignItems(ui.Center).Justify(ui.Center).Children(func() { ui.Icon(c, terminalIcon).Width(19).Height(19).TextColor(c.Theme().Text) })
-				ui.Column(c).Grow(1).Gap(3).Children(func() {
-					ui.Text(c, "本机终端").FontSize(14).Bold()
-					ui.Text(c, "PowerShell · 此电脑").FontSize(12).TextColor(c.Theme().TextMuted)
-				})
-			})
+			if d.hostListView {
+				button = button.Height(48).Padding(8, 12).Gap(10).Radius(6).Background(ui.Transparent)
+				if button.Hovered() {
+					button = button.Background(c.Theme().SurfaceHover)
+				}
+			}
+			button.Children(func() { d.hostSummary(c, terminalIcon, "本机终端", "PowerShell · 此电脑", "", cardWidth) })
 			if button.Clicked() {
 				d.openLocalTerminal()
 			}
@@ -515,20 +527,11 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 			if compact {
 				label += " · " + p.Settings.Host + ":" + p.Settings.Port
 			}
-			card := ui.Column(c).Width(cardWidth).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(10).BorderWidth(1).BorderColor(ui.Transparent)
-			if d.selectedProfile == string(p.ID) || d.checkedProfiles[p.ID] {
-				card = card.Background(c.Theme().SurfaceHover).BorderColor(c.Theme().Accent)
-			}
+			card := d.hostLayoutCard(c, cardWidth, d.selectedProfile == string(p.ID) || d.checkedProfiles[p.ID])
 			card.Children(func() {
 				row := ui.Button(c.Key("profile-"+string(p.ID)), "").Label(label).BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).FillWidth().Background(ui.Transparent)
 				row.Children(func() {
-					ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().SurfacePressed).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-						ui.Icon(c, serverIcon).Width(19).Height(19).TextColor(c.Theme().Text)
-					})
-					ui.Column(c).Grow(1).Gap(3).Children(func() {
-						ui.Text(c, p.Label).FontSize(14).SingleLine().Tooltip(p.Label)
-						ui.Text(c, p.Settings.User+"@"+p.Settings.Host+":"+p.Settings.Port).FontSize(12).TextColor(c.Theme().TextMuted).SingleLine().Tooltip(p.Settings.Host + ":" + p.Settings.Port)
-					})
+					d.hostSummary(c, serverIcon, p.Label, net.JoinHostPort(p.Settings.Host, p.Settings.Port), p.Settings.User, cardWidth)
 				})
 				if !d.busy {
 					row = row.Drag(p.ID)
@@ -567,7 +570,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 					}
 				})
 				mods := row.ClickModifiers()
-				if row.DoubleClicked() && mods&(ui.Cmd|ui.Shift) == 0 && !blockedByEditor {
+				if !d.busy && !blockedByEditor && ((row.DoubleClicked() && mods&(ui.Cmd|ui.Shift) == 0) || row.Shortcut(0, ui.KeyEnter)) {
 					if d.prepareConnectionNavigation() {
 						if current, ok := d.currentProfile(p.ID); ok {
 							d.openProfileConnection(current)
@@ -744,7 +747,8 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				visibleCloudIDs = append(visibleCloudIDs, account.ID)
 			}
 		}
-		ui.Row(c).FillWidth().Wrap().Gap(10).AlignItems(ui.Start).Children(func() {
+		d.hostListHeader(c, cardWidth, "cloud")
+		ui.Row(c).FillWidth().Wrap().Gap(d.hostLayoutGap()).AlignItems(ui.Start).Children(func() {
 			for _, entry := range accounts {
 				account := entry
 				if !d.cloudAccountVisible(account) {
@@ -753,20 +757,11 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				shown++
 				label := account.Label + " · " + account.Username + "@" + account.Host
 				_, isChecked := d.checkedCloud[account.ID]
-				card := ui.Column(c).Width(cardWidth).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(10).BorderWidth(1).BorderColor(ui.Transparent)
-				if d.selectedCloudProfile == account.ID || isChecked {
-					card = card.Background(c.Theme().SurfaceHover).BorderColor(c.Theme().Accent)
-				}
+				card := d.hostLayoutCard(c, cardWidth, d.selectedCloudProfile == account.ID || isChecked)
 				card.Children(func() {
 					row := ui.Button(c.Key("profile-cloud-"+account.ID), "").Label(label).FillWidth().BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).Background(ui.Transparent).Disabled(d.busy).Drag(cloudGroupDragID(account.ID))
 					row.Children(func() {
-						ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().SurfacePressed).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-							ui.Icon(c, cloudIcon).Width(19).Height(19).TextColor(c.Theme().Text)
-						})
-						ui.Column(c).Grow(1).Gap(3).Children(func() {
-							ui.Text(c, account.Label).FontSize(14).SingleLine().Tooltip(account.Label)
-							ui.Text(c, account.Username+"@"+account.Host).FontSize(12).TextColor(c.Theme().TextMuted).SingleLine().Tooltip(account.Host)
-						})
+						d.hostSummary(c, cloudIcon, account.Label, net.JoinHostPort(account.Host, fmt.Sprint(account.Port)), account.Username, cardWidth)
 					})
 					blockedByEditor := draftBlocked
 					row.ContextMenu(func(menu *ui.Menu) {
@@ -777,7 +772,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 						}
 					})
 					mods := row.ClickModifiers()
-					if row.DoubleClicked() && mods&(ui.Cmd|ui.Shift) == 0 && !blockedByEditor {
+					if !d.busy && !blockedByEditor && ((row.DoubleClicked() && mods&(ui.Cmd|ui.Shift) == 0) || row.Shortcut(0, ui.KeyEnter)) {
 						if d.prepareConnectionNavigation() {
 							d.loadCloudAccount(account)
 						}

@@ -123,6 +123,7 @@ type desktop struct {
 	profileLabel                                                                            string
 	profileFilter                                                                           string
 	profileSource                                                                           string
+	hostListView                                                                            bool
 	selectedCloudProfile                                                                    string
 	profileFavorites                                                                        bool
 	profileRecent                                                                           bool
