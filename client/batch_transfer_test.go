@@ -146,7 +146,7 @@ func TestBatchBackgroundPartialResultKeepsSessionAndRefresh(t *testing.T) {
 func TestBatchDropLimitIsReportedBeforeTransfer(t *testing.T) {
 	d := &desktop{workspace: "files", term: &terminal.Terminal{}, fileDir: t.TempDir()}
 	view := ui.NewTester(d.view, 1200, 1400)
-	zone, ok := view.Find("拖入文件复制到当前目录（最多 100 个）")
+	zone, ok := view.Find("会话文件面板")
 	if !ok {
 		t.Fatal("batch drop zone missing")
 	}

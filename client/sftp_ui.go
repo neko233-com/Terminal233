@@ -561,19 +561,20 @@ func (d *desktop) openSessionDirectory(f remoteFile, local bool) {
 func (d *desktop) fileView(c *ui.Context, compact bool) {
 	d.syncCheckedDirectory()
 	local := d.term != nil && d.shell == nil
-	title := "远程文件"
-	if local {
-		title = "本机文件"
-	}
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, title).FontSize(16).Bold()
+		sessionLabel := "选择主机"
 		for _, session := range d.sessions {
 			if session.id == d.currentSession {
-				ui.Text(c, "所属会话："+session.label).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+				sessionLabel = session.label
 				break
 			}
 		}
-		picker := ui.Button(c.Key("file-session-picker-toggle"), "切换会话").Label("选择文件会话").Disabled(!d.canSwitchSession())
+		tip := "所属会话：" + sessionLabel
+		if local {
+			tip += " · 本机文件"
+		}
+		picker := ui.Button(c.Key("file-session-picker-toggle"), "").Label("选择文件会话").Tooltip(tip).Gap(6).Disabled(!d.canSwitchSession())
+		picker.Children(func() { ui.Text(c, sessionLabel).SingleLine(); ui.Text(c, "▾") })
 		if picker.Clicked() {
 			d.showFileSessionPicker = !d.showFileSessionPicker
 		}
@@ -581,49 +582,56 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			panel.AttachTo(picker, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() { d.fileSessionPicker(c) })
 		})
 		ui.Box(c).Grow(1)
-		filterLabel := "筛选"
-		if d.fileFilter != "" {
-			filterLabel = "筛选 ·"
+		if d.term != nil || len(d.files) > 0 {
+			if ui.Button(c.Key("file-terminal-dir"), "◎").Label("定位终端目录").Tooltip("定位终端目录").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
+				d.followReportedDirectory(true)
+			}
+			label := "跟随终端目录：关"
+			if d.fileFollowTerminal {
+				label = "跟随终端目录：开"
+			}
+			if terminalActionButton(c, "file-follow-terminal", label, terminalIcon, d.fileFollowTerminal, d.busy || d.fileSessionUnavailable()).Clicked() {
+				d.fileFollowTerminal = !d.fileFollowTerminal
+				d.lastTerminalDir = ""
+				if d.fileFollowTerminal {
+					d.followReportedDirectory(true)
+				}
+			}
 		}
-		if ui.Button(c.Key("file-filter-toggle"), filterLabel).Label("筛选文件列表").Clicked() {
+		if terminalActionButton(c, "file-filter-toggle", "筛选文件列表", searchIcon, d.showFileFilter || d.fileFilter != "", false).Clicked() {
 			d.showFileFilter = !d.showFileFilter
 		}
 		optionsLabel := "排序与显示"
 		if d.showFileOptions {
 			optionsLabel = "收起排序与显示"
 		}
-		if ui.Button(c.Key("file-options-toggle"), optionsLabel).Clicked() {
+		if terminalActionButton(c, "file-options-toggle", optionsLabel, moreIcon, d.showFileOptions, false).Clicked() {
 			d.showFileOptions = !d.showFileOptions
 		}
 	})
 	if d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0 {
 		ui.Column(c).FillWidth().Padding(24).Gap(10).Background(c.Theme().Surface).Radius(8).Children(func() {
-			ui.Text(c, "先打开一个终端").FontSize(17).Bold()
-			ui.Text(c, "连接 SSH 后浏览远程文件，或打开本机终端浏览本机文件。").FontSize(13).TextColor(c.Theme().TextMuted).Wrap()
+			ui.Text(c, "选择主机").FontSize(17).Bold()
+			ui.Text(c, "连接后浏览和传输文件。").FontSize(13).TextColor(c.Theme().TextMuted).Wrap()
 			ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-				if ui.PrimaryButton(c.Key("files-open-local"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+				if ui.Button(c.Key("files-open-local"), "打开本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
 					d.openLocalTerminal()
 				}
-				if ui.Button(c.Key("files-open-connections"), "选择 SSH 连接").Clicked() {
+				if ui.PrimaryButton(c.Key("files-open-connections"), "选择 SSH 连接").Clicked() {
 					d.fileReturnAfterConnect = true
 					d.workspace = "connections"
 				}
 			})
 		})
-		d.fileDropView(c, local)
+		if d.workspace != "files" || !compact {
+			d.fileDropView(c, local)
+		}
 		if d.fileStatus != "" {
 			ui.Text(c, d.fileStatus).FontSize(12).Wrap()
 		}
 		return
 	}
-	ui.TextInput(c.Key("remote-dir"), &d.fileDir).Label("当前目录").Placeholder("目录路径").OnChange(func() {
-		d.selectedFile = ""
-		d.confirmDelete = ""
-		d.fileNewDirectory = ""
-		d.fileRename = ""
-		d.files = nil
-	}).OnSubmit(func() { d.refreshFiles() })
-	ui.Row(c).Gap(8).Wrap().Children(func() {
+	ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 		_, _, canBack := d.fileHistory.target(-1)
 		_, _, canForward := d.fileHistory.target(1)
 		if ui.Button(c.Key("file-back"), "‹").Label("后退").Tooltip("后退").Width(36).Disabled(d.busy || d.fileSessionUnavailable() || !canBack).Clicked() {
@@ -642,23 +650,16 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			d.files = nil
 			d.refreshFiles()
 		}
-		if ui.Button(c.Key("file-terminal-dir"), "◎").Label("定位终端目录").Tooltip("定位终端目录").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
-			d.followReportedDirectory(true)
-		}
+		ui.TextInput(c.Key("remote-dir"), &d.fileDir).Label("当前目录").Placeholder("目录路径").OnChange(func() {
+			d.selectedFile = ""
+			d.confirmDelete = ""
+			d.fileNewDirectory = ""
+			d.fileRename = ""
+			d.files = nil
+		}).OnSubmit(func() { d.refreshFiles() }).Grow(1)
 		if ui.Button(c.Key("file-refresh"), "↻").Label("打开目录").Tooltip("打开目录").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			d.selectedFile, d.confirmDelete, d.fileRename = "", "", ""
 			d.refreshFiles()
-		}
-		label := "跟随终端目录：关"
-		if d.fileFollowTerminal {
-			label = "跟随终端目录：开"
-		}
-		if ui.Button(c.Key("file-follow-terminal"), label).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
-			d.fileFollowTerminal = !d.fileFollowTerminal
-			d.lastTerminalDir = ""
-			if d.fileFollowTerminal {
-				d.followReportedDirectory(true)
-			}
 		}
 	})
 	if d.term == nil {
@@ -733,13 +734,23 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if len(visible) > 0 {
 		height := float32(len(visible) * 44)
 		maxHeight := float32(320)
-		if compact {
+		if d.workspace == "files" {
+			_, windowHeight := c.Size()
+			maxHeight = windowHeight - 400
+			if maxHeight < 180 {
+				maxHeight = 180
+			}
+			if maxHeight > 520 {
+				maxHeight = 520
+			}
+			height = maxHeight
+		} else if compact {
 			maxHeight = 220
 		}
 		if height > maxHeight {
 			height = maxHeight
 		}
-		ui.Scroll(c.Key("file-list")).Height(height).FillWidth().Children(func() {
+		ui.Scroll(c.Key("file-list")).Label("会话文件列表").Height(height).FillWidth().Children(func() {
 			for _, entry := range visible {
 				f := entry
 				label := f.Name
@@ -781,6 +792,13 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							d.openSessionDirectory(f, local)
 						}
 						if eligibleBatchFile(f) {
+							if d.workspace == "files" && d.shell != nil {
+								item := remotePaneDrag{directory: d.fileDir, name: f.Name, sessionID: d.currentSession, shell: d.shell}
+								_, targetErr := d.paneDownloadTarget(item)
+								if menu.Item("复制到本机当前目录").Disabled(targetErr != nil).Chosen() {
+									d.downloadPaneFile(item)
+								}
+							}
 							label := "下载到…"
 							if local {
 								label = "复制到…"
@@ -834,7 +852,9 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	if len(d.files) > 0 && len(visible) == 0 {
 		ui.Text(c, "没有匹配的文件").TextColor(c.Theme().TextMuted)
 	}
-	d.fileDropView(c, local)
+	if d.workspace != "files" || !compact {
+		d.fileDropView(c, local)
+	}
 	for _, entry := range visible {
 		if entry.Name == d.selectedFile && entry.IsDir {
 			if ui.Button(c.Key("file-open-selected"), "打开所选目录").Label("打开会话所选目录").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {

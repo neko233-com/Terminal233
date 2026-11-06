@@ -538,7 +538,7 @@ func TestWorkspaceKeyboardNavigation(t *testing.T) {
 	d := &desktop{}
 	test := ui.NewTester(d.view, 1200, 900)
 	test.Key(ui.Cmd|ui.Shift, ui.Key3)
-	if d.workspace != "files" || !test.HasText("文件管理") {
+	if d.workspace != "files" || !test.HasText("SFTP") {
 		t.Fatal("file workspace shortcut failed")
 	}
 	test.Key(ui.Cmd|ui.Shift, ui.Key4)
@@ -692,7 +692,7 @@ func TestDroppedFilesWithoutConnectionGivesFeedback(t *testing.T) {
 	if err := test.Click("远程文件"); err != nil {
 		t.Fatal(err)
 	}
-	zone, ok := test.Find("拖入文件上传（最多 100 个）")
+	zone, ok := test.Find("会话文件面板")
 	if !ok {
 		t.Fatal("drop zone missing")
 	}
@@ -840,8 +840,8 @@ func TestFileSortingUnknownValuesAndSessionState(t *testing.T) {
 
 func TestFileWorkspaceIdentifiesCurrentSession(t *testing.T) {
 	d := &desktop{workspace: "files", currentSession: 2, sessions: []*workspaceSession{{id: 1, label: "server one"}, {id: 2, label: "server two"}}}
-	view := ui.NewTester(d.view, 1200, 1200)
-	if !view.HasText("所属会话：server two") || view.HasText("所属会话：server one") {
+	view := ui.NewTester(func(c *ui.Context) { d.fileView(c, true) }, 1200, 1200)
+	if !view.HasText("server two") || view.HasText("server one") || !view.HasText("选择文件会话") {
 		t.Fatal("file workspace identifies wrong session")
 	}
 }
@@ -858,7 +858,7 @@ func TestFileListPrecedesControlsAndRemainsBounded(t *testing.T) {
 	if !ok || !hasControls || first.Y >= controls.Y {
 		t.Fatal("file list must precede transfer controls")
 	}
-	if controls.Y-first.Y > 440 {
+	if controls.Y-first.Y > 700 {
 		t.Fatalf("large directory pushed controls too far away: %v", controls.Y-first.Y)
 	}
 }

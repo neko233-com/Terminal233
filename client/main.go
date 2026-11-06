@@ -792,7 +792,7 @@ func (d *desktop) view(c *ui.Context) {
 					ui.Column(c).Padding(24).Gap(10).Children(func() {
 						switch d.workspace {
 						case "files":
-							ui.Text(c, "文件管理").FontSize(22).Bold()
+							ui.Text(c, "SFTP").FontSize(16).Bold()
 							d.fileWorkspace(c, width, height)
 						case "forward":
 							d.forwardView(c)
@@ -1011,7 +1011,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.89"
+const version = "0.3.90"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

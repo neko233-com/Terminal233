@@ -79,7 +79,7 @@ func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
 		return
 	}
 	paneWidth := (width - 48 - 12) / 2
-	listHeight := height - 340
+	listHeight := height - 400
 	if listHeight < 180 {
 		listHeight = 180
 	}
@@ -164,18 +164,8 @@ func (d *desktop) navigateLocalPane(offset int) {
 
 func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 	d.initializeLocalPane()
-	ui.Text(c, "本机").FontSize(16).Bold()
-	ui.TextInput(c.Key("local-pane-path"), &d.localPane.input).Label("本机目录").Placeholder("本机绝对目录路径").OnChange(func() {
-		d.localPane.selected = ""
-		if d.localPane.loading {
-			d.localPane.generation++
-			d.localPane.loading = false
-		}
-		if !sameLocalDirectory(d.localPane.input, d.localPane.directory) {
-			d.localPane.status = "打开输入的目录后才能传输。"
-		}
-	}).OnSubmit(func() { d.requestLocalPane(d.localPane.input, -1) }).FillWidth()
-	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+	ui.Row(c).FillWidth().Height(36).AlignItems(ui.Center).Children(func() { ui.Text(c, "本机").FontSize(16).Bold() })
+	ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 		_, _, back := d.localPane.history.target(-1)
 		_, _, forward := d.localPane.history.target(1)
 		if ui.Button(c.Key("local-pane-back"), "‹").Label("本机目录后退").Tooltip("后退").Width(36).Disabled(!back).Clicked() {
@@ -187,7 +177,17 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 		if ui.Button(c.Key("local-pane-parent"), "↑").Label("本机上一级目录").Tooltip("上一级").Width(36).Disabled(d.localPane.directory == "").Clicked() {
 			d.requestLocalPane(filepath.Dir(d.localPane.directory), -1)
 		}
-		if ui.Button(c.Key("local-pane-open"), "打开目录").Clicked() {
+		ui.TextInput(c.Key("local-pane-path"), &d.localPane.input).Label("本机目录").Placeholder("本机绝对目录路径").OnChange(func() {
+			d.localPane.selected = ""
+			if d.localPane.loading {
+				d.localPane.generation++
+				d.localPane.loading = false
+			}
+			if !sameLocalDirectory(d.localPane.input, d.localPane.directory) {
+				d.localPane.status = "打开输入的目录后才能传输。"
+			}
+		}).OnSubmit(func() { d.requestLocalPane(d.localPane.input, -1) }).Grow(1)
+		if ui.Button(c.Key("local-pane-open"), "↻").Label("打开本机目录").Tooltip("打开或刷新目录").Width(36).Clicked() {
 			d.requestLocalPane(d.localPane.input, -1)
 		}
 	})

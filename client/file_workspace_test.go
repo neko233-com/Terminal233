@@ -39,11 +39,33 @@ func TestDualPaneUsesIndependentLocalAndSessionDirectories(t *testing.T) {
 		t.Fatalf("local file context actions missing: %s", menu)
 	}
 	view.CloseMenu()
+	if err := view.RightClick("remote.txt"); err != nil {
+		t.Fatal(err)
+	}
+	menu = strings.Join(view.Menu(), "|")
+	if !strings.Contains(menu, "复制到本机当前目录") || !strings.Contains(menu, "下载到…") {
+		t.Fatalf("remote file transfer actions missing: %s", menu)
+	}
+	view.CloseMenu()
 	if err := view.Click("📁 folder"); err != nil {
 		t.Fatal(err)
 	}
 	if !view.HasText("打开本机所选目录") {
 		t.Fatal("a selected directory needs a keyboard-accessible open action")
+	}
+}
+
+func TestDualPaneNavigationAndListsAlign(t *testing.T) {
+	dir := t.TempDir()
+	d := &desktop{workspace: "files", shell: &remoteShell{}, term: &terminal.Terminal{}, currentSession: 1, fileDir: "/remote", files: []remoteFile{{Name: "remote.txt"}}, localPane: localFilePane{initialized: true, directory: dir, input: dir, files: []remoteFile{{Name: "local.txt"}}}}
+	view := ui.NewTester(d.view, 1280, 760)
+	localPath, a := view.Find("本机目录")
+	remotePath, b := view.Find("当前目录")
+	localList, c := view.Find("本机文件列表")
+	remoteList, e := view.Find("会话文件列表")
+	tools, f := view.Find("文件操作")
+	if !a || !b || !c || !e || !f || localPath.Y != remotePath.Y || localList.H != remoteList.H || tools.Y+tools.H > 760 {
+		t.Fatalf("dual-pane controls are not aligned or visible: local=%+v remote=%+v lists=%+v %+v tools=%+v", localPath, remotePath, localList, remoteList, tools)
 	}
 }
 
