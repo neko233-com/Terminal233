@@ -30,6 +30,7 @@ type desktop struct {
 	terminalLightTheme, terminalDarkTheme                                                   *terminal.Theme
 	showFilePanel                                                                           bool
 	showFileTools                                                                           bool
+	showFileFilter, showFileOptions                                                         bool
 	sidebarCollapsed                                                                        bool
 	sessions                                                                                []*workspaceSession
 	currentSession, nextSession, splitSession, splitFirstSession, splitFocusedSession       int
@@ -922,7 +923,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.70"
+const version = "0.3.71"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

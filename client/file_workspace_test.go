@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo"
@@ -30,10 +31,18 @@ func TestDualPaneUsesIndependentLocalAndSessionDirectories(t *testing.T) {
 	if d.localPane.selected != "local.txt" || d.fileDir != "/remote" || d.selectedFile != "" {
 		t.Fatal("local selection changed the remote pane")
 	}
+	if err := view.RightClick("local.txt"); err != nil {
+		t.Fatal(err)
+	}
+	menu := strings.Join(view.Menu(), "|")
+	if !strings.Contains(menu, "上传到会话") || !strings.Contains(menu, "复制路径") {
+		t.Fatalf("local file context actions missing: %s", menu)
+	}
+	view.CloseMenu()
 	if err := view.Click("📁 folder"); err != nil {
 		t.Fatal(err)
 	}
-	if !view.HasText("打开所选目录") {
+	if !view.HasText("打开本机所选目录") {
 		t.Fatal("a selected directory needs a keyboard-accessible open action")
 	}
 }
@@ -56,6 +65,52 @@ func TestNarrowFileWorkspaceSwitchesBetweenLocalAndSession(t *testing.T) {
 	}
 	if !view.HasText("local.txt") || d.localPane.directory != dir {
 		t.Fatal("switching panes lost local state")
+	}
+}
+
+func TestSessionFileSelectionDoesNotNavigateOrExpandTools(t *testing.T) {
+	d := &desktop{workspace: "files", shell: &remoteShell{}, term: &terminal.Terminal{}, fileDir: "/home", files: []remoteFile{{Name: "folder", IsDir: true}, {Name: "log.txt"}}}
+	view := ui.NewTester(d.view, 1280, 900)
+	_, filterVisible := view.Find("筛选文件")
+	if view.HasText("按名称 ↑") || filterVisible {
+		t.Fatal("filter and sort controls should start collapsed")
+	}
+	if err := view.Click("📁 folder"); err != nil {
+		t.Fatal(err)
+	}
+	if d.fileDir != "/home" || d.selectedFile != "folder" || d.showFileTools || !view.HasText("打开会话所选目录") {
+		t.Fatal("single click should select the directory without navigating")
+	}
+	if err := view.Click("log.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if d.selectedFile != "log.txt" || d.showFileTools || view.HasText("打开会话所选目录") {
+		t.Fatal("single click should select the file without expanding tools")
+	}
+	if err := view.Click("筛选文件列表"); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasText("筛选文件") {
+		t.Fatal("file filter could not be opened")
+	}
+}
+
+func TestSessionPaneAcceptsExternalFileDrop(t *testing.T) {
+	d := &desktop{workspace: "files", term: &terminal.Terminal{}, fileDir: t.TempDir(), localPane: localFilePane{initialized: true}}
+	view := ui.NewTester(d.view, 1280, 900)
+	pane, ok := view.Find("会话文件面板")
+	if !ok {
+		t.Fatal("session pane missing")
+	}
+	files := make([]string, maxBatchFiles+1)
+	for i := range files {
+		files[i] = "file"
+	}
+	if !view.DropFiles(pane.X+pane.W-8, pane.Y+pane.H-8, files...) {
+		t.Fatal("session pane did not accept an external file drop")
+	}
+	if !strings.Contains(d.fileStatus, "最多传输 100") || d.busy {
+		t.Fatal("pane drop did not apply the existing batch limit")
 	}
 }
 

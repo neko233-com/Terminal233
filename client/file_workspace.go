@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -93,6 +94,9 @@ func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
 		}
 		remote := ui.Column(c.Key("session-file-pane")).Label("会话文件面板").Width(paneWidth).MinHeight(listHeight + 210).Shrink(0).Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8)
 		remote.Children(func() { d.fileView(c, true) })
+		if files := remote.DroppedFiles(); len(files) > 0 {
+			d.handleFileDrop(files)
+		}
 		if item, ok := ui.Drop[localPaneDrag](remote); ok {
 			d.uploadPaneFile(item)
 		}
@@ -202,13 +206,35 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 				label = "📁 " + label
 			}
 			ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-				row := ui.Button(c.Key("local-pane-file-"+f.Name), label).BorderWidth(0).Justify(ui.Start).Grow(1)
+				row := ui.Button(c.Key("local-pane-file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8)
 				if d.localPane.selected == f.Name {
 					row = row.Background(c.Theme().SurfacePressed)
 				}
+				row.Children(func() {
+					icon, color := documentIcon, c.Theme().TextMuted
+					if f.IsDir {
+						icon, color = fileIcon, c.Theme().AccentHover
+					}
+					ui.Icon(c, icon).Width(16).Height(16).Shrink(0).TextColor(color)
+					ui.Text(c, f.Name)
+				})
 				if eligibleBatchFile(f) {
 					row = row.Drag(localPaneDrag{directory: d.localPane.directory, name: f.Name, generation: d.localPane.generation, sessionID: d.currentSession, shell: d.shell, remoteDir: d.fileDir})
 				}
+				row.ContextMenu(func(menu *ui.Menu) {
+					if f.IsDir && menu.Item("打开目录").Disabled(d.localPane.loading).Chosen() {
+						d.requestLocalPane(filepath.Join(d.localPane.directory, f.Name), -1)
+					}
+					if eligibleBatchFile(f) && menu.Item("上传到会话").Disabled(d.busy || d.shell == nil || d.fileSessionUnavailable() || d.localPane.loading || !sameLocalDirectory(d.localPane.input, d.localPane.directory)).Chosen() {
+						d.uploadPaneFile(localPaneDrag{directory: d.localPane.directory, name: f.Name, generation: d.localPane.generation, sessionID: d.currentSession, shell: d.shell, remoteDir: d.fileDir})
+					}
+					if menu.Item("复制路径").Chosen() {
+						if full, err := localItemPath(d.localPane.directory, f.Name); err == nil {
+							mygo.Clipboard.WriteText(full)
+							d.localPane.status = "已复制路径"
+						}
+					}
+				})
 				if row.DoubleClicked() && f.IsDir {
 					d.requestLocalPane(filepath.Join(d.localPane.directory, f.Name), -1)
 				} else if row.Clicked() {
@@ -219,21 +245,31 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 		}
 	})
 	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+		localEligible, remoteEligible := false, false
 		for _, entry := range d.localPane.files {
+			if entry.Name == d.localPane.selected && eligibleBatchFile(entry) {
+				localEligible = true
+			}
 			if entry.Name == d.localPane.selected && entry.IsDir {
-				if ui.Button(c.Key("local-pane-open-selected"), "打开所选目录").Disabled(d.localPane.loading).Clicked() {
+				if ui.Button(c.Key("local-pane-open-selected"), "打开所选目录").Label("打开本机所选目录").Disabled(d.localPane.loading).Clicked() {
 					d.requestLocalPane(filepath.Join(d.localPane.directory, entry.Name), -1)
 				}
 				break
 			}
 		}
+		for _, entry := range d.files {
+			if entry.Name == d.selectedFile && eligibleBatchFile(entry) {
+				remoteEligible = true
+				break
+			}
+		}
 		origin := localPaneDrag{directory: d.localPane.directory, name: d.localPane.selected, generation: d.localPane.generation, sessionID: d.currentSession, shell: d.shell, remoteDir: d.fileDir}
 		pathPending := d.localPane.directory == "" || d.localPane.loading || !sameLocalDirectory(d.localPane.input, d.localPane.directory)
-		if ui.Button(c.Key("local-pane-upload"), "上传到会话 →").Disabled(d.busy || d.shell == nil || d.localPane.selected == "" || pathPending).Clicked() {
+		if ui.Button(c.Key("local-pane-upload"), "上传到会话 →").Disabled(d.busy || d.shell == nil || d.fileSessionUnavailable() || !localEligible || pathPending).Clicked() {
 			d.uploadPaneFile(origin)
 		}
 		source := remotePaneDrag{directory: d.fileDir, name: d.selectedFile, sessionID: d.currentSession, shell: d.shell}
-		if ui.Button(c.Key("local-pane-download"), "← 下载到本机").Disabled(d.busy || d.shell == nil || d.selectedFile == "" || pathPending).Clicked() {
+		if ui.Button(c.Key("local-pane-download"), "← 下载到本机").Disabled(d.busy || d.shell == nil || d.fileSessionUnavailable() || !remoteEligible || pathPending).Clicked() {
 			d.downloadPaneFile(source)
 		}
 	})

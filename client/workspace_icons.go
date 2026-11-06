@@ -12,6 +12,7 @@ var (
 	serverIcon      = workspaceIcon(`<rect x="3" y="3" width="18" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/>`)
 	terminalIcon    = workspaceIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/>`)
 	fileIcon        = workspaceIcon(`<path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>`)
+	documentIcon    = workspaceIcon(`<path d="M6 3h8l4 4v14H6zM14 3v5h4"/>`)
 	forwardIcon     = workspaceIcon(`<path d="M4 8h14m-4-4 4 4-4 4M20 16H6m4-4-4 4 4 4"/>`)
 	cloudIcon       = workspaceIcon(`<path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 9a4.5 4.5 0 0 0 1 9z"/>`)
 	snippetIcon     = workspaceIcon(`<path d="M9 4C7 4 7 6 7 8v1c0 2-1 3-3 3 2 0 3 1 3 3v1c0 2 0 4 2 4M15 4c2 0 2 2 2 4v1c0 2 1 3 3 3-2 0-3 1-3 3v1c0 2 0 4-2 4"/>`)

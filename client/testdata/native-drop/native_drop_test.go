@@ -96,3 +96,48 @@ func TestNativeOLEBatchDrop(t *testing.T) {
 		t.Fatal("native drop did not continue after collision")
 	}
 }
+
+func TestNativeOLEPaneDrop(t *testing.T) {
+	source, dest := t.TempDir(), t.TempDir()
+	file := filepath.Join(source, "pane.txt")
+	if err := os.WriteFile(file, []byte("pane"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	left, right := net.Pipe()
+	defer right.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{workspace: "files", sidebarCollapsed: true, term: term, fileDir: dest, currentSession: 1, sessions: []*workspaceSession{{id: 1, term: term, fileDir: dest}}, localPane: localFilePane{initialized: true}}
+	w := mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH native pane drop test", Hidden: false, Width: 1200, Height: 760, Content: ui.View(func(c *ui.Context) {
+		width, height := c.Size()
+		ui.Column(c).Fill().Padding(10).Children(func() { d.fileWorkspace(c, width, height) })
+	})})
+	defer w.Destroy()
+	mygo.RunOnMain(func() { d.win = w })
+	deadline := time.Now().Add(10 * time.Second)
+	dropped := false
+	for time.Now().Before(deadline) {
+		mygo.RunOnMain(func() {
+			_, dropped = native.TestDropFiles(w.NativeHandle(), 850, 500, []string{file})
+		})
+		if dropped {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !dropped {
+		t.Fatal("native file drop was rejected by the session pane")
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		data, readErr := os.ReadFile(filepath.Join(dest, "pane.txt"))
+		if readErr == nil && string(data) == "pane" {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("native pane drop did not copy the file")
+}

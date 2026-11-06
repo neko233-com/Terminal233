@@ -785,6 +785,9 @@ func TestFileSortFilterAndHiddenSelection(t *testing.T) {
 	files := []remoteFile{{Name: "large", Size: 200, Modified: 10}, {Name: ".hidden", Size: 20, Modified: 30}, {Name: "folder", IsDir: true}, {Name: "small", Size: 3, Modified: 20}}
 	d := &desktop{workspace: "files", files: files, selectedFile: ".hidden", fileRename: ".hidden"}
 	view := ui.NewTester(d.view, 1200, 1500)
+	if err := view.Click("排序与显示"); err != nil {
+		t.Fatal(err)
+	}
 	if err := view.Click("隐藏点文件"); err != nil {
 		t.Fatal(err)
 	}

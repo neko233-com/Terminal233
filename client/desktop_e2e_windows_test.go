@@ -656,7 +656,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "本机文件") && strings.Contains(tree, "file-filter") {
+		if strings.Contains(tree, "本机文件") && strings.Contains(tree, "file-tools-toggle") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -764,6 +764,14 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	if !localReady {
 		t.Fatal("isolated local directory did not finish loading")
+	}
+	call("act", map[string]any{"key": "file-options-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "file-toggle-dotfiles") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	call("act", map[string]any{"key": "file-toggle-dotfiles", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
@@ -937,6 +945,30 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("directory navigation did not load %q with %q: %v", dir, marker, call("tree"))
 	}
 	call("act", map[string]any{"key": "file-新目录", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "file-open-selected") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "file-open-selected", "action": "press"})
+	waitDirectory(childDirectory, "history-marker.txt")
+	call("act", map[string]any{"key": "file-back", "action": "press"})
+	waitDirectory(localDirectory, "renamed.txt")
+	resultForDirectory := call("tree")["result"].(map[string]any)
+	var directoryBounds map[string]any
+	for _, value := range resultForDirectory["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["key"] == "file-新目录" {
+			directoryBounds, _ = node["bounds"].(map[string]any)
+			break
+		}
+	}
+	if directoryBounds == nil {
+		t.Fatal("directory row missing before double click")
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": directoryBounds["x"].(float64) + directoryBounds["width"].(float64)/2, "y": directoryBounds["y"].(float64) + directoryBounds["height"].(float64)/2}}})
 	waitDirectory(childDirectory, "history-marker.txt")
 	call("act", map[string]any{"key": "file-back", "action": "press"})
 	waitDirectory(localDirectory, "renamed.txt")
@@ -1385,7 +1417,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "session-2") {
+		if strings.Contains(tree, "toggle-split") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)

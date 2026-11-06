@@ -31,7 +31,7 @@ try {
     $mygoDir = $mygoDir.Replace('\','/')
     & go -C $module mod edit "-replace=github.com/egoist/mygo=$mygoDir"
     if ($LASTEXITCODE -ne 0) { throw 'Could not configure the native test module.' }
-    & go -C $module test -p 1 -run '^TestNativeOLEBatchDrop$' -count 1 .
+    & go -C $module test -p 1 -run '^TestNativeOLE(BatchDrop|PaneDrop)$' -count 1 .
     if ($LASTEXITCODE -ne 0) { throw 'Native OLE batch drop test failed.' }
 } finally {
     if (Test-Path -LiteralPath $module) { Remove-Item -LiteralPath $module -Recurse -Force }

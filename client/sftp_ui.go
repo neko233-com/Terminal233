@@ -544,6 +544,20 @@ func (d *desktop) setFileSort(order string) {
 	}
 }
 
+func (d *desktop) openSessionDirectory(f remoteFile, local bool) {
+	if d.busy || d.fileSessionUnavailable() || !f.IsDir || f.Name == "" || f.Name == "." || f.Name == ".." || strings.ContainsAny(f.Name, "/\x00") || (local && (!filepath.IsLocal(f.Name) || strings.Contains(f.Name, `\`))) {
+		return
+	}
+	d.fileNewDirectory, d.fileRename = "", ""
+	if local {
+		d.fileDir = filepath.Join(d.fileDir, f.Name)
+	} else {
+		d.fileDir = path.Join(d.fileDir, f.Name)
+	}
+	d.selectedFile, d.confirmDelete = "", ""
+	d.refreshFiles()
+}
+
 func (d *desktop) fileView(c *ui.Context, compact bool) {
 	d.syncCheckedDirectory()
 	local := d.term != nil && d.shell == nil
@@ -558,6 +572,21 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 				ui.Text(c, "所属会话："+session.label).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 				break
 			}
+		}
+		ui.Box(c).Grow(1)
+		filterLabel := "筛选"
+		if d.fileFilter != "" {
+			filterLabel = "筛选 ·"
+		}
+		if ui.Button(c.Key("file-filter-toggle"), filterLabel).Label("筛选文件列表").Clicked() {
+			d.showFileFilter = !d.showFileFilter
+		}
+		optionsLabel := "排序与显示"
+		if d.showFileOptions {
+			optionsLabel = "收起排序与显示"
+		}
+		if ui.Button(c.Key("file-options-toggle"), optionsLabel).Clicked() {
+			d.showFileOptions = !d.showFileOptions
 		}
 	})
 	if d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0 {
@@ -629,7 +658,6 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 	} else if terminalEnded(d.term) {
 		ui.Text(c, "当前会话已结束，文件操作不可用；请重新连接或打开终端。").TextColor(c.Theme().TextMuted).Wrap()
 	}
-	d.fileDropView(c, local)
 	if d.fileStatus != "" {
 		ui.Text(c, d.fileStatus).FontSize(12).Wrap()
 	}
@@ -649,34 +677,38 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 			})
 		}
 	}
-	ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录").OnChange(func() {
-		d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""
-	})
-	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
-		for _, column := range []struct{ key, label string }{{"name", "按名称"}, {"size", "按大小"}, {"time", "按修改时间"}} {
-			label := column.label
-			if d.fileSort == column.key || (d.fileSort == "" && column.key == "name") {
-				if d.fileSortDescending {
-					label += " ↓"
-				} else {
-					label += " ↑"
+	if d.showFileFilter {
+		ui.TextInput(c.Key("file-filter"), &d.fileFilter).Label("筛选文件").Placeholder("按名称筛选当前目录").OnChange(func() {
+			d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""
+		})
+	}
+	if d.showFileOptions {
+		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+			for _, column := range []struct{ key, label string }{{"name", "按名称"}, {"size", "按大小"}, {"time", "按修改时间"}} {
+				label := column.label
+				if d.fileSort == column.key || (d.fileSort == "" && column.key == "name") {
+					if d.fileSortDescending {
+						label += " ↓"
+					} else {
+						label += " ↑"
+					}
+				}
+				if ui.Button(c.Key("file-sort-"+column.key), label).Clicked() {
+					d.setFileSort(column.key)
 				}
 			}
-			if ui.Button(c.Key("file-sort-"+column.key), label).Clicked() {
-				d.setFileSort(column.key)
+			label := "隐藏点文件"
+			if d.fileHideDotfiles {
+				label = "显示点文件"
 			}
-		}
-		label := "隐藏点文件"
-		if d.fileHideDotfiles {
-			label = "显示点文件"
-		}
-		if ui.Button(c.Key("file-toggle-dotfiles"), label).Clicked() {
-			d.fileHideDotfiles = !d.fileHideDotfiles
-			if d.fileHideDotfiles && strings.HasPrefix(d.selectedFile, ".") {
-				d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""
+			if ui.Button(c.Key("file-toggle-dotfiles"), label).Clicked() {
+				d.fileHideDotfiles = !d.fileHideDotfiles
+				if d.fileHideDotfiles && strings.HasPrefix(d.selectedFile, ".") {
+					d.selectedFile, d.fileRename, d.confirmDelete = "", "", ""
+				}
 			}
-		}
-	})
+		})
+	}
 	if len(d.files) > 0 {
 		ui.Row(c).FillWidth().Gap(12).Padding(8, 12).Background(c.Theme().Surface).Children(func() {
 			ui.Text(c, "名称").Grow(1).TextColor(c.Theme().TextMuted)
@@ -721,7 +753,15 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							delete(d.fileChecked, f.Name)
 						}
 					}
-					row := ui.Button(c.Key("file-"+f.Name), label).BorderWidth(0).Justify(ui.Start).Grow(1).Disabled(d.busy || d.fileSessionUnavailable())
+					row := ui.Button(c.Key("file-"+f.Name), "").Label(label).BorderWidth(0).Justify(ui.Start).Grow(1).Gap(8).Disabled(d.busy || d.fileSessionUnavailable())
+					row.Children(func() {
+						icon, color := documentIcon, c.Theme().TextMuted
+						if f.IsDir {
+							icon, color = fileIcon, c.Theme().AccentHover
+						}
+						ui.Icon(c, icon).Width(16).Height(16).Shrink(0).TextColor(color)
+						ui.Text(c, f.Name)
+					})
 					if d.shell != nil && eligibleBatchFile(f) {
 						row = row.Drag(remotePaneDrag{directory: d.fileDir, name: f.Name, sessionID: d.currentSession, shell: d.shell})
 					}
@@ -729,6 +769,9 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 						row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
 					}
 					row.ContextMenu(func(menu *ui.Menu) {
+						if f.IsDir && menu.Item("打开目录").Chosen() {
+							d.openSessionDirectory(f, local)
+						}
 						if eligibleBatchFile(f) {
 							label := "下载到…"
 							if local {
@@ -756,23 +799,11 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							d.removeSelected()
 						}
 					})
-					if row.Clicked() {
+					if row.DoubleClicked() && f.IsDir {
+						d.openSessionDirectory(f, local)
+					} else if row.Clicked() {
 						d.confirmDelete = ""
-						if f.IsDir {
-							d.fileNewDirectory, d.fileRename = "", ""
-							if local {
-								d.fileDir = filepath.Join(d.fileDir, f.Name)
-							} else {
-								d.fileDir = path.Join(d.fileDir, f.Name)
-							}
-							d.selectedFile = ""
-							d.refreshFiles()
-						} else {
-							d.showFileTools = true
-							d.selectedFile = f.Name
-							d.fileRename = f.Name
-							d.fileStatus = "已选择：" + f.Name
-						}
+						d.selectedFile, d.fileRename = f.Name, f.Name
 					}
 					kind := "文件"
 					if f.IsDir {
@@ -794,6 +825,15 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 
 	if len(d.files) > 0 && len(visible) == 0 {
 		ui.Text(c, "没有匹配的文件").TextColor(c.Theme().TextMuted)
+	}
+	d.fileDropView(c, local)
+	for _, entry := range visible {
+		if entry.Name == d.selectedFile && entry.IsDir {
+			if ui.Button(c.Key("file-open-selected"), "打开所选目录").Label("打开会话所选目录").Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
+				d.openSessionDirectory(entry, local)
+			}
+			break
+		}
 	}
 	toolsOpen := d.showFileTools || d.cancelTransfer != nil
 	toolsLabel := "文件操作"
@@ -846,14 +886,18 @@ func (d *desktop) fileDropView(c *ui.Context, local bool) {
 	drop := ui.Box(c.Key("file-drop")).Height(48).Border(1, c.Theme().Border).Padding(8).Label(dropLabel)
 	drop.Children(func() { ui.Text(c, dropLabel).FontSize(12) })
 	if files := drop.DroppedFiles(); len(files) > 0 {
-		if d.busy || d.fileSessionUnavailable() {
-			d.fileStatus = "请先连接后再上传"
-		} else if len(files) == 1 {
-			d.fileLocal = files[0]
-			d.transfer(true)
-		} else {
-			d.transferBatch(files)
-		}
+		d.handleFileDrop(files)
+	}
+}
+
+func (d *desktop) handleFileDrop(files []string) {
+	if d.busy || d.fileSessionUnavailable() {
+		d.fileStatus = "请先连接后再上传"
+	} else if len(files) == 1 {
+		d.fileLocal = files[0]
+		d.transfer(true)
+	} else {
+		d.transferBatch(files)
 	}
 }
 
