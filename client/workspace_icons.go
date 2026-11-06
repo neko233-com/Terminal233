@@ -14,6 +14,7 @@ var (
 	fileIcon        = workspaceIcon(`<path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>`)
 	forwardIcon     = workspaceIcon(`<path d="M4 8h14m-4-4 4 4-4 4M20 16H6m4-4-4 4 4 4"/>`)
 	cloudIcon       = workspaceIcon(`<path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 9a4.5 4.5 0 0 0 1 9z"/>`)
+	snippetIcon     = workspaceIcon(`<path d="M9 4C7 4 7 6 7 8v1c0 2-1 3-3 3 2 0 3 1 3 3v1c0 2 0 4 2 4M15 4c2 0 2 2 2 4v1c0 2 1 3 3 3-2 0-3 1-3 3v1c0 2 0 4-2 4"/>`)
 	starIcon        = workspaceIcon(`<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>`)
 	clockIcon       = workspaceIcon(`<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`)
 	navigationIcons = map[string]*ui.SVG{
@@ -22,6 +23,7 @@ var (
 		"nav-files":       fileIcon,
 		"nav-forward":     forwardIcon,
 		"nav-cloud":       cloudIcon,
+		"nav-snippets":    snippetIcon,
 		"group-all":       serverIcon,
 		"group-favorites": starIcon,
 		"group-recent":    clockIcon,

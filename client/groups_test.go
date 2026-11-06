@@ -89,9 +89,17 @@ func TestGroupConflictAndStaleWriterPreserveData(t *testing.T) {
 	}
 }
 
+func openConnectionNavigation(t *testing.T, view *ui.Tester) {
+	t.Helper()
+	if err := view.Click("连接筛选"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGroupControlsAndLegacyProfileGroups(t *testing.T) {
 	d := &desktop{workspace: "connections", profiles: []profile{{ID: "1", Label: "server", Group: "legacy/child", Settings: connectionSettings{Host: "host.test", Port: "22", User: "alice"}}}}
 	view := ui.NewTester(d.view, 1400, 1400)
+	openConnectionNavigation(t, view)
 	if !view.HasText("分组：legacy") || !view.HasText("分组：legacy/child") {
 		t.Fatal("legacy group ancestors not shown")
 	}
@@ -125,6 +133,7 @@ func TestProfileDragToGroupPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := ui.NewTester(d.view, 1400, 1400)
+	openConnectionNavigation(t, view)
 	from, ok := view.Find("server")
 	if !ok {
 		t.Fatal("connection missing")
@@ -183,6 +192,7 @@ func TestGroupStorageVersionProtectsEmptyGroupsFromOlderClients(t *testing.T) {
 func TestGroupTreeCanCollapseAndExpand(t *testing.T) {
 	d := &desktop{workspace: "connections", profileGroups: []string{"parent", "parent/child", "other"}}
 	view := ui.NewTester(d.view, 1400, 1400)
+	openConnectionNavigation(t, view)
 	if !view.HasText("分组：parent/child") {
 		t.Fatal("child missing")
 	}
@@ -203,6 +213,7 @@ func TestGroupTreeCanCollapseAndExpand(t *testing.T) {
 func TestGroupContextMenuOpensManagement(t *testing.T) {
 	d := &desktop{workspace: "connections", profileGroups: []string{"parent", "parent/child"}}
 	view := ui.NewTester(d.view, 1400, 1400)
+	openConnectionNavigation(t, view)
 	if err := view.RightClick("分组：parent/child"); err != nil {
 		t.Fatal(err)
 	}

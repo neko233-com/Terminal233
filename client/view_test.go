@@ -104,6 +104,7 @@ func TestNativeViewLoadsSyncedAccountWithoutTrustingIt(t *testing.T) {
 func TestConnectionListShowsCurrentCloudScopeWithoutTrustingIt(t *testing.T) {
 	d := &desktop{cloud: &cloudClient{teamID: "team-1"}, teams: []cloudTeam{{ID: "team-1", Name: "研发"}}, accounts: []cloudAccount{{ID: "cloud-1", Label: "测试机", Host: "example.test", Port: 22, Username: "alice", Password: "secret", HostKeyFingerprint: "SHA256:cloud"}, {ID: "cloud-2", Label: "Alpha", Host: "other.test", Port: 22, Username: "bob"}}}
 	view := ui.NewTester(d.view, 1200, 1400)
+	openConnectionNavigation(t, view)
 	if !view.HasText("云端连接 · 研发") || !view.HasText("全部连接  3") || !view.HasText("测试机 · alice@example.test") {
 		t.Fatalf("cloud connection missing from workspace: %v", view.Texts())
 	}
@@ -345,6 +346,7 @@ func TestConnectionGroupNavigation(t *testing.T) {
 		t.Fatal(err)
 	}
 	test := ui.NewTester(d.view, 1200, 1200)
+	openConnectionNavigation(t, test)
 	if err := test.Click("工作  1"); err != nil {
 		t.Fatal(err)
 	}
@@ -362,6 +364,7 @@ func TestConnectionGroupNavigation(t *testing.T) {
 func TestBuiltinLocalTerminalIsDiscoverableAndFiltered(t *testing.T) {
 	d := &desktop{}
 	view := ui.NewTester(d.view, 1200, 900)
+	openConnectionNavigation(t, view)
 	if !view.HasText("打开本机终端") {
 		t.Fatal("built-in local terminal missing from the connection list")
 	}
@@ -395,6 +398,7 @@ func TestFavoritesAndCustomNameSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	test := ui.NewTester(d.view, 1200, 1200)
+	openConnectionNavigation(t, test)
 	if err := test.Click("更多连接操作"); err != nil {
 		t.Fatal(err)
 	}
@@ -432,6 +436,7 @@ func TestRecentConnectionsUseSuccessfulConnectionOrder(t *testing.T) {
 	}
 	d.profiles[1].LastConnected = 20
 	test := ui.NewTester(d.view, 1200, 1200)
+	openConnectionNavigation(t, test)
 	if err := test.Click("最近连接  2"); err != nil {
 		t.Fatal(err)
 	}

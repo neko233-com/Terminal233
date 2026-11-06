@@ -6,6 +6,24 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func TestConnectionNavigationIsCompactAndPreservesFilter(t *testing.T) {
+	d := &desktop{workspace: "connections", profileGroups: []string{"work"}}
+	view := ui.NewTester(d.view, 1280, 800)
+	if view.HasText("全部连接  1") {
+		t.Fatal("group tree should start collapsed")
+	}
+	openConnectionNavigation(t, view)
+	if err := view.Click("分组：work"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.Click("连接筛选"); err != nil {
+		t.Fatal(err)
+	}
+	if d.showConnectionNavigation || d.profileFilter != "work" || !view.HasText("分组 / work") {
+		t.Fatal("collapsing navigation lost the selected group")
+	}
+}
+
 func TestGroupCardsNavigateHierarchyWithoutHidingDescendantHosts(t *testing.T) {
 	d := &desktop{
 		workspace: "connections", profileGroups: []string{"work", "work/prod", "personal"},

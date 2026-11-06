@@ -17,6 +17,7 @@ func TestCloudGroupNavigationAndScopeIsolation(t *testing.T) {
 		t.Fatal("valid group snapshot rejected")
 	}
 	view := ui.NewTester(d.view, 1400, 1400)
+	openConnectionNavigation(t, view)
 	if !view.HasText("云端分组：work/prod") {
 		t.Fatal("cloud group missing")
 	}

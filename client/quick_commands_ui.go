@@ -96,6 +96,10 @@ func (d *desktop) sendQuickCommand(item quickCommand, execute bool) {
 		d.term.Paste(item.Command)
 		d.quickStatus = "已插入「" + target + "」，请检查后执行：" + item.Name
 	}
+	if d.workspace == "snippets" {
+		d.workspace = "terminal"
+		d.pendingTerminalFocus = d.currentSession
+	}
 }
 
 func (d *desktop) quickCommandTarget() string {
@@ -171,7 +175,11 @@ func (d *desktop) quickCommandsView(c *ui.Context) {
 // opened explicitly, leaving the terminal itself at full height.
 func (d *desktop) quickCommandsSideView(c *ui.Context) {
 	ui.Column(c).FillWidth().Padding(14).Gap(10).Children(func() {
-		ui.Text(c, "快速命令").FontSize(16).Bold()
+		title := "快速命令"
+		if d.workspace == "snippets" {
+			title = "命令片段"
+		}
+		ui.Text(c, title).FontSize(16).Bold()
 		ui.Text(c, "命令目标："+d.quickCommandTarget()).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 			if ui.Button(c.Key("quick-new"), "+ 新建命令").Disabled(d.quickEditorOpen).Clicked() {
@@ -208,16 +216,20 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 		if len(visible) == 0 {
 			ui.Text(c, "没有匹配的快速命令").FontSize(12).TextColor(c.Theme().TextMuted)
 		}
+		if d.workspace == "snippets" {
+			d.quickCommandsGrid(c, visible)
+			return
+		}
 		for _, command := range visible {
 			item := command
 			ui.Column(c).FillWidth().Padding(10).Gap(6).Background(c.Theme().Background).Radius(8).Children(func() {
 				ui.Text(c, item.Name).Bold().Wrap()
 				ui.Text(c, item.Command).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 				ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
-					if ui.Button(c.Key("quick-insert-"+item.ID), "插入").Disabled(terminalEnded(d.term)).Clicked() {
+					if ui.Button(c.Key("quick-insert-"+item.ID), "插入").Disabled(d.term == nil || terminalEnded(d.term)).Clicked() {
 						d.sendQuickCommand(item, false)
 					}
-					if ui.Button(c.Key("quick-run-"+item.ID), "发送并回车").Disabled(terminalEnded(d.term)).Clicked() {
+					if ui.Button(c.Key("quick-run-"+item.ID), "发送并回车").Disabled(d.term == nil || terminalEnded(d.term)).Clicked() {
 						d.sendQuickCommand(item, true)
 					}
 					if ui.Button(c.Key("quick-edit-"+item.ID), "编辑").Disabled(d.quickEditorOpen).Clicked() {
@@ -232,6 +244,54 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 						d.deleteQuickCommand(item)
 					}
 				})
+			})
+		}
+	})
+}
+
+// The workspace presents snippets as selectable items; actions appear only
+// for the selected item, while the terminal sidebar keeps its compact list.
+func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
+	ui.Row(c).FillWidth().Wrap().Gap(10).Children(func() {
+		for _, command := range commands {
+			item := command
+			ui.Column(c).Width(300).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(8).Children(func() {
+				selected := d.quickSelected == item.ID
+				button := ui.Button(c.Key("snippet-select-"+item.ID), "").Label("选择命令片段：" + item.Name).FillWidth().BorderWidth(0).Justify(ui.Start).Disabled(d.quickEditorOpen)
+				if selected {
+					button = button.Background(c.Theme().SurfacePressed)
+				}
+				button.Children(func() {
+					ui.Column(c).FillWidth().Gap(3).Children(func() {
+						ui.Text(c, item.Name).Bold().Wrap()
+						ui.Text(c, item.Command).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+					})
+				})
+				if button.Clicked() {
+					d.quickSelected, d.quickConfirm = item.ID, ""
+				}
+				if selected {
+					ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+						unavailable := d.quickEditorOpen || d.term == nil || terminalEnded(d.term)
+						if ui.Button(c.Key("snippet-insert-"+item.ID), "插入").Disabled(unavailable).Clicked() {
+							d.sendQuickCommand(item, false)
+						}
+						if ui.Button(c.Key("snippet-run-"+item.ID), "发送并回车").Disabled(unavailable).Clicked() {
+							d.sendQuickCommand(item, true)
+						}
+						if ui.Button(c.Key("snippet-edit-"+item.ID), "编辑").Disabled(d.quickEditorOpen).Clicked() {
+							d.quickEditorOpen = true
+							d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
+						}
+						label := "删除"
+						if d.quickConfirm == item.ID {
+							label = "确认删除"
+						}
+						if ui.Button(c.Key("snippet-delete-"+item.ID), label).Disabled(d.quickEditorOpen).Clicked() {
+							d.deleteQuickCommand(item)
+						}
+					})
+				}
 			})
 		}
 	})

@@ -96,6 +96,94 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "连接列表") {
 		t.Fatalf("missing native fields: %s", tree)
 	}
+	call("act", map[string]any{"key": "nav-snippets", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "quick-new") && strings.Contains(tree, "命令目标：未选择终端") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "quick-new") || !strings.Contains(tree, "命令目标：未选择终端") {
+		t.Fatalf("snippet workspace not available before connecting: %s", tree)
+	}
+	call("act", map[string]any{"key": "quick-new", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "quick-cancel-edit") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "quick-cancel-edit") {
+		t.Fatal("snippet editor did not open before connecting")
+	}
+	call("act", map[string]any{"key": "quick-name", "action": "setValue", "text": "临时测试"})
+	call("act", map[string]any{"key": "quick-text", "action": "setValue", "text": "pwd"})
+	call("act", map[string]any{"key": "quick-save", "action": "press"})
+	var snippetID string
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if key, ok := node["key"].(string); ok && strings.HasPrefix(key, "snippet-select-") {
+				snippetID = strings.TrimPrefix(key, "snippet-select-")
+				break
+			}
+		}
+		if snippetID != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if snippetID == "" {
+		t.Fatal("saved snippet did not appear")
+	}
+	call("act", map[string]any{"key": "snippet-select-" + snippetID, "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "snippet-delete-"+snippetID) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "snippet-delete-"+snippetID) {
+		t.Fatal("selected snippet actions did not appear")
+	}
+	snippetTree := call("tree")["result"].(map[string]any)
+	insertDisabled := false
+	for _, value := range snippetTree["nodes"].([]any) {
+		node := value.(map[string]any)
+		if node["key"] == "snippet-insert-"+snippetID && strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+			insertDisabled = true
+		}
+	}
+	if !insertDisabled {
+		t.Fatal("snippet insertion was enabled without a terminal")
+	}
+	call("act", map[string]any{"key": "snippet-delete-" + snippetID, "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "确认删除") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "snippet-delete-" + snippetID, "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !strings.Contains(fmt.Sprint(call("tree")), "snippet-select-"+snippetID) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if strings.Contains(fmt.Sprint(call("tree")), "snippet-select-"+snippetID) {
+		t.Fatal("confirmed snippet deletion did not complete")
+	}
 	call("act", map[string]any{"key": "nav-cloud", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

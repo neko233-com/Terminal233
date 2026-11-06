@@ -160,6 +160,52 @@ func TestQuickSideEditorOpensAndClosesAfterSaving(t *testing.T) {
 	}
 }
 
+func TestSnippetWorkspaceWorksWithoutSessionAndReturnsToTarget(t *testing.T) {
+	d := &desktop{workspace: "connections", quickPath: filepath.Join(t.TempDir(), "commands.json")}
+	view := ui.NewTester(d.view, 1280, 800)
+	if err := view.Click("命令片段"); err != nil {
+		t.Fatal(err)
+	}
+	if d.workspace != "snippets" || !view.HasText("命令目标：未选择终端") {
+		t.Fatal("snippet workspace did not open without a session")
+	}
+	if err := view.Click("+ 新建命令"); err != nil {
+		t.Fatal(err)
+	}
+	d.quickName, d.quickText = "磁盘", "df -h"
+	view.Frame()
+	if err := view.Click("保存命令"); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.quickCommands) != 1 || !view.HasText("磁盘") {
+		t.Fatal("snippet was not saved without an active terminal")
+	}
+	left, right := net.Pipe()
+	defer right.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d.term, d.currentSession = term, 1
+	d.sessions = []*workspaceSession{{id: 1, label: "local", term: term}}
+	view.Frame()
+	if err := view.Click("选择命令片段：磁盘"); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.Click("发送并回车"); err != nil {
+		t.Fatal(err)
+	}
+	if d.workspace != "terminal" || !view.Focused("Terminal") {
+		t.Fatal("running a snippet should show and focus its target terminal")
+	}
+	_ = right.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 6)
+	if _, err := io.ReadFull(right, buf); err != nil || string(buf) != "df -h\r" {
+		t.Fatalf("target received %q: %v", buf, err)
+	}
+}
+
 func TestQuickCommandReachesVerifiedSSHSession(t *testing.T) {
 	settings, fingerprint, _ := testSSHServer(t)
 	settings.Fingerprint = fingerprint

@@ -57,6 +57,7 @@ type desktop struct {
 	profileFormat                                                                           int
 	showGroupControls, showTerminalSettings                                                 bool
 	showShortcutHelp                                                                        bool
+	showConnectionNavigation                                                                bool
 	showCompactProfileTools                                                                 bool
 	groupInput                                                                              string
 	confirmGroupDelete                                                                      bool
@@ -105,7 +106,7 @@ type desktop struct {
 	terminalSearchText                                                                      string
 	quickOpen                                                                               bool
 	quickEditorOpen                                                                         bool
-	quickPath, quickName, quickText, quickStatus, quickConfirm, quickFilter                 string
+	quickPath, quickName, quickText, quickStatus, quickConfirm, quickFilter, quickSelected  string
 	quickCommands                                                                           []quickCommand
 	quickEdit                                                                               *quickCommand
 	expectedFingerprint, changedFingerprint                                                 string
@@ -394,6 +395,9 @@ func (d *desktop) view(c *ui.Context) {
 						if navigationButton(c, "nav-forward", "端口转发", d.workspace == "forward").Clicked() {
 							d.workspace = "forward"
 						}
+						if navigationButton(c, "nav-snippets", "命令片段", d.workspace == "snippets").Clicked() {
+							d.workspace = "snippets"
+						}
 						if navigationButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
 							d.workspace = "cloud"
 						}
@@ -436,133 +440,147 @@ func (d *desktop) view(c *ui.Context) {
 								d.savePanelSizes()
 							}
 						}
-						ui.Text(c, "连接").FontSize(12).TextColor(t.TextMuted)
-						connectionCount := len(d.profiles) + 1
-						if d.cloud != nil {
-							connectionCount += len(d.accounts)
+						filterLabel := "连接筛选"
+						if d.showConnectionNavigation {
+							filterLabel = "收起连接筛选"
+						} else if d.profileFavorites {
+							filterLabel = "筛选：收藏"
+						} else if d.profileRecent {
+							filterLabel = "筛选：最近"
+						} else if d.profileFilter != "" {
+							filterLabel = "分组：" + d.profileFilter
 						}
-						if navigationButton(c, "group-all", fmt.Sprintf("全部连接  %d", connectionCount), d.profileFilter == "" && !d.profileFavorites && !d.profileRecent).Disabled(draftBlocked).Clicked() {
-							d.workspace = "connections"
-							if d.editConnection {
-								d.closeConnectionEditor()
-							}
-							d.profileFilter = ""
-							d.profileFavorites = false
-							d.profileRecent = false
+						if ui.Button(c.Key("connection-navigation-toggle"), filterLabel).Label("连接筛选").FillWidth().Clicked() {
+							d.showConnectionNavigation = !d.showConnectionNavigation
 						}
-						isCloudGroups := d.profileSource == "cloud"
-						groups, counts := d.groupTree()
-						folded := d.foldedGroups
-						if isCloudGroups {
-							groups, counts = d.cloudGroupTree()
-							folded = d.cloudFoldedGroups
-						}
-						favorites := 0
-						recent := 0
-						for _, p := range d.profiles {
-							if p.Favorite {
-								favorites++
+						if d.showConnectionNavigation {
+							connectionCount := len(d.profiles) + 1
+							if d.cloud != nil {
+								connectionCount += len(d.accounts)
 							}
-							if p.LastConnected > 0 {
-								recent++
-							}
-						}
-						if navigationButton(c, "group-favorites", fmt.Sprintf("收藏的连接  %d", favorites), d.profileFavorites).Disabled(draftBlocked).Clicked() {
-							d.workspace = "connections"
-							if d.editConnection {
-								d.closeConnectionEditor()
-							}
-							d.profileFilter = ""
-							d.profileFavorites = true
-							d.profileRecent = false
-							if d.profileSource == "cloud" {
-								d.profileSource = "local"
-							}
-						}
-						if navigationButton(c, "group-recent", fmt.Sprintf("最近连接  %d", recent), d.profileRecent).Disabled(draftBlocked).Clicked() {
-							d.workspace = "connections"
-							if d.editConnection {
-								d.closeConnectionEditor()
-							}
-							d.profileFilter = ""
-							d.profileFavorites = false
-							d.profileRecent = true
-							if d.profileSource == "cloud" {
-								d.profileSource = "local"
-							}
-						}
-						parents := groupsWithChildren(groups)
-						for _, group := range groups {
-							name := group
-							if groupHidden(name, folded) {
-								continue
-							}
-							ui.Row(c).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
-								if depth := groupDepth(name); depth > 0 {
-									ui.Box(c).Width(float32(depth * 10)).Shrink(0)
+							if navigationButton(c, "group-all", fmt.Sprintf("全部连接  %d", connectionCount), d.profileFilter == "" && !d.profileFavorites && !d.profileRecent).Disabled(draftBlocked).Clicked() {
+								d.workspace = "connections"
+								if d.editConnection {
+									d.closeConnectionEditor()
 								}
-								if parents[name] {
-									label, title := "▾", "折叠分组："+name
-									if folded[name] {
-										label, title = "▸", "展开分组："+name
+								d.profileFilter = ""
+								d.profileFavorites = false
+								d.profileRecent = false
+							}
+							isCloudGroups := d.profileSource == "cloud"
+							groups, counts := d.groupTree()
+							folded := d.foldedGroups
+							if isCloudGroups {
+								groups, counts = d.cloudGroupTree()
+								folded = d.cloudFoldedGroups
+							}
+							favorites := 0
+							recent := 0
+							for _, p := range d.profiles {
+								if p.Favorite {
+									favorites++
+								}
+								if p.LastConnected > 0 {
+									recent++
+								}
+							}
+							if navigationButton(c, "group-favorites", fmt.Sprintf("收藏的连接  %d", favorites), d.profileFavorites).Disabled(draftBlocked).Clicked() {
+								d.workspace = "connections"
+								if d.editConnection {
+									d.closeConnectionEditor()
+								}
+								d.profileFilter = ""
+								d.profileFavorites = true
+								d.profileRecent = false
+								if d.profileSource == "cloud" {
+									d.profileSource = "local"
+								}
+							}
+							if navigationButton(c, "group-recent", fmt.Sprintf("最近连接  %d", recent), d.profileRecent).Disabled(draftBlocked).Clicked() {
+								d.workspace = "connections"
+								if d.editConnection {
+									d.closeConnectionEditor()
+								}
+								d.profileFilter = ""
+								d.profileFavorites = false
+								d.profileRecent = true
+								if d.profileSource == "cloud" {
+									d.profileSource = "local"
+								}
+							}
+							parents := groupsWithChildren(groups)
+							for _, group := range groups {
+								name := group
+								if groupHidden(name, folded) {
+									continue
+								}
+								ui.Row(c).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
+									if depth := groupDepth(name); depth > 0 {
+										ui.Box(c).Width(float32(depth * 10)).Shrink(0)
 									}
-									if ui.Button(c.Key("group-fold-"+name), label).Label(title).Width(32).Clicked() {
-										if isCloudGroups {
-											if d.cloudFoldedGroups == nil {
-												d.cloudFoldedGroups = make(map[string]bool)
+									if parents[name] {
+										label, title := "▾", "折叠分组："+name
+										if folded[name] {
+											label, title = "▸", "展开分组："+name
+										}
+										if ui.Button(c.Key("group-fold-"+name), label).Label(title).Width(32).Clicked() {
+											if isCloudGroups {
+												if d.cloudFoldedGroups == nil {
+													d.cloudFoldedGroups = make(map[string]bool)
+												}
+												d.cloudFoldedGroups[name] = !d.cloudFoldedGroups[name]
+											} else {
+												if d.foldedGroups == nil {
+													d.foldedGroups = make(map[string]bool)
+												}
+												d.foldedGroups[name] = !d.foldedGroups[name]
 											}
-											d.cloudFoldedGroups[name] = !d.cloudFoldedGroups[name]
-										} else {
-											if d.foldedGroups == nil {
-												d.foldedGroups = make(map[string]bool)
-											}
-											d.foldedGroups[name] = !d.foldedGroups[name]
 										}
 									}
-								}
-								groupLabel := "分组：" + name
-								if isCloudGroups {
-									groupLabel = "云端分组：" + name
-								}
-								button := navigationButton(c, "group-entry-"+name, fmt.Sprintf("%s  %d", groupLeaf(name), counts[name]), d.profileFilter == name).Label(groupLabel).Disabled(d.busy || draftBlocked).Grow(1)
-								button.ContextMenu(func(menu *ui.Menu) {
-									if menu.Item("管理分组").Disabled(draftBlocked).Chosen() {
+									groupLabel := "分组：" + name
+									if isCloudGroups {
+										groupLabel = "云端分组：" + name
+									}
+									button := navigationButton(c, "group-entry-"+name, fmt.Sprintf("%s  %d", groupLeaf(name), counts[name]), d.profileFilter == name).Label(groupLabel).Disabled(d.busy || draftBlocked).Grow(1)
+									button.ContextMenu(func(menu *ui.Menu) {
+										if menu.Item("管理分组").Disabled(draftBlocked).Chosen() {
+											d.workspace = "connections"
+											if d.editConnection {
+												d.closeConnectionEditor()
+											}
+											if isCloudGroups {
+												d.profileSource = "cloud"
+											} else {
+												d.profileSource = "local"
+											}
+											d.profileFilter, d.showGroupControls, d.confirmGroupDelete = name, true, false
+											d.profileFavorites, d.profileRecent = false, false
+										}
+									})
+									if button.Clicked() {
 										d.workspace = "connections"
 										if d.editConnection {
 											d.closeConnectionEditor()
 										}
-										if isCloudGroups {
-											d.profileSource = "cloud"
-										} else {
+										d.profileFilter = name
+										d.confirmGroupDelete = false
+										d.profileFavorites = false
+										d.profileRecent = false
+										if !isCloudGroups && d.profileSource == "cloud" {
 											d.profileSource = "local"
 										}
-										d.profileFilter, d.showGroupControls, d.confirmGroupDelete = name, true, false
-										d.profileFavorites, d.profileRecent = false, false
+									}
+									if isCloudGroups {
+										if dragged, ok := ui.Drop[cloudGroupDragID](button); ok && !d.busy {
+											d.cloudGroupOperation("move", string(dragged), name)
+										}
+									} else {
+										if dragged, ok := ui.Drop[profileID](button); ok && !d.busy {
+											d.moveProfileToGroup(dragged, name)
+										}
 									}
 								})
-								if button.Clicked() {
-									d.workspace = "connections"
-									if d.editConnection {
-										d.closeConnectionEditor()
-									}
-									d.profileFilter = name
-									d.confirmGroupDelete = false
-									d.profileFavorites = false
-									d.profileRecent = false
-									if !isCloudGroups && d.profileSource == "cloud" {
-										d.profileSource = "local"
-									}
-								}
-								if isCloudGroups {
-									if dragged, ok := ui.Drop[cloudGroupDragID](button); ok && !d.busy {
-										d.cloudGroupOperation("move", string(dragged), name)
-									}
-								} else {
-									if dragged, ok := ui.Drop[profileID](button); ok && !d.busy {
-										d.moveProfileToGroup(dragged, name)
-									}
-								}
-							})
+							}
 						}
 						if ui.Button(c.Key("shortcut-help-toggle"), "快捷键").Clicked() {
 							d.showShortcutHelp = !d.showShortcutHelp
@@ -736,6 +754,8 @@ func (d *desktop) view(c *ui.Context) {
 							d.fileWorkspace(c, width, height)
 						case "forward":
 							d.forwardView(c)
+						case "snippets":
+							ui.Column(c).FillWidth().MaxWidth(680).Children(func() { d.quickCommandsSideView(c) })
 						case "cloud":
 							ui.Text(c, "云端工作区").FontSize(22).Bold()
 							d.cloudView(c)
@@ -891,7 +911,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.68"
+const version = "0.3.69"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
