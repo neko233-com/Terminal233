@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -83,7 +84,12 @@ func (d *desktop) newTabResults(query string) []newTabResult {
 			results = append(results, newTabResult{key: fmt.Sprintf("new-tab-session-%d", s.id), label: label, detail: fmt.Sprintf("已打开 · 会话 %d", s.id), accessible: fmt.Sprintf("切换到会话：%s · 会话 %d", label, s.id), kind: "session", sessionID: s.id, enabled: d.canSwitchSession()})
 		}
 	}
-	for _, p := range d.profiles {
+	profiles := d.profiles
+	if query == "" {
+		profiles = append([]profile(nil), d.profiles...)
+		sort.SliceStable(profiles, func(i, j int) bool { return profiles[i].LastConnected > profiles[j].LastConnected })
+	}
+	for _, p := range profiles {
 		name := p.Label
 		if name == "" {
 			name = p.Settings.User + "@" + p.Settings.Host
@@ -237,35 +243,57 @@ func (d *desktop) newTabView(c *ui.Context) {
 			}
 		}
 	}
-	ui.Column(c).FillWidth().MaxWidth(760).Padding(28).Gap(12).Children(func() {
-		ui.Text(c, "新标签页").FontSize(22).Bold()
-		ui.TextInput(c.Key("new-tab-search"), &d.newTabQuery).Label("搜索主机或会话").Placeholder("搜索主机或会话，或输入 ssh 用户@主机").FillWidth().AutoFocus().OnTextKey(d.newTabTextKey)
-		if d.newTabStatus != "" {
-			ui.Text(c, d.newTabStatus).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-		}
-		if d.hasUnsavedConnection() {
-			ui.Text(c, "主机详情有未保存的更改；保存或关闭后可打开其他主机。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-		}
-		if len(results) == 0 && strings.TrimSpace(d.newTabQuery) != "" {
-			ui.Text(c, "没有匹配的主机或会话").FontSize(12).TextColor(c.Theme().TextMuted)
-		}
-		for _, result := range results {
-			r := result
-			button := ui.Button(c.Key(r.key), "").Label(r.accessible).FillWidth().Justify(ui.Start).Disabled(!r.enabled)
-			if highlight == r.key {
-				button = button.Selected(true).Background(c.Theme().SurfacePressed).TextColor(c.Theme().Text)
+	width, _ := c.Size()
+	if d.sidebarVisible() {
+		width -= workspaceSidebarWidth(width)
+	}
+	contentWidth := min(float32(760), max(float32(1), width-48))
+	ui.Row(c).FillWidth().Padding(40, 24).Justify(ui.Center).Children(func() {
+		ui.Column(c).Width(contentWidth).Gap(16).Children(func() {
+			ui.TextInput(c.Key("new-tab-search"), &d.newTabQuery).Label("搜索主机或会话").Placeholder("搜索主机、会话或 SSH 地址").FillWidth().AutoFocus().OnTextKey(d.newTabTextKey)
+			if d.newTabStatus != "" {
+				ui.Text(c, d.newTabStatus).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 			}
-			button.Children(func() {
-				ui.Column(c).FillWidth().Gap(2).Children(func() {
-					ui.Text(c, r.label).Wrap()
-					if r.detail != "" {
-						ui.Text(c, r.detail).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+			if d.hasUnsavedConnection() {
+				ui.Text(c, "主机详情有未保存的更改；保存或关闭后可打开其他主机。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+			}
+			if len(results) == 0 && strings.TrimSpace(d.newTabQuery) != "" {
+				ui.Text(c, "没有匹配的主机或会话").FontSize(12).TextColor(c.Theme().TextMuted)
+			}
+			if len(results) > 0 {
+				ui.Column(c).FillWidth().Padding(12).Gap(4).Background(c.Theme().Surface).Radius(12).Children(func() {
+					if strings.TrimSpace(d.newTabQuery) == "" {
+						ui.Text(c, "会话与主机").Bold().FontSize(13).Padding(4, 8)
+					}
+					for _, result := range results {
+						r := result
+						button := ui.Button(c.Key(r.key), "").Label(r.accessible).FillWidth().Padding(10, 12).Gap(12).BorderWidth(0).Radius(8).Justify(ui.Start).Disabled(!r.enabled)
+						if highlight == r.key {
+							button = button.Selected(true).Background(c.Theme().SurfacePressed).TextColor(c.Theme().Text)
+						}
+						button.Children(func() {
+							icon := serverIcon
+							if r.kind == "local" || r.kind == "session" {
+								icon = terminalIcon
+							} else if r.kind == "cloud" {
+								icon = cloudIcon
+							} else if r.kind == "quick" {
+								icon = searchIcon
+							}
+							ui.Icon(c, icon).Width(18).Height(18).TextColor(c.Theme().TextMuted)
+							ui.Column(c).Grow(1).Gap(2).Children(func() {
+								ui.Text(c, r.label).Wrap()
+								if r.detail != "" {
+									ui.Text(c, r.detail).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+								}
+							})
+						})
+						if button.Clicked() {
+							d.activateNewTabResult(r.key)
+						}
 					}
 				})
-			})
-			if button.Clicked() {
-				d.activateNewTabResult(r.key)
 			}
-		}
+		})
 	})
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"net"
 	"testing"
 
@@ -97,6 +98,39 @@ func TestNewTabFitsMinimumWindow(t *testing.T) {
 		if !ok || r.Y < 0 || r.Y+r.H > 480 {
 			t.Fatalf("%s is not visible at minimum window size: %+v", label, r)
 		}
+	}
+}
+
+func TestNewTabSearchIsCenteredInWorkspace(t *testing.T) {
+	for _, tc := range []struct {
+		width   int
+		sidebar bool
+	}{{640, false}, {1280, false}, {1600, false}, {1280, true}} {
+		d := &desktop{workspace: "connections"}
+		d.openNewTab()
+		d.terminalNavigationOpen = tc.sidebar
+		view := ui.NewTester(d.view, tc.width, 900)
+		r, ok := view.Find("搜索主机或会话")
+		left := float32(0)
+		if tc.sidebar {
+			left = workspaceSidebarWidth(float32(tc.width))
+		}
+		center := (left + float32(tc.width)) / 2
+		if !ok || math.Abs(float64(r.X+r.W/2-center)) > 2 || r.W > 760 {
+			t.Errorf("search not centered at width %d sidebar %v: %+v", tc.width, tc.sidebar, r)
+		}
+	}
+}
+
+func TestNewTabListsRecentLocalHostsFirst(t *testing.T) {
+	d := &desktop{profiles: []profile{
+		{ID: "1", Label: "older", LastConnected: 1},
+		{ID: "2", Label: "newer", LastConnected: 10},
+		{ID: "3", Label: "never"},
+	}}
+	results := d.newTabResults("")
+	if len(results) != 4 || results[1].id != "2" || results[2].id != "1" || results[3].id != "3" || d.profiles[0].ID != "1" {
+		t.Fatalf("recent ordering changed profiles or is incorrect: %#v", results)
 	}
 }
 
