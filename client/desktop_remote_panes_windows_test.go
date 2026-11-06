@@ -692,4 +692,29 @@ func TestDesktopRemotePanes(t *testing.T) {
 	waitKey("group-focus-13")
 	press("group-focus-13")
 	waitSelected("group-focus-13")
+	// Create a workspace directly from saved hosts and the local terminal.
+	press("local-terminal")
+	setPath("workspace-template-name", "主机工作区")
+	press("workspace-hosts-toggle")
+	press("workspace-host-local")
+	press("workspace-host-profile:1")
+	press("workspace-host-profile:2")
+	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_HOSTS"); capturePath != "" {
+		result := call("capture", nil)["result"].(map[string]any)
+		png, decodeErr := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if writeErr := os.WriteFile(capturePath, png, 0600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	press("workspace-hosts-open")
+	waitKey("group-tab-4")
+	waitKey("group-focus-15")
+	waitKey("group-focus-16")
+	waitKey("group-focus-17")
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "已创建工作区") {
+		t.Fatal("workspace was not created from selected hosts")
+	}
 }

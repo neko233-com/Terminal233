@@ -54,6 +54,8 @@ type desktop struct {
 	nextTerminalGroupID, confirmTerminalGroupClose                                          int
 	terminalGroupSelected                                                                   map[int]bool
 	showTerminalGroupSelection                                                              bool
+	showWorkspaceHostSelection                                                              bool
+	workspaceHostSelected                                                                   map[string]bool
 	currentSession, nextSession, splitSession, splitFirstSession, splitFocusedSession       int
 	pendingTerminalFocus                                                                    int
 	showTeams, showAdmin, showInviteEntry                                                   bool
@@ -1076,7 +1078,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.98"
+const version = "0.3.99"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

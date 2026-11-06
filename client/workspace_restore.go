@@ -71,6 +71,9 @@ func (d *desktop) resolveWorkspace(w savedWorkspace) ([]workspaceRestoreTarget, 
 				return nil, fmt.Errorf("第 %d 个主机没有保存可用凭据", i+1)
 			}
 			target.settings, target.label, target.sourceProfileID = settings, settings.User+"@"+settings.Host, string(matches[0].ID)
+			if matches[0].Label != "" {
+				target.label = matches[0].Label
+			}
 		case "cloud":
 			if d.cloud == nil || d.cloud.base == nil || d.cloud.token == "" || d.cloud.base.String() != e.CloudURL || d.cloudUser != e.CloudUser {
 				return nil, fmt.Errorf("第 %d 个主机需要先登录对应云账号", i+1)
@@ -119,6 +122,9 @@ func hydrateWorkspaceCloudTargets(ctx context.Context, targets []workspaceRestor
 			return nil, fmt.Errorf("第 %d 个云主机已修改或不可用，请重新保存工作区", i+1)
 		}
 		target.settings.Password = match.Password
+		if match.Label != "" {
+			target.label = match.Label
+		}
 		target.cloudVersion = match.UpdatedAt
 	}
 	if err := ctx.Err(); err != nil {
@@ -233,6 +239,10 @@ func workspaceTemplateUnchanged(filename string, selected savedWorkspace) error 
 }
 
 func (d *desktop) restoreWorkspaceTemplate(w savedWorkspace) {
+	d.startWorkspace(w, true)
+}
+
+func (d *desktop) startWorkspace(w savedWorkspace, saved bool) {
 	if d.busy || d.win == nil {
 		return
 	}
@@ -240,9 +250,11 @@ func (d *desktop) restoreWorkspaceTemplate(w savedWorkspace) {
 		d.workspaceTemplatesStatus = d.status
 		return
 	}
-	if err := workspaceTemplateUnchanged(d.workspaceTemplatesPath, w); err != nil {
-		d.workspaceTemplatesStatus = err.Error()
-		return
+	if saved {
+		if err := workspaceTemplateUnchanged(d.workspaceTemplatesPath, w); err != nil {
+			d.workspaceTemplatesStatus = err.Error()
+			return
+		}
 	}
 	targets, err := d.resolveWorkspace(w)
 	if err != nil {
@@ -253,7 +265,11 @@ func (d *desktop) restoreWorkspaceTemplate(w savedWorkspace) {
 	op := &workspaceRestore{cancel: cancel}
 	d.workspaceRestore = op
 	d.busy = true
-	d.workspaceTemplatesStatus = "正在恢复工作区…"
+	action := "恢复"
+	if !saved {
+		action = "创建"
+	}
+	d.workspaceTemplatesStatus = "正在" + action + "工作区…"
 	options := d.terminalOptions()
 	var cloudCopy *cloudClient
 	if d.cloud != nil {
@@ -293,7 +309,7 @@ func (d *desktop) restoreWorkspaceTemplate(w savedWorkspace) {
 				if !op.closed.Load() {
 					win.Update(func() {
 						if d.workspaceRestore == op && !op.closed.Load() && !op.cancelling {
-							d.workspaceTemplatesStatus = fmt.Sprintf("正在恢复 %d/%d…", index, len(targets))
+							d.workspaceTemplatesStatus = fmt.Sprintf("正在%s %d/%d…", action, index, len(targets))
 						}
 					})
 				}
@@ -386,11 +402,13 @@ func (d *desktop) restoreWorkspaceTemplate(w savedWorkspace) {
 			d.newTabOpen = false
 			d.workspace = "terminal"
 			d.pendingTerminalFocus = d.currentSession
-			d.status = fmt.Sprintf("已恢复工作区 %s（%d 个会话）", w.Name, len(opened))
+			d.status = fmt.Sprintf("已%s工作区 %s（%d 个会话）", action, w.Name, len(opened))
 			if groupErr != nil {
 				d.status = "会话已恢复，但无法组成工作区：" + groupErr.Error()
 			}
 			d.workspaceTemplatesStatus = ""
+			d.showWorkspaceHostSelection = false
+			d.workspaceHostSelected = nil
 		})
 	}()
 }
@@ -414,10 +432,22 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 	if len(d.workspaceTemplates) > 0 {
 		title = fmt.Sprintf("工作区 · %d", len(d.workspaceTemplates))
 	}
-	if ui.Button(c.Key("workspace-templates-toggle"), title).Clicked() {
-		d.showWorkspaceTemplates = !d.showWorkspaceTemplates
-		d.confirmWorkspaceRemove = ""
-	}
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(6).Children(func() {
+		if ui.Button(c.Key("workspace-templates-toggle"), title).Clicked() {
+			d.showWorkspaceTemplates = !d.showWorkspaceTemplates
+			d.confirmWorkspaceRemove = ""
+		}
+		if d.showWorkspaceTemplates && d.workspaceRestore == nil {
+			if ui.Button(c.Key("workspace-template-refresh"), "刷新工作区").Disabled(d.busy).Clicked() {
+				saved, err := readWorkspaceTemplates(d.workspaceTemplatesPath)
+				if err != nil {
+					d.workspaceTemplatesStatus = "读取失败：" + err.Error()
+				} else {
+					d.workspaceTemplates, d.workspaceTemplatesStatus = saved.Items, "已刷新"
+				}
+			}
+		}
+	})
 	if !d.showWorkspaceTemplates && d.workspaceRestore == nil {
 		return
 	}
@@ -430,14 +460,6 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 		}
 		return
 	}
-	if ui.Button(c.Key("workspace-template-refresh"), "刷新工作区").Disabled(d.busy).Clicked() {
-		saved, err := readWorkspaceTemplates(d.workspaceTemplatesPath)
-		if err != nil {
-			d.workspaceTemplatesStatus = "读取失败：" + err.Error()
-		} else {
-			d.workspaceTemplates, d.workspaceTemplatesStatus = saved.Items, "已刷新"
-		}
-	}
 	ui.Row(c).FillWidth().Gap(6).Children(func() {
 		ui.TextInput(c.Key("workspace-template-name"), &d.workspaceTemplateName).Label("新工作区名称").Placeholder("工作区名称").Grow(1)
 		if ui.Button(c.Key("workspace-template-save"), "保存当前会话").Disabled(d.busy || len(d.sessions) == 0).Clicked() {
@@ -447,22 +469,25 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 			d.createGroupFromCurrentSessions()
 		}
 	})
+	d.workspaceHostSelection(c)
 	selectionLabel := "选择终端"
 	if d.showTerminalGroupSelection {
 		selectionLabel = "使用全部终端"
 	}
-	if ui.Button(c.Key("workspace-group-select"), selectionLabel).Disabled(d.busy || len(d.sessions) < 2 || d.terminalGroupFor(d.currentSession) != nil).Clicked() {
-		d.showTerminalGroupSelection = !d.showTerminalGroupSelection
-		d.terminalGroupSelected = nil
-		if d.showTerminalGroupSelection {
-			d.terminalGroupSelected = map[int]bool{}
-			for _, session := range d.sessions {
-				if d.terminalGroupFor(session.id) == nil && session.term != nil && !terminalEnded(session.term) {
-					d.terminalGroupSelected[session.id] = true
+	ui.Row(c).FillWidth().Children(func() {
+		if ui.Button(c.Key("workspace-group-select"), selectionLabel).Disabled(d.busy || len(d.sessions) < 2 || d.terminalGroupFor(d.currentSession) != nil).Clicked() {
+			d.showTerminalGroupSelection = !d.showTerminalGroupSelection
+			d.terminalGroupSelected = nil
+			if d.showTerminalGroupSelection {
+				d.terminalGroupSelected = map[int]bool{}
+				for _, session := range d.sessions {
+					if d.terminalGroupFor(session.id) == nil && session.term != nil && !terminalEnded(session.term) {
+						d.terminalGroupSelected[session.id] = true
+					}
 				}
 			}
 		}
-	}
+	})
 	if d.showTerminalGroupSelection {
 		ui.Scroll(c.Key("workspace-group-selection-list")).Label("选择工作区终端").Height(min(float32(150), float32(len(d.sessions)*38))).FillWidth().Children(func() {
 			for _, entry := range d.sessions {

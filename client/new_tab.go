@@ -15,6 +15,8 @@ func (d *desktop) openNewTab() {
 		d.newTabReturn = d.workspace
 		d.showTerminalGroupSelection = false
 		d.terminalGroupSelected = nil
+		d.showWorkspaceHostSelection = false
+		d.workspaceHostSelected = nil
 	}
 	d.newTabOpen, d.workspace, d.terminalNavigationOpen = true, "new-tab", false
 	d.newTabStatus = ""
