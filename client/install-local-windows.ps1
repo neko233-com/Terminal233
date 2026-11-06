@@ -44,6 +44,31 @@ $shell = New-Object -ComObject WScript.Shell
 $link = $shell.CreateShortcut($shortcut)
 try { if (-not [string]::Equals($link.TargetPath, $installedExe, [StringComparison]::OrdinalIgnoreCase)) { throw 'Start Menu shortcut target mismatch.' } }
 finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+# Point the familiar NekoSSH entry points at this install. Preserve any
+# unrelated shortcut and the previous application's files and data.
+$oldNekoExe = Join-Path $env:LOCALAPPDATA 'Programs\NekoSSH\nekossh.exe'
+$nekoShortcuts = @(
+    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'NekoSSH.lnk'),
+    (Join-Path ([Environment]::GetFolderPath('Programs')) 'NekoSSH.lnk')
+)
+$shell = New-Object -ComObject WScript.Shell
+try {
+    foreach ($path in $nekoShortcuts) {
+        $existing = Test-Path -LiteralPath $path -PathType Leaf
+        $link = $shell.CreateShortcut($path)
+        if ($existing -and -not [string]::Equals($link.TargetPath, $oldNekoExe, [StringComparison]::OrdinalIgnoreCase) -and -not [string]::Equals($link.TargetPath, $installedExe, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "NekoSSH shortcut points to an unrecognized target; preserved: $path"
+        }
+        $link.TargetPath = $installedExe
+        $link.Arguments = ''
+        $link.WorkingDirectory = $installRoot
+        $link.IconLocation = "$installedExe,0"
+        $link.Description = 'NekoSSH'
+        $link.Save()
+        $check = $shell.CreateShortcut($path)
+        if (-not [string]::Equals($check.TargetPath, $installedExe, [StringComparison]::OrdinalIgnoreCase)) { throw "NekoSSH shortcut target mismatch: $path" }
+    }
+} finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
 $key = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.neko233.terminal233'
 if ($key.DisplayVersion -ne $version -or $key.InstallLocation -ne $installRoot) { throw 'Uninstall registration verification failed.' }
 Set-Content -LiteralPath (Join-Path $installRoot 'UNSIGNED-BUILD.txt') -Value "Unsigned Windows build; source commit $head" -Encoding UTF8
