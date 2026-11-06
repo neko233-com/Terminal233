@@ -96,7 +96,7 @@ func (d *desktop) cloudRefresh() {
 		d.win.Update(func() {
 			d.busy = false
 			if d.cloud == client {
-				client.conditionalUpdates, client.conditionalDeletes, client.cloudGroups, client.cloudWorkspaces, client.capabilityUnknown = probe.conditionalUpdates, probe.conditionalDeletes, probe.cloudGroups, probe.cloudWorkspaces, probe.capabilityUnknown
+				client.conditionalUpdates, client.conditionalDeletes, client.cloudGroups, client.cloudWorkspaces, client.cloudTags, client.capabilityUnknown = probe.conditionalUpdates, probe.conditionalDeletes, probe.cloudGroups, probe.cloudWorkspaces, probe.cloudTags, probe.capabilityUnknown
 				d.setCloudWorkspaceState(workspaces, workspaceErr)
 			}
 			d.finishCloudRefresh(accounts, err)
@@ -180,9 +180,14 @@ func (d *desktop) cloudSave() {
 }
 
 func (d *desktop) cloudSaveForm() {
+	// Preserve pending local edits before the form becomes bound to a cloud
+	// record; cloud writes do not persist the local group or local credentials.
+	if !d.settingsFromCloud && !d.prepareConnectionNavigation() {
+		return
+	}
 	settings := d.settings
 	settings.Fingerprint = d.fingerprint
-	binding := cloudSaveBinding{client: d.cloud, form: true, formSettings: d.settings, formFingerprint: d.fingerprint, formLabel: d.profileLabel, formProfileID: d.selectedProfile, formFromCloud: d.settingsFromCloud}
+	binding := cloudSaveBinding{client: d.cloud, form: true, formSettings: d.settings, formFingerprint: d.fingerprint, formLabel: d.profileLabel, formTags: d.profileTags, formGroup: d.profileGroup, formProfileID: d.selectedProfile, formFromCloud: d.settingsFromCloud}
 	if d.cloud != nil {
 		binding.scope = d.cloud.teamID
 		binding.sourceID = d.formCloudSource()
@@ -240,6 +245,21 @@ func (d *desktop) saveCloudConnection(settings connectionSettings, label, source
 		d.cloudStatus, d.status = err.Error(), err.Error()
 		return
 	}
+	if binding.form {
+		tags, tagErr := parseProfileTags(binding.formTags)
+		if tagErr != nil {
+			d.cloudStatus, d.status = tagErr.Error(), tagErr.Error()
+			return
+		}
+		if len(tags) > 0 && !d.cloud.cloudTags {
+			d.cloudStatus = "当前同步服务尚不支持主机标签，请先更新服务。"
+			d.status = d.cloudStatus
+			return
+		}
+		if d.cloud.cloudTags {
+			account.Tags = append([]string{}, tags...)
+		}
+	}
 	if err := applyConditionalVersion(d.cloud, &account, binding.sourceVersion); err != nil {
 		d.cloudStatus, d.status = err.Error(), "请重新载入云端连接。"
 		return
@@ -282,15 +302,15 @@ func applyConditionalVersion(c *cloudClient, account *cloudAccount, version stri
 // A response may arrive after the user has moved to a different form or
 // session. Bind its ID only to the exact state that initiated the write.
 type cloudSaveBinding struct {
-	client                                    *cloudClient
-	scope                                     string
-	sessionID                                 int
-	sessionSettings                           connectionSettings
-	form                                      bool
-	formSettings                              connectionSettings
-	formFingerprint, formLabel, formProfileID string
-	formFromCloud                             bool
-	sourceID, sourceVersion                   string
+	client                                                         *cloudClient
+	scope                                                          string
+	sessionID                                                      int
+	sessionSettings                                                connectionSettings
+	form                                                           bool
+	formSettings                                                   connectionSettings
+	formFingerprint, formLabel, formTags, formGroup, formProfileID string
+	formFromCloud                                                  bool
+	sourceID, sourceVersion                                        string
 }
 
 func (d *desktop) bindSavedCloudID(binding cloudSaveBinding, id, version string) bool {
@@ -298,7 +318,7 @@ func (d *desktop) bindSavedCloudID(binding cloudSaveBinding, id, version string)
 		return false
 	}
 	if binding.form {
-		if d.settings != binding.formSettings || d.fingerprint != binding.formFingerprint || d.profileLabel != binding.formLabel || d.selectedProfile != binding.formProfileID || d.settingsFromCloud != binding.formFromCloud || d.formCloudSource() != binding.sourceID || d.formCloudVersion() != binding.sourceVersion {
+		if d.settings != binding.formSettings || d.fingerprint != binding.formFingerprint || d.profileLabel != binding.formLabel || d.profileTags != binding.formTags || d.profileGroup != binding.formGroup || d.selectedProfile != binding.formProfileID || d.settingsFromCloud != binding.formFromCloud || d.formCloudSource() != binding.sourceID || d.formCloudVersion() != binding.sourceVersion {
 			return false
 		}
 		if d.cloudFormSources == nil {
@@ -310,6 +330,12 @@ func (d *desktop) bindSavedCloudID(binding cloudSaveBinding, id, version string)
 			d.cloudFormVersions = make(map[string]string)
 		}
 		d.cloudFormVersions[binding.scope] = version
+		if binding.formFromCloud && binding.formGroup == "" {
+			d.captureConnectionDraft()
+		} else if !binding.formFromCloud && !d.hasUnsavedConnection() {
+			d.profileGroup = ""
+			d.captureConnectionDraft()
+		}
 		return true
 	}
 	for _, session := range d.sessions {
@@ -366,7 +392,7 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.showProfileInspector = false
 	d.profileInspectorAt = time.Time{}
 	d.profileGroup = ""
-	d.profileTags = ""
+	d.profileTags = strings.Join(account.Tags, ", ")
 	d.profileLabel = account.Label
 	d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
 	d.settingsFromCloud = true

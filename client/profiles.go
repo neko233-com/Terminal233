@@ -766,6 +766,19 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 							d.scheduleProfileInspector(c)
 						}
 					}
+					if len(account.Tags) > 0 {
+						ui.Row(c).FillWidth().Wrap().Gap(4).Children(func() {
+							for i, tag := range account.Tags {
+								tag := tag
+								if ui.Button(c.Key(fmt.Sprintf("cloud-profile-tag-%s-%d", account.ID, i)), tag).Label("搜索云端标签："+tag).Tooltip("搜索标签："+tag).Padding(3, 7).BorderWidth(0).Background(c.Theme().SurfaceHover).Disabled(draftBlocked).Clicked() {
+									if d.closeConnectionForNavigation() {
+										d.profileFilter, d.profileSearch = "", tag
+										d.profileFavorites, d.profileRecent = false, false
+									}
+								}
+							}
+						})
+					}
 					showActions := d.showCompactProfileTools || len(d.checkedCloud) > 0 || (!inspectorCapable && d.selectedCloudProfile == account.ID)
 					if showActions {
 						ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {

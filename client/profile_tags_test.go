@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +56,77 @@ func TestProfileTagsRoundTripSearchAndFilter(t *testing.T) {
 	restored.profileTags = "changed"
 	if !restored.hasUnsavedConnection() {
 		t.Fatal("tag edits not included in draft protection")
+	}
+}
+
+func TestCloudTagsPayloadOldServiceAndEmptyClear(t *testing.T) {
+	var body []byte
+	s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"id"}`))
+	}))
+	defer s.Close()
+	c, err := newCloudClient(s.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.http = s.Client()
+	c.token = "token"
+	a := cloudAccount{ID: "id", Tags: []string{"prod"}}
+	if _, err = c.saveReturningRecord(a); err == nil {
+		t.Fatal("old service silently lost tags")
+	}
+	c.cloudTags = true
+	a.Tags = []string{}
+	if _, err = c.saveReturningRecord(a); err != nil || !strings.Contains(string(body), `"tags":[]`) {
+		t.Fatalf("empty tags not sent as explicit clear: %s %v", body, err)
+	}
+	a.Tags = nil
+	if _, err = c.saveReturningRecord(a); err != nil || strings.Contains(string(body), `"tags"`) {
+		t.Fatal("omitted tags should preserve remote data")
+	}
+}
+
+func TestCloudTagsVisibleSearchAndEditor(t *testing.T) {
+	a := cloudAccount{ID: "cloud1", Label: "remote", Host: "example.test", Port: 22, Username: "alice", Tags: []string{"生产", "api"}}
+	d := &desktop{workspace: "connections", cloud: &cloudClient{cloudTags: true}, accounts: []cloudAccount{a}}
+	v := ui.NewTester(d.view, 1280, 900)
+	if err := v.Click("搜索云端标签：生产"); err != nil {
+		t.Fatal(err)
+	}
+	if d.profileSearch != "生产" || !d.cloudAccountVisible(a) || d.cloudAccountVisible(cloudAccount{Label: "other", Host: "other.test"}) {
+		t.Fatal("cloud tag filtering failed")
+	}
+	results := d.newTabResults("api remote")
+	if len(results) != 1 || results[0].id != "cloud1" {
+		t.Fatal("new-tab cloud tag search failed")
+	}
+	d.loadCloudAccount(a)
+	if d.profileTags != "生产, api" {
+		t.Fatal("cloud tags missing from editor")
+	}
+	binding := cloudSaveBinding{client: d.cloud, form: true, formSettings: d.settings, formLabel: d.profileLabel, formTags: d.profileTags, formFromCloud: true, sourceID: "cloud1"}
+	d.profileTags = "edited"
+	if d.bindSavedCloudID(binding, "cloud1", "") {
+		t.Fatal("late save was bound to changed tags")
+	}
+	binding.formTags = d.profileTags
+	if !d.hasUnsavedConnection() || !d.bindSavedCloudID(binding, "cloud1", "") || d.hasUnsavedConnection() {
+		t.Fatal("confirmed cloud tag update did not clear its draft")
+	}
+}
+
+func TestCloudArchiveRetainsTagsAndGroups(t *testing.T) {
+	a := cloudAccount{ID: "id", Label: "work", Host: "example.test", Port: 22, Username: "alice", Password: "password", HostKeyFingerprint: "SHA256:verified", Tags: []string{"private-tag"}}
+	groups := cloudGroupSnapshot{Groups: []string{"work"}, Assignments: map[string]string{"id": "work"}, AccountIDs: []string{"id"}, Revision: strings.Repeat("a", 64)}
+	data, err := encodeCloudArchiveWithGroups([]cloudAccount{a}, "long-backup-password", groups)
+	if err != nil || strings.Contains(string(data), "private-tag") {
+		t.Fatal("encrypted tag backup failed", err)
+	}
+	doc, err := decodeCloudArchiveDocument(data, "long-backup-password")
+	if err != nil || doc.Version != 3 || len(doc.Accounts) != 1 || len(doc.Accounts[0].Tags) != 1 || doc.Accounts[0].Tags[0] != "private-tag" || doc.AccountGroups[0] != "work" {
+		t.Fatal("archive lost tags or groups", err)
 	}
 }
 

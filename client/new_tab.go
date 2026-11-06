@@ -114,7 +114,7 @@ func (d *desktop) newTabResults(query string) []newTabResult {
 				name = a.Username + "@" + a.Host
 			}
 			address := a.Username + "@" + net.JoinHostPort(a.Host, strconv.Itoa(a.Port))
-			if newTabMatches(query, name+" "+address+" "+a.Username+"@"+a.Host+" "+a.Host+" "+a.Username) {
+			if newTabMatches(query, name+" "+address+" "+a.Username+"@"+a.Host+" "+a.Host+" "+a.Username+" "+strings.Join(a.Tags, " ")) {
 				results = append(results, newTabResult{key: "new-tab-cloud-" + a.ID, label: name, detail: address + " · 云端", accessible: "打开主机：" + name + " · 云端", kind: "cloud", id: a.ID, enabled: !openDisabled})
 			}
 		}

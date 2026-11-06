@@ -38,6 +38,14 @@ func importCloudAccounts(ctx context.Context, c *cloudClient, items []cloudAccou
 		result.preflightErr = fmt.Errorf("当前空间最多 %d 条连接，剩余容量不足", maxCloudArchiveAccounts)
 		return result
 	}
+	if !c.cloudTags {
+		for _, item := range items {
+			if len(item.Tags) > 0 {
+				result.preflightErr = fmt.Errorf("目标服务不支持备份中的主机标签")
+				return result
+			}
+		}
+	}
 	result.preflightDone = true
 	seen := make(map[string]bool, len(existing))
 	for _, a := range existing {
@@ -72,7 +80,7 @@ func importCloudArchive(ctx context.Context, c *cloudClient, doc cloudArchiveDoc
 }
 
 func importCloudArchiveExpected(ctx context.Context, c *cloudClient, doc cloudArchiveDocument, expected string) archiveImportResult {
-	if doc.Version != 2 {
+	if doc.Version < 2 {
 		return importCloudAccounts(ctx, c, doc.Accounts)
 	}
 	if !validCloudArchiveGroups(doc) {

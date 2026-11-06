@@ -253,7 +253,7 @@ func (s *Store) listTeamAccounts(user, id string) ([]Account, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, Account{ID: a.ID, Label: a.Label, Host: a.Host, Port: a.Port, Username: a.Username, Password: password, HostKeyFingerprint: a.HostKeyFingerprint, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt})
+		result = append(result, Account{ID: a.ID, Label: a.Label, Host: a.Host, Port: a.Port, Username: a.Username, Password: password, HostKeyFingerprint: a.HostKeyFingerprint, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, Tags: append([]string(nil), a.Tags...)})
 	}
 	return result, nil
 }
@@ -265,6 +265,9 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 	role := t.Members[user]
 	if !ok || t.Disabled || !s.activeUserLocked(user) || (role != "owner" && role != "admin") {
 		return Account{}, errTeamUnavailable
+	}
+	if !validAccountTags(a.Tags) {
+		return Account{}, errors.New("invalid account tags")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	index := -1
@@ -283,6 +286,9 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 				now = nextAccountTimestamp(existing.UpdatedAt)
 				index = i
 				a.CreatedAt = existing.CreatedAt
+				if a.Tags == nil {
+					a.Tags = append([]string(nil), existing.Tags...)
+				}
 				break
 			}
 		}
@@ -296,8 +302,11 @@ func (s *Store) saveTeamAccount(user, id string, a Account) (Account, error) {
 	if err != nil {
 		return Account{}, err
 	}
-	record := storedAccount{ID: a.ID, Label: a.Label, Host: a.Host, Port: a.Port, Username: a.Username, EncryptedPassword: encrypted, HostKeyFingerprint: a.HostKeyFingerprint, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt}
+	record := storedAccount{ID: a.ID, Label: a.Label, Host: a.Host, Port: a.Port, Username: a.Username, EncryptedPassword: encrypted, HostKeyFingerprint: a.HostKeyFingerprint, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, Tags: append([]string(nil), a.Tags...)}
 	err = s.transactionalLocked(func() error {
+		if len(record.Tags) > 0 {
+			s.doc.Version = max(s.doc.Version, 4)
+		}
 		items := append([]storedAccount(nil), t.Accounts...)
 		if index < 0 {
 			items = append(items, record)

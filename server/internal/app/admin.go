@@ -69,7 +69,7 @@ func (s *Store) importBackup(data []byte, admin string) error {
 	if err = json.Unmarshal(plain, &doc); err != nil {
 		return err
 	}
-	if (doc.Version < 1 || doc.Version > 3) || doc.Users == nil || doc.Accounts == nil {
+	if (doc.Version < 1 || doc.Version > 4) || doc.Users == nil || doc.Accounts == nil {
 		return errors.New("invalid backup")
 	}
 	if err = validateCloudGroupDocument(doc); err != nil {
@@ -77,6 +77,9 @@ func (s *Store) importBackup(data []byte, admin string) error {
 	}
 	if err = validateCloudWorkspaceDocument(doc); err != nil {
 		return errors.New("invalid backup workspace state")
+	}
+	if err = validateAccountTagsDocument(doc); err != nil {
+		return errors.New("invalid backup account tags")
 	}
 	adminRecord, ok := doc.Users[normalizeUsername(admin)]
 	if !ok || adminRecord.Disabled {

@@ -22,7 +22,7 @@ func (d *desktop) cloudAccountVisible(a cloudAccount) bool {
 		return false
 	}
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
-	return query == "" || strings.Contains(strings.ToLower(a.Label+" "+a.Host+" "+a.Username), query)
+	return query == "" || strings.Contains(strings.ToLower(a.Label+" "+a.Host+" "+a.Username+" "+strings.Join(a.Tags, " ")), query)
 }
 
 func (d *desktop) checkCloudAccount(a cloudAccount, checked bool) {

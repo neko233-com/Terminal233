@@ -14,16 +14,17 @@ import (
 )
 
 type cloudAccount struct {
-	ID                 string `json:"id,omitempty"`
-	Label              string `json:"label"`
-	Host               string `json:"host"`
-	Port               int    `json:"port"`
-	Username           string `json:"username"`
-	Password           string `json:"password"`
-	HostKeyFingerprint string `json:"hostKeyFingerprint"`
-	CreatedAt          string `json:"createdAt,omitempty"`
-	UpdatedAt          string `json:"updatedAt,omitempty"`
-	ExpectedUpdatedAt  string `json:"expectedUpdatedAt,omitempty"`
+	ID                 string   `json:"id,omitempty"`
+	Label              string   `json:"label"`
+	Host               string   `json:"host"`
+	Port               int      `json:"port"`
+	Username           string   `json:"username"`
+	Password           string   `json:"password"`
+	HostKeyFingerprint string   `json:"hostKeyFingerprint"`
+	CreatedAt          string   `json:"createdAt,omitempty"`
+	UpdatedAt          string   `json:"updatedAt,omitempty"`
+	ExpectedUpdatedAt  string   `json:"expectedUpdatedAt,omitempty"`
+	Tags               []string `json:"tags,omitempty"`
 }
 
 type cloudClient struct {
@@ -36,6 +37,7 @@ type cloudClient struct {
 	conditionalDeletes bool
 	cloudGroups        bool
 	cloudWorkspaces    bool
+	cloudTags          bool
 	capabilityUnknown  bool
 }
 
@@ -59,6 +61,7 @@ func (c *cloudClient) discoverCapabilities() {
 	c.conditionalDeletes = false
 	c.cloudGroups = false
 	c.cloudWorkspaces = false
+	c.cloudTags = false
 	c.capabilityUnknown = true
 	if c.request(http.MethodGet, "/healthz", nil, &health) != nil || health.Status != "ok" {
 		return
@@ -76,6 +79,9 @@ func (c *cloudClient) discoverCapabilities() {
 		}
 		if capability == "cloud-workspaces-v1" {
 			c.cloudWorkspaces = true
+		}
+		if capability == "account-tags-v1" {
+			c.cloudTags = true
 		}
 	}
 }
@@ -178,13 +184,43 @@ func (c *cloudClient) list() ([]cloudAccount, error) {
 		return nil, errors.New("请先登录同步服务")
 	}
 	err := c.request(http.MethodGet, c.accountsPath(), nil, &result)
+	if err == nil {
+		for _, account := range result {
+			if !validStoredProfileTags(account.Tags) {
+				return nil, errors.New("云主机标签无效")
+			}
+		}
+	}
 	return result, err
+}
+
+// A missing tags field means preserve existing tags, including for old clients.
+// A present empty array deliberately clears them.
+func (c *cloudClient) accountPayload(a cloudAccount) (any, error) {
+	if !validStoredProfileTags(a.Tags) {
+		return nil, errors.New("主机标签无效")
+	}
+	if !c.cloudTags && len(a.Tags) > 0 {
+		return nil, errors.New("当前同步服务尚不支持主机标签，请先更新服务")
+	}
+	var tags *[]string
+	if c.cloudTags && a.Tags != nil {
+		tags = &a.Tags
+	}
+	return struct {
+		cloudAccount
+		Tags *[]string `json:"tags,omitempty"`
+	}{cloudAccount: a, Tags: tags}, nil
 }
 func (c *cloudClient) save(a cloudAccount) error {
 	if c.token == "" {
 		return errors.New("请先登录同步服务")
 	}
-	return c.request(http.MethodPost, c.accountsPath(), a, nil)
+	payload, err := c.accountPayload(a)
+	if err != nil {
+		return err
+	}
+	return c.request(http.MethodPost, c.accountsPath(), payload, nil)
 }
 
 // saveReturningID uses the server's exact response ID, avoiding endpoint-based
@@ -202,7 +238,11 @@ func (c *cloudClient) saveReturningRecord(a cloudAccount) (cloudAccount, error) 
 		ID        string `json:"id"`
 		UpdatedAt string `json:"updatedAt"`
 	}
-	if err := c.request(http.MethodPost, c.accountsPath(), a, &result); err != nil {
+	payload, err := c.accountPayload(a)
+	if err != nil {
+		return cloudAccount{}, err
+	}
+	if err := c.request(http.MethodPost, c.accountsPath(), payload, &result); err != nil {
 		return cloudAccount{}, err
 	}
 	if result.ID == "" || len(result.ID) > 128 || strings.ContainsAny(result.ID, "/\\\x00") || (a.ID != "" && result.ID != a.ID) {

@@ -43,15 +43,16 @@ type userRecord struct {
 }
 
 type storedAccount struct {
-	ID                 string `json:"id"`
-	Label              string `json:"label"`
-	Host               string `json:"host"`
-	Port               int    `json:"port"`
-	Username           string `json:"username"`
-	EncryptedPassword  string `json:"encryptedPassword"`
-	HostKeyFingerprint string `json:"hostKeyFingerprint,omitempty"`
-	CreatedAt          string `json:"createdAt"`
-	UpdatedAt          string `json:"updatedAt"`
+	ID                 string   `json:"id"`
+	Label              string   `json:"label"`
+	Host               string   `json:"host"`
+	Port               int      `json:"port"`
+	Username           string   `json:"username"`
+	EncryptedPassword  string   `json:"encryptedPassword"`
+	HostKeyFingerprint string   `json:"hostKeyFingerprint,omitempty"`
+	CreatedAt          string   `json:"createdAt"`
+	UpdatedAt          string   `json:"updatedAt"`
+	Tags               []string `json:"tags,omitempty"`
 }
 
 type Store struct {
@@ -189,7 +190,7 @@ func openStore(path, masterKey string) (result *Store, err error) {
 	return s, nil
 }
 func (s *Store) validateDocument() error {
-	if (s.doc.Version < 1 || s.doc.Version > 3) || s.doc.Users == nil || s.doc.Accounts == nil {
+	if (s.doc.Version < 1 || s.doc.Version > 4) || s.doc.Users == nil || s.doc.Accounts == nil {
 		return errors.New("数据文件版本不受支持")
 	}
 	if s.doc.Teams == nil {
@@ -201,7 +202,10 @@ func (s *Store) validateDocument() error {
 	if err := validateCloudGroupDocument(s.doc); err != nil {
 		return err
 	}
-	return validateCloudWorkspaceDocument(s.doc)
+	if err := validateCloudWorkspaceDocument(s.doc); err != nil {
+		return err
+	}
+	return validateAccountTagsDocument(s.doc)
 }
 func openSQLite(path string) (*sql.DB, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
@@ -340,7 +344,7 @@ func (s *Store) listAccounts(username string) ([]Account, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, Account{ID: item.ID, Label: item.Label, Host: item.Host, Port: item.Port, Username: item.Username, Password: password, HostKeyFingerprint: item.HostKeyFingerprint, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt})
+		result = append(result, Account{ID: item.ID, Label: item.Label, Host: item.Host, Port: item.Port, Username: item.Username, Password: password, HostKeyFingerprint: item.HostKeyFingerprint, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, Tags: append([]string(nil), item.Tags...)})
 	}
 	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].Label) < strings.ToLower(result[j].Label) })
 	return result, nil
@@ -352,6 +356,9 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 	owner = normalizeUsername(owner)
 	if !s.activeUserLocked(owner) {
 		return Account{}, errTeamUnavailable
+	}
+	if !validAccountTags(account.Tags) {
+		return Account{}, errors.New("invalid account tags")
 	}
 	items := append([]storedAccount(nil), s.doc.Accounts[owner]...)
 	original := s.doc.Accounts[owner]
@@ -369,6 +376,9 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 				now = nextAccountTimestamp(item.UpdatedAt)
 				found = true
 				account.CreatedAt = item.CreatedAt
+				if account.Tags == nil {
+					account.Tags = append([]string(nil), item.Tags...)
+				}
 				break
 			}
 		}
@@ -385,7 +395,11 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 	if err != nil {
 		return Account{}, err
 	}
-	record := storedAccount{ID: account.ID, Label: account.Label, Host: account.Host, Port: account.Port, Username: account.Username, EncryptedPassword: ciphertext, HostKeyFingerprint: account.HostKeyFingerprint, CreatedAt: account.CreatedAt, UpdatedAt: account.UpdatedAt}
+	record := storedAccount{ID: account.ID, Label: account.Label, Host: account.Host, Port: account.Port, Username: account.Username, EncryptedPassword: ciphertext, HostKeyFingerprint: account.HostKeyFingerprint, CreatedAt: account.CreatedAt, UpdatedAt: account.UpdatedAt, Tags: append([]string(nil), account.Tags...)}
+	previousVersion := s.doc.Version
+	if len(record.Tags) > 0 {
+		s.doc.Version = max(s.doc.Version, 4)
+	}
 	if account.ID != "" {
 		for i, item := range items {
 			if item.ID == account.ID {
@@ -393,6 +407,7 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 				s.doc.Accounts[owner] = items
 				if err := s.saveLocked(); err != nil {
 					s.doc.Accounts[owner] = original
+					s.doc.Version = previousVersion
 					return Account{}, err
 				}
 				return account, nil
@@ -400,11 +415,13 @@ func (s *Store) upsertAccount(owner string, account Account) (Account, error) {
 		}
 	}
 	if len(items) >= maxAccountsPerUser {
+		s.doc.Version = previousVersion
 		return Account{}, errAccountLimit
 	}
 	s.doc.Accounts[owner] = append(items, record)
 	if err := s.saveLocked(); err != nil {
 		s.doc.Accounts[owner] = original
+		s.doc.Version = previousVersion
 		return Account{}, err
 	}
 	return account, nil

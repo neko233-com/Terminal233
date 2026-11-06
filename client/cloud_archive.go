@@ -54,6 +54,10 @@ func normalizeArchiveAccounts(accounts []cloudAccount) ([]cloudAccount, error) {
 		if err != nil {
 			return nil, fmt.Errorf("备份第 %d 条连接无效", i+1)
 		}
+		if !validStoredProfileTags(account.Tags) {
+			return nil, fmt.Errorf("备份第 %d 条连接的标签无效", i+1)
+		}
+		item.Tags = append([]string(nil), account.Tags...)
 		result = append(result, item)
 	}
 	return result, nil
@@ -83,7 +87,16 @@ func encodeCloudArchive(accounts []cloudAccount, password string) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	return encodeCloudArchiveDocument(cloudArchiveDocument{Version: 1, Accounts: items}, password)
+	doc := cloudArchiveDocument{Version: 1, Accounts: items}
+	for _, item := range items {
+		if len(item.Tags) > 0 {
+			doc.Version = 3
+			doc.Groups = []string{}
+			doc.AccountGroups = make([]string, len(items))
+			break
+		}
+	}
+	return encodeCloudArchiveDocument(doc, password)
 }
 
 func encodeCloudArchiveWithGroups(accounts []cloudAccount, password string, groups cloudGroupSnapshot) ([]byte, error) {
@@ -98,7 +111,14 @@ func encodeCloudArchiveWithGroups(accounts []cloudAccount, password string, grou
 	for i, a := range accounts {
 		paths[i] = groups.Assignments[a.ID]
 	}
-	return encodeCloudArchiveDocument(cloudArchiveDocument{Version: 2, Accounts: items, Groups: append([]string{}, groups.Groups...), AccountGroups: paths}, password)
+	version := 2
+	for _, item := range items {
+		if len(item.Tags) > 0 {
+			version = 3
+			break
+		}
+	}
+	return encodeCloudArchiveDocument(cloudArchiveDocument{Version: version, Accounts: items, Groups: append([]string{}, groups.Groups...), AccountGroups: paths}, password)
 }
 
 func encodeCloudArchiveDocument(document cloudArchiveDocument, password string) ([]byte, error) {
@@ -147,7 +167,7 @@ func decodeCloudArchiveDocument(data []byte, password string) (cloudArchiveDocum
 	}
 	defer clear(plain)
 	var document cloudArchiveDocument
-	if json.Unmarshal(plain, &document) != nil || (document.Version != 1 && document.Version != 2) || document.Accounts == nil {
+	if json.Unmarshal(plain, &document) != nil || (document.Version < 1 || document.Version > 3) || document.Accounts == nil {
 		return empty, errors.New("备份内容无效")
 	}
 	items, err := normalizeArchiveAccounts(document.Accounts)
@@ -155,7 +175,14 @@ func decodeCloudArchiveDocument(data []byte, password string) (cloudArchiveDocum
 		return empty, err
 	}
 	document.Accounts = items
-	if document.Version == 2 {
+	if document.Version < 3 {
+		for _, item := range document.Accounts {
+			if len(item.Tags) > 0 {
+				return empty, errors.New("备份版本与标签不符")
+			}
+		}
+	}
+	if document.Version >= 2 {
 		if !validCloudArchiveGroups(document) {
 			return empty, errors.New("备份分组无效")
 		}

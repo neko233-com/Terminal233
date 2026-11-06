@@ -76,16 +76,36 @@ func TestCloudAgainstGoServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.discoverCapabilities()
-	if !client.conditionalUpdates || !client.conditionalDeletes || !client.cloudGroups || !client.cloudWorkspaces {
+	if !client.conditionalUpdates || !client.conditionalDeletes || !client.cloudGroups || !client.cloudWorkspaces || !client.cloudTags {
 		t.Fatal("server conditional-update capability missing")
 	}
-	account := cloudAccount{Label: "sample", Host: "example.test", Port: 22, Username: "me", Password: "ssh-password", HostKeyFingerprint: "SHA256:verified"}
+	account := cloudAccount{Label: "sample", Host: "example.test", Port: 22, Username: "me", Password: "ssh-password", HostKeyFingerprint: "SHA256:verified", Tags: []string{"production", "database"}}
 	if err := client.save(account); err != nil {
 		t.Fatal(err)
 	}
 	accounts, err := client.list()
-	if err != nil || len(accounts) != 1 || accounts[0].Password != "ssh-password" {
+	if err != nil || len(accounts) != 1 || accounts[0].Password != "ssh-password" || len(accounts[0].Tags) != 2 {
 		t.Fatalf("list=%v err=%v", accounts, err)
+	}
+	legacy := accounts[0]
+	legacy.Tags = nil
+	legacy.ExpectedUpdatedAt = legacy.UpdatedAt
+	if err = client.request(http.MethodPost, client.accountsPath(), legacy, nil); err != nil {
+		t.Fatal("legacy update failed", err)
+	}
+	accounts, err = client.list()
+	if err != nil || len(accounts) != 1 || len(accounts[0].Tags) != 2 {
+		t.Fatal("legacy client removed tags", err)
+	}
+	clearTags := accounts[0]
+	clearTags.Tags = []string{}
+	clearTags.ExpectedUpdatedAt = clearTags.UpdatedAt
+	if _, err = client.saveReturningRecord(clearTags); err != nil {
+		t.Fatal("clear tags failed", err)
+	}
+	accounts, err = client.list()
+	if err != nil || len(accounts) != 1 || len(accounts[0].Tags) != 0 {
+		t.Fatal("tags were not cleared", err)
 	}
 	workspaceState, err := client.listCloudWorkspaces()
 	if err != nil {

@@ -69,7 +69,8 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	if err := client.login("archive-test", "test-cloud-password"); err != nil {
 		t.Fatal(err)
 	}
-	account := cloudAccount{Label: "隔离测试连接", Host: "example.test", Port: 22, Username: "alice", Password: "test-ssh-password", HostKeyFingerprint: "SHA256:test"}
+	client.discoverCapabilities()
+	account := cloudAccount{Label: "隔离测试连接", Host: "example.test", Port: 22, Username: "alice", Password: "test-ssh-password", HostKeyFingerprint: "SHA256:test", Tags: []string{"fixture-prod"}}
 	if err := client.save(account); err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +156,10 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	waitText("同步服务已登录")
 	call("act", map[string]any{"key": "nav-connections", "action": "press"})
 	waitText("隔离测试连接 · alice@example.test")
+	waitText("搜索云端标签：fixture-prod")
+	call("act", map[string]any{"key": "profile-search", "action": "setValue", "text": "fixture-prod"})
+	waitText("隔离测试连接 · alice@example.test")
+	call("act", map[string]any{"key": "profile-search", "action": "setValue", "text": ""})
 	stored, err := client.list()
 	if err != nil || len(stored) != 1 {
 		t.Fatal("isolated cloud connection missing")
@@ -178,7 +183,7 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	if err != nil || bytes.Contains(data, []byte(account.Password)) {
 		t.Fatal("native export was missing or contained plaintext")
 	}
-	if decoded, err := decodeCloudArchive(data, "test-backup-password"); err != nil || len(decoded) != 1 || decoded[0].Password != account.Password {
+	if decoded, err := decodeCloudArchive(data, "test-backup-password"); err != nil || len(decoded) != 1 || decoded[0].Password != account.Password || len(decoded[0].Tags) != 1 || decoded[0].Tags[0] != "fixture-prod" {
 		t.Fatal("native export could not be decrypted")
 	}
 	call("act", map[string]any{"key": "archive-password", "action": "setValue", "text": "wrong-backup-password"})
@@ -194,7 +199,7 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	waitText("确认追加导入")
 	call("act", map[string]any{"key": "archive-import", "action": "press"})
 	waitText("已追加导入 1 条连接")
-	if accounts, err := client.list(); err != nil || len(accounts) != 2 || accounts[0].ID == accounts[1].ID {
+	if accounts, err := client.list(); err != nil || len(accounts) != 2 || accounts[0].ID == accounts[1].ID || len(accounts[0].Tags) != 1 || len(accounts[1].Tags) != 1 {
 		t.Fatal("native import did not append a separate connection")
 	}
 	// Exercise the team controls against the same isolated Go service.
