@@ -22,6 +22,7 @@ func (d *desktop) reloadQuickCommands() {
 	}
 	d.quickCommands, d.quickPackages, d.quickEdit, d.quickConfirm = saved.Items, saved.Packages, nil, ""
 	d.quickPackageConfirm, d.quickPackageName = false, ""
+	d.quickChecked = nil
 	if d.quickPackageFilter != "" && d.quickPackageFilter != "-" && quickPackageIndex(saved.Packages, d.quickPackageFilter) < 0 {
 		d.quickPackageFilter = ""
 	}
@@ -175,8 +176,9 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 		}
 		ui.Text(c, title).FontSize(16).Bold()
 		ui.Text(c, "命令目标："+d.quickCommandTarget()).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+		batching := d.workspace == "snippets" && d.quickBatch
 		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
-			if ui.Button(c.Key("quick-new"), "+ 新建命令").Disabled(d.quickEditorOpen).Clicked() {
+			if ui.Button(c.Key("quick-new"), "+ 新建命令").Disabled(d.quickEditorOpen || batching).Clicked() {
 				d.quickEditorOpen = true
 				d.quickEdit, d.quickName, d.quickText, d.quickConfirm = nil, "", "", ""
 				d.quickPackageManaging, d.quickPackageConfirm = false, false
@@ -185,12 +187,22 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 					d.quickPackageID = ""
 				}
 			}
-			if ui.Button(c.Key("quick-packages"), "分组").Disabled(d.quickEditorOpen).Clicked() {
+			if ui.Button(c.Key("quick-packages"), "分组").Disabled(d.quickEditorOpen || batching).Clicked() {
 				d.quickPackageManaging = !d.quickPackageManaging
 				d.quickPackageConfirm, d.quickPackageName = false, ""
 			}
 			if ui.Button(c.Key("quick-refresh"), "刷新").Disabled(d.quickEditorOpen).Clicked() {
 				d.reloadQuickCommands()
+			}
+			if d.workspace == "snippets" && (len(d.quickPackages) > 0 || d.quickBatch) {
+				label := "选择片段"
+				if d.quickBatch {
+					label = "完成选择"
+				}
+				if ui.Button(c.Key("quick-batch-toggle"), label).Disabled(d.quickEditorOpen).Clicked() {
+					d.quickBatch = !d.quickBatch
+					d.quickChecked, d.quickPackageManaging = nil, false
+				}
 			}
 		})
 		if len(d.quickPackages) > 0 && !d.quickEditorOpen {
@@ -240,6 +252,10 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 		}
 		if d.quickStatus != "" {
 			ui.Text(c, d.quickStatus).FontSize(12).Wrap()
+		}
+		if d.workspace == "snippets" {
+			d.quickBatchControls(c)
+			d.quickPackageCards(c)
 		}
 		if len(d.quickCommands) == 0 {
 			ui.Text(c, "还没有快速命令").FontSize(12).TextColor(c.Theme().TextMuted)
@@ -309,7 +325,29 @@ func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
 			item := command
 			ui.Column(c).Width(300).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(8).Children(func() {
 				selected := d.quickSelected == item.ID
+				if d.quickBatch {
+					_, checked := d.quickChecked[item.ID]
+					if ui.Checkbox(c.Key("snippet-check-"+item.ID), &checked, "").Label("勾选片段：" + item.Name).Changed() {
+						if checked {
+							if d.quickChecked == nil {
+								d.quickChecked = make(map[string]quickCommand)
+							}
+							d.quickChecked[item.ID] = item
+						} else {
+							delete(d.quickChecked, item.ID)
+						}
+					}
+				}
 				button := ui.Button(c.Key("snippet-select-"+item.ID), "").Label("选择命令片段：" + item.Name).FillWidth().BorderWidth(0).Justify(ui.Start).Disabled(d.quickEditorOpen)
+				if !d.quickEditorOpen {
+					items := []quickCommand{item}
+					if d.quickBatch {
+						if _, checked := d.quickChecked[item.ID]; checked {
+							items = d.checkedQuickCommands()
+						}
+					}
+					button = button.Drag(quickSnippetDrag{Items: items})
+				}
 				if selected {
 					button = button.Background(c.Theme().SurfacePressed)
 				}
@@ -319,14 +357,14 @@ func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
 						ui.Text(c, quickCommandPreview(item.Command)).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 					})
 				})
-				if button.DoubleClicked() && !d.quickEditorOpen {
+				if button.DoubleClicked() && !d.quickEditorOpen && !d.quickBatch {
 					d.quickSelected, d.quickEditorOpen = item.ID, true
 					d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
 					d.quickPackageID = item.PackageID
 				} else if button.Clicked() {
 					d.quickSelected, d.quickConfirm = item.ID, ""
 				}
-				if selected {
+				if selected && !d.quickBatch {
 					ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 						unavailable := d.quickEditorOpen || d.term == nil || terminalEnded(d.term)
 						d.quickInsertButton(c, "snippet-insert-"+item.ID, item, unavailable)

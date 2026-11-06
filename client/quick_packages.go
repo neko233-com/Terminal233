@@ -4,11 +4,68 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
+
+type quickSnippetDrag struct{ Items []quickCommand }
+
+func (d *desktop) checkedQuickCommands() []quickCommand {
+	items := make([]quickCommand, 0, len(d.quickChecked))
+	for _, current := range d.quickCommands {
+		if item, ok := d.quickChecked[current.ID]; ok {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+// Move all snapshots together under the file lock. A stale selection or
+// destination aborts the entire move and leaves the on-disk file untouched.
+func (d *desktop) moveQuickCommands(items []quickCommand, destination *quickPackage) {
+	if len(items) == 0 {
+		d.quickStatus = "请先选择片段"
+		return
+	}
+	target := ""
+	if destination != nil {
+		target = destination.ID
+	}
+	saved, err := updateQuickCommandFile(d.quickPath, func(saved *quickCommandFile) error {
+		if destination != nil {
+			i := quickPackageIndex(saved.Packages, destination.ID)
+			if i < 0 || saved.Packages[i] != *destination {
+				return errors.New("目标分组已在其他窗口修改，请刷新后重试")
+			}
+		}
+		indices := make([]int, 0, len(items))
+		seen := make(map[string]bool, len(items))
+		for _, item := range items {
+			i := slices.IndexFunc(saved.Items, func(current quickCommand) bool { return current.ID == item.ID })
+			if seen[item.ID] || i < 0 || saved.Items[i] != item {
+				return errors.New("片段已在其他窗口修改，请刷新后重试")
+			}
+			seen[item.ID] = true
+			indices = append(indices, i)
+		}
+		for _, i := range indices {
+			saved.Items[i].PackageID = target
+		}
+		return nil
+	})
+	if err != nil {
+		d.quickStatus = "移动失败：" + err.Error()
+		return
+	}
+	d.quickCommands, d.quickPackages = saved.Items, saved.Packages
+	for _, item := range items {
+		delete(d.quickChecked, item.ID)
+	}
+	d.quickStatus = fmt.Sprintf("已移动 %d 个片段", len(items))
+}
 
 func quickPackageIndex(packages []quickPackage, id string) int {
 	return slices.IndexFunc(packages, func(p quickPackage) bool { return p.ID == id })

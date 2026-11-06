@@ -177,6 +177,46 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if snippetID == "" {
 		t.Fatal("saved snippet did not appear")
 	}
+	var packageKey string
+	for _, value := range call("tree")["result"].(map[string]any)["nodes"].([]any) {
+		node := value.(map[string]any)
+		if key, ok := node["key"].(string); ok && strings.HasPrefix(key, "quick-package-card-") && key != "quick-package-card-ungrouped" {
+			packageKey = key
+			break
+		}
+	}
+	if packageKey == "" {
+		t.Fatal("snippet group card missing")
+	}
+	call("act", map[string]any{"key": "quick-batch-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "snippet-check-"+snippetID) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "snippet-check-" + snippetID, "action": "press"})
+	call("act", map[string]any{"key": "quick-move-selected", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "已移动 1 个片段") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "已移动 1 个片段") {
+		t.Fatal("native batch move failed")
+	}
+	call("act", map[string]any{"key": "quick-package-card-ungrouped", "action": "press"})
+	call("act", map[string]any{"key": "quick-batch-toggle", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "snippet-select-"+snippetID) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	call("act", map[string]any{"key": "snippet-select-" + snippetID, "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -219,6 +259,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if strings.Contains(fmt.Sprint(call("tree")), "snippet-select-"+snippetID) {
 		t.Fatal("confirmed snippet deletion did not complete")
 	}
+	call("act", map[string]any{"key": packageKey, "action": "press"})
 	call("act", map[string]any{"key": "quick-packages", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

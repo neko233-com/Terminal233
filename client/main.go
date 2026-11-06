@@ -114,6 +114,9 @@ type desktop struct {
 	quickPath, quickName, quickText, quickStatus, quickConfirm, quickFilter, quickSelected  string
 	quickPackageID, quickPackageFilter, quickPackageName                                    string
 	quickPackageManaging, quickPackageConfirm                                               bool
+	quickBatch                                                                              bool
+	quickMoveTarget                                                                         string
+	quickChecked                                                                            map[string]quickCommand
 	quickCommands                                                                           []quickCommand
 	quickPackages                                                                           []quickPackage
 	quickEdit                                                                               *quickCommand
@@ -947,7 +950,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.79"
+const version = "0.3.80"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
