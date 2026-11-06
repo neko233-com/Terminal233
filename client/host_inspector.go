@@ -10,25 +10,36 @@ import (
 
 const connectionInspectorWidth float32 = 360
 
-type connectionDraft [32]byte
+type connectionDraft struct {
+	metadata [32]byte
+	secrets  [32]byte
+}
 
-func (d *desktop) currentConnectionDraft() connectionDraft {
+func connectionDraftHash(values ...string) [32]byte {
 	h := sha256.New()
 	var size [8]byte
-	for _, value := range []string{d.settings.Host, d.settings.Port, d.settings.User, d.settings.Password, d.settings.KeyPath, d.settings.Passphrase, d.profileLabel, d.profileGroup} {
+	for _, value := range values {
 		binary.BigEndian.PutUint64(size[:], uint64(len(value)))
 		_, _ = h.Write(size[:])
 		_, _ = h.Write([]byte(value))
 	}
-	var result connectionDraft
+	var result [32]byte
 	copy(result[:], h.Sum(nil))
 	return result
+}
+
+func (d *desktop) currentConnectionDraft() connectionDraft {
+	return connectionDraft{
+		metadata: connectionDraftHash(d.settings.Host, d.settings.Port, d.settings.User, d.settings.KeyPath, d.profileLabel, d.profileGroup),
+		secrets:  connectionDraftHash(d.settings.Password, d.settings.Passphrase),
+	}
 }
 
 func (d *desktop) captureConnectionDraft() {
 	d.connectionDraft = d.currentConnectionDraft()
 	d.connectionDraftSet = true
 	d.confirmDiscardConnection = false
+	d.profileAutoDirty, d.profileAutoAt = false, time.Time{}
 }
 
 func (d *desktop) hasUnsavedConnection() bool {
@@ -38,6 +49,9 @@ func (d *desktop) hasUnsavedConnection() bool {
 func (d *desktop) closeConnectionEditor() bool {
 	if d.busy {
 		return false
+	}
+	if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
+		d.flushProfileAutosave()
 	}
 	if d.hasUnsavedConnection() && !d.confirmDiscardConnection {
 		d.confirmDiscardConnection = true
@@ -49,6 +63,7 @@ func (d *desktop) closeConnectionEditor() bool {
 	d.showKeyOptions = false
 	d.fileReturnAfterConnect = false
 	d.connectionDraft, d.connectionDraftSet, d.confirmDiscardConnection = connectionDraft{}, false, false
+	d.profileAutoDirty, d.profileAutoAt = false, time.Time{}
 	d.settings.Password, d.settings.Passphrase = "", ""
 	return true
 }

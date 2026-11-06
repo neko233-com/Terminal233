@@ -75,6 +75,8 @@ type desktop struct {
 	profileInspectorAt                                                                      time.Time
 	connectionDraft                                                                         connectionDraft
 	connectionDraftSet, confirmDiscardConnection                                            bool
+	profileAutoDirty                                                                        bool
+	profileAutoAt                                                                           time.Time
 	confirmProfileDelete                                                                    profileID
 	checkedProfiles                                                                         map[profileID]bool
 	confirmProfileBatchDelete                                                               bool
@@ -258,6 +260,9 @@ func (d *desktop) inspect() {
 	if d.busy {
 		return
 	}
+	if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
+		d.flushProfileAutosave()
+	}
 	d.busy = true
 	d.fingerprint = ""
 	d.changedFingerprint = ""
@@ -301,6 +306,9 @@ func (d *desktop) acceptChangedFingerprint() {
 func (d *desktop) connect() {
 	if d.busy || len(d.sessions) >= maxWorkspaceSessions || d.fingerprint == "" {
 		return
+	}
+	if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
+		d.flushProfileAutosave()
 	}
 	d.busy = true
 	d.status = "正在建立安全连接…"
@@ -357,6 +365,7 @@ func (d *desktop) connect() {
 }
 
 func (d *desktop) view(c *ui.Context) {
+	d.serviceProfileAutosave(c)
 	d.workspaceShortcuts(c)
 	if d.workspace != "terminal" && d.workspace != "new-tab" {
 		d.terminalNavigationOpen = false
@@ -839,7 +848,8 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 		sectionColor, sectionPadding, sectionGap = c.Theme().SurfaceHover, 12, 6
 	}
 	markDraftChanged := func() { d.confirmDiscardConnection = false }
-	resetFingerprint := func() { d.fingerprint, d.expectedFingerprint, d.changedFingerprint = "", "", ""; markDraftChanged() }
+	markMetadataChanged := func() { markDraftChanged(); d.profileAutoDirty = true }
+	resetFingerprint := func() { d.fingerprint, d.expectedFingerprint, d.changedFingerprint = "", "", ""; markMetadataChanged() }
 	ui.Column(c).FillWidth().Padding(sectionPadding).Gap(sectionGap).Background(sectionColor).Radius(10).Children(func() {
 		ui.Text(c, "地址").FontSize(15).Bold()
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
@@ -856,11 +866,11 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 		ui.Text(c, "通用").FontSize(15).Bold()
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "名称").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
-			ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("可选").OnChange(markDraftChanged).Grow(1)
+			ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("可选").OnChange(markMetadataChanged).Grow(1)
 		})
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "分组").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
-			ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("可选").OnChange(markDraftChanged).Grow(1)
+			ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("可选").OnChange(markMetadataChanged).Grow(1)
 		})
 	})
 	ui.Column(c).FillWidth().Padding(sectionPadding).Gap(sectionGap).Background(sectionColor).Radius(10).Children(func() {
@@ -885,7 +895,7 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 			}
 			ui.Text(c, "私钥文件（可选）").FontSize(12).TextColor(c.Theme().TextMuted)
 			ui.Row(c).FillWidth().Gap(10).AlignItems(ui.End).Children(func() {
-				ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）").OnChange(markDraftChanged).Grow(1)
+				ui.TextInput(c.Key("key"), &d.settings.KeyPath).Label("私钥路径").Placeholder("私钥路径（可选）").OnChange(markMetadataChanged).Grow(1)
 				if ui.Button(c.Key("pick-key"), "选择私钥文件…").Disabled(d.busy).Clicked() {
 					d.pickLocalPath("key")
 				}
@@ -947,13 +957,12 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 		if ui.Button(c.Key("profile-add"), "保存").Label("保存到连接列表").Tooltip("保存到连接列表").Disabled(d.busy).Clicked() {
-			if err := d.addProfile(); err != nil {
-				d.status = err.Error()
-			} else if err := d.saveProfiles(); err != nil {
-				d.status = "连接已添加，但本机保存失败：" + err.Error()
+			if err := d.saveCurrentProfile(); err != nil {
+				d.status = "保存失败，表单内容仍保留：" + err.Error()
 			} else {
 				d.status = "连接已保存（不保存密码）"
-				d.captureConnectionDraft()
+				d.connectionDraft.metadata = d.currentConnectionDraft().metadata
+				d.profileAutoDirty, d.profileAutoAt = false, time.Time{}
 			}
 		}
 		ui.Button(c.Key("inspect"), "获取指纹").Label("获取主机指纹").Tooltip("获取主机指纹").Disabled(d.busy).OnClick(d.inspect)
@@ -981,7 +990,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.85"
+const version = "0.3.86"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -1019,7 +1028,12 @@ func main() {
 	mygo.Theme.SetSource(mygo.ThemeDark)
 	mygo.App.WhenReady(func() {
 		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH", Width: 1200, Height: 760, MinWidth: 640, MinHeight: 480, Content: ui.View(d.view)})
-		d.win.OnClosed(d.closeAllSessions)
+		d.win.OnClosed(func() {
+			if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
+				d.flushProfileAutosave()
+			}
+			d.closeAllSessions()
+		})
 		d.startUpdateCheck()
 	})
 	if err := mygo.App.Run(); err != nil {

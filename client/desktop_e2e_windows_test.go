@@ -411,6 +411,18 @@ func TestDesktopNativeWindow(t *testing.T) {
 	for key, value := range map[string]string{"host": settings.Host, "port": settings.Port, "user": settings.User, "password": settings.Password} {
 		call("act", map[string]any{"key": key, "action": "setValue", "text": value})
 	}
+	var saved []byte
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		saved, err = os.ReadFile(filepath.Join(configDir, "NekoSSH", "profiles.json"))
+		if err == nil && strings.Contains(string(saved), settings.Host) && strings.Contains(string(saved), settings.User) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil || !strings.Contains(string(saved), settings.Host) || !strings.Contains(string(saved), settings.User) || strings.Contains(string(saved), settings.Password) {
+		t.Fatal("native editor did not autosave metadata safely")
+	}
 	call("act", map[string]any{"key": "profile-add", "action": "press"})
 	// The primary action inspects an unknown host before it can authenticate.
 	call("act", map[string]any{"key": "connect", "action": "press"})

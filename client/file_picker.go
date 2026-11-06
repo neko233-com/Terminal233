@@ -177,6 +177,9 @@ func (d *desktop) applyPickedPath(kind, selected string, err error) {
 	case "batch-target":
 		d.fileBatchTarget = selected
 	case "key":
+		if d.settings.KeyPath != selected {
+			d.profileAutoDirty = true
+		}
 		d.settings.KeyPath = selected
 		d.confirmDiscardConnection = false
 	case "backup-open", "backup-save":
