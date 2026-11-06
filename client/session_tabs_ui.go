@@ -11,6 +11,28 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 	closeSessionID, closeGroupID, disbandGroupID := 0, 0, 0
 	var moveFrom, moveTo sessionDragID
 	var splitFrom, splitTo sessionDragID
+	var hostTarget int
+	var localHost profileID
+	var cloudHost cloudGroupDragID
+	// MyGo accepts one drop type per element; inspect the value after accepting it.
+	handleDrop := func(tab ui.Element, target int) {
+		value, ok := ui.Drop[any](tab)
+		if !ok {
+			return
+		}
+		switch dragged := value.(type) {
+		case sessionDragID:
+			if tabDropCenter(tab) && d.canSplitTabDrop(int(dragged), target) {
+				splitFrom, splitTo = dragged, sessionDragID(target)
+			} else {
+				moveFrom, moveTo = dragged, sessionDragID(target)
+			}
+		case profileID:
+			localHost, hostTarget = dragged, target
+		case cloudGroupDragID:
+			cloudHost, hostTarget = dragged, target
+		}
+	}
 	tabs := d.terminalTopTabs()
 	for index, entry := range tabs {
 		tabInfo := entry
@@ -18,7 +40,7 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 		ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
 			if g := tabInfo.group; g != nil {
 				active := d.workspace == "terminal" && d.terminalGroupFor(d.currentSession) == g
-				tab := workspaceButton(c, fmt.Sprintf("group-tab-%d", g.id), g.name, active).Label("工作区：" + g.name).Tooltip("拖入终端加入分屏；拖到边缘调整顺序").Disabled(!d.canSwitchSession()).Drag(sessionDragID(tabInfo.representative))
+				tab := workspaceButton(c, fmt.Sprintf("group-tab-%d", g.id), g.name, active).Label("工作区：" + g.name).Tooltip("拖入主机或终端加入分屏；拖到边缘调整顺序").Disabled(!d.canSwitchSession()).Drag(sessionDragID(tabInfo.representative))
 				tab.ContextMenu(func(menu *ui.Menu) {
 					if menu.Item("向左移动").Disabled(index == 0).Chosen() {
 						moveFrom, moveTo = sessionDragID(tabInfo.representative), sessionDragID(tabs[index-1].representative)
@@ -61,13 +83,7 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 						d.workspace = "terminal"
 					}
 				}
-				if dragged, ok := ui.Drop[sessionDragID](tab); ok {
-					if tabDropCenter(tab) && d.canSplitTabDrop(int(dragged), tabInfo.representative) {
-						splitFrom, splitTo = dragged, sessionDragID(tabInfo.representative)
-					} else {
-						moveFrom, moveTo = dragged, sessionDragID(tabInfo.representative)
-					}
-				}
+				handleDrop(tab, tabInfo.representative)
 				if d.workspaceGroupDirty(g) {
 					if ui.Button(c.Key(fmt.Sprintf("group-save-%d", g.id)), "●").Label("保存工作区：" + g.name).Tooltip("保存工作区").Width(24).Height(30).Padding(0).BorderWidth(0).Background(c.Theme().Background).TextColor(c.Theme().TextMuted).Disabled(d.busy).Clicked() {
 						d.selectSession(g.focused)
@@ -90,7 +106,7 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 			}
 			s := tabInfo.sessions[0]
 			active := s.id == d.currentSession && ((s.fileOnly && d.workspace == "files") || (!s.fileOnly && d.workspace == "terminal"))
-			tab := workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), active).Label("会话标签：" + sessionDisplayLabel(s)).Tooltip("拖入终端创建分屏；拖到边缘调整顺序").Disabled(!d.canSwitchSession()).Drag(sessionDragID(s.id))
+			tab := workspaceButton(c, fmt.Sprintf("session-%d", s.id), sessionDisplayLabel(s), active).Label("会话标签：" + sessionDisplayLabel(s)).Tooltip("拖入主机或终端创建分屏；拖到边缘调整顺序").Disabled(!d.canSwitchSession()).Drag(sessionDragID(s.id))
 			tab.ContextMenu(func(menu *ui.Menu) {
 				if menu.Item("向左移动").Disabled(index == 0).Chosen() {
 					moveFrom, moveTo = sessionDragID(s.id), sessionDragID(tabs[index-1].representative)
@@ -106,13 +122,7 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 				d.confirmTerminalGroupClose = 0
 				d.selectSession(s.id)
 			}
-			if dragged, ok := ui.Drop[sessionDragID](tab); ok {
-				if tabDropCenter(tab) && d.canSplitTabDrop(int(dragged), s.id) {
-					splitFrom, splitTo = dragged, sessionDragID(s.id)
-				} else {
-					moveFrom, moveTo = dragged, sessionDragID(s.id)
-				}
-			}
+			handleDrop(tab, s.id)
 			if ui.Button(c.Key(fmt.Sprintf("session-close-%d", s.id)), "×").Label("关闭会话：" + s.label).Disabled(d.busy).Clicked() {
 				closeSessionID = s.id
 			}
@@ -128,6 +138,10 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 				d.closeNewTab()
 			}
 		})
+	}
+	if hostTarget != 0 {
+		d.startWorkspaceHostDrop(hostTarget, localHost, cloudHost)
+		c.Invalidate()
 	}
 	if splitFrom != 0 {
 		d.splitTabs(int(splitFrom), int(splitTo))

@@ -39,7 +39,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 		t.Fatal(err)
 	}
 	profiles.profileGroups = []string{"batch-target"}
-	for i, settings := range []connectionSettings{a, b, c, bad} {
+	for i, settings := range []connectionSettings{a, b, c, bad, bad} {
 		profiles.settings, profiles.active = settings, settings
 		profiles.selectedProfile, profiles.profileLabel = "", fmt.Sprintf("fixture-%d", i+1)
 		if err := profiles.saveCurrentProfile(); err != nil {
@@ -934,4 +934,28 @@ func TestDesktopRemotePanes(t *testing.T) {
 	if err := restoredProfiles.loadProfiles(filepath.Join(configDir, "NekoSSH", "profiles.json")); err != nil || len(restoredProfiles.profiles) < 2 || restoredProfiles.profiles[0].Group != "batch-target" || restoredProfiles.profiles[1].Group != "batch-target" {
 		t.Fatal("native batch drag did not persist", err)
 	}
+	// A previously verified saved host can be dropped into an existing workspace.
+	beforeDrop := attempts.Load()
+	visibleBounds("group-tab-4")
+	drag("profile-3", "group-tab-4")
+	waitKey("group-focus-18")
+	waitKey("group-grid-4")
+	if attempts.Load() != beforeDrop+1 {
+		t.Fatal("saved host was not authenticated exactly once")
+	}
+	// Authentication failure keeps the same target for an explicit retry.
+	press("workspace-hosts-tab")
+	visibleBounds("group-tab-4")
+	drag("profile-5", "group-tab-4")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "连接失败") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "连接失败") {
+		t.Fatal("failed authentication was not reported")
+	}
+	waitKey("password")
+	call("act", map[string]any{"key": "password", "action": "setValue", "text": "test-password"})
+	press("connect")
+	waitKey("group-focus-19")
 }

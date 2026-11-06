@@ -94,6 +94,7 @@ func (d *desktop) closeConnectionEditor() bool {
 		d.status = "主机详情有未保存的修改；再次点击返回可放弃修改。"
 		return false
 	}
+	d.pendingWorkspaceHost = nil
 	d.editConnection = false
 	d.profileTagsCaretPending, d.profileGroupCaretPending = false, false
 	d.connectionFocusPending = false

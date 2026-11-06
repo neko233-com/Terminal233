@@ -98,6 +98,7 @@ func (d *desktop) moveProfile(from, to profileID) {
 	d.profiles[b] = item
 }
 func (d *desktop) loadProfile(p profile) {
+	d.pendingWorkspaceHost = nil
 	d.profileTagsCaretPending, d.profileGroupCaretPending = false, false
 	d.workspace = "connections"
 	d.editConnection = true

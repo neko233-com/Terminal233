@@ -52,6 +52,7 @@ type desktop struct {
 	terminalNavigationOpen                                                                  bool
 	sessions                                                                                []*workspaceSession
 	terminalGroups                                                                          []*terminalGroup
+	pendingWorkspaceHost                                                                    *workspaceHostDrop
 	nextTerminalGroupID, confirmTerminalGroupClose                                          int
 	terminalGroupSelected                                                                   map[int]bool
 	showTerminalGroupSelection                                                              bool
@@ -393,6 +394,11 @@ func (d *desktop) connect() {
 	options := d.terminalOptions()
 	settings.Fingerprint = d.fingerprint
 	profileID := d.selectedProfile
+	dropIntent := d.pendingWorkspaceHost
+	if !dropIntent.matchesForm(d, settings, returnToFiles) {
+		dropIntent = nil
+		d.pendingWorkspaceHost = nil
+	}
 	var cloudSources, cloudVersions map[string]string
 	cloudOriginURL, cloudOriginUser, cloudOriginTeam, cloudOriginID := "", "", "", ""
 	if d.settingsFromCloud && d.cloud != nil {
@@ -429,6 +435,8 @@ func (d *desktop) connect() {
 				d.status = "已取消文件连接。"
 				return
 			}
+			attachToWorkspace := dropIntent != nil && d.pendingWorkspaceHost == dropIntent && d.workspace == "connections"
+			d.pendingWorkspaceHost = nil
 			showSecondary := showFiles && d.secondaryConnectPending
 			previousID, previousShell, previousTerm := d.secondaryPreviousID, d.secondaryPreviousShell, d.secondaryPreviousTerm
 			d.fileReturnAfterConnect = false
@@ -447,6 +455,22 @@ func (d *desktop) connect() {
 					session.sourceProfileID = profileID
 					session.cloudOriginURL, session.cloudOriginUser, session.cloudOriginTeam, session.cloudOriginID = cloudOriginURL, cloudOriginUser, cloudOriginTeam, cloudOriginID
 					break
+				}
+			}
+			workspaceTargetChanged := false
+			if attachToWorkspace {
+				if dropIntent.targetStillValid(d) && d.canSplitTabDrop(newSessionID, dropIntent.target.id) {
+					d.splitTabs(newSessionID, dropIntent.target.id)
+					if d.currentSession != newSessionID {
+						for _, session := range d.sessions {
+							if session.id == newSessionID {
+								session.refreshPending = true
+								break
+							}
+						}
+					}
+				} else {
+					workspaceTargetChanged = true
 				}
 			}
 			if showSecondary {
@@ -479,6 +503,9 @@ func (d *desktop) connect() {
 				}
 			}
 			d.workspace = "terminal"
+			if workspaceTargetChanged {
+				d.status += "；目标工作区已变化，请重新拖动终端"
+			}
 			if showFiles {
 				d.workspace, d.narrowFilePane = "files", "session"
 				if showSecondary {
@@ -503,6 +530,7 @@ func (d *desktop) view(c *ui.Context) {
 		d.terminalNavigationOpen = false
 	}
 	if d.workspace != "connections" && d.workspace != "" {
+		d.pendingWorkspaceHost = nil
 		d.fileReturnAfterConnect = false
 		d.clearSecondaryConnectIntent()
 	}
@@ -1221,7 +1249,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.124"
+const version = "0.3.125"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
