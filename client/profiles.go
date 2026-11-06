@@ -89,6 +89,7 @@ func (d *desktop) moveProfile(from, to profileID) {
 	d.profiles[b] = item
 }
 func (d *desktop) loadProfile(p profile) {
+	d.profileTagsCaretPending, d.profileGroupCaretPending = false, false
 	d.workspace = "connections"
 	d.editConnection = true
 	d.connectionFocusPending = false
@@ -216,6 +217,7 @@ func (d *desktop) profileView(c *ui.Context) {
 					return
 				}
 				d.settings = connectionSettings{Port: "22"}
+				d.profileTagsCaretPending, d.profileGroupCaretPending = false, false
 				d.profileSecretError = false
 				d.showKeyOptions = false
 				d.showConnectionTools = false

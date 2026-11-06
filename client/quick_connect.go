@@ -90,6 +90,7 @@ func (d *desktop) openQuickConnection() {
 		return
 	}
 	d.settings = settings
+	d.profileTagsCaretPending, d.profileGroupCaretPending = false, false
 	d.profileSecretError = false
 	d.connectionFocusPending = false
 	d.showKeyOptions = false

@@ -74,6 +74,14 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	if err := client.save(account); err != nil {
 		t.Fatal(err)
 	}
+	initialGroups, err := client.listCloudGroups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialGroups.Groups = []string{"production-group"}
+	if _, err = client.replaceCloudGroups(initialGroups); err != nil {
+		t.Fatal(err)
+	}
 	caPath := filepath.Join(temp, "test-ca.pem")
 	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: proxy.Certificate().Raw}), 0600); err != nil {
 		t.Fatal(err)
@@ -177,6 +185,70 @@ func TestDesktopCloudWorkflows(t *testing.T) {
 	cloudHostTree := fmt.Sprint(call("tree"))
 	if strings.Contains(cloudHostTree, "使用已信任指纹连接") || !strings.Contains(cloudHostTree, "连接并核验主机指纹") {
 		t.Fatal("cloud fingerprint was silently trusted")
+	}
+	var groupFieldID string
+	for _, entry := range call("tree")["result"].(map[string]any)["nodes"].([]any) {
+		node := entry.(map[string]any)
+		if node["label"] == "云端主机分组" {
+			groupFieldID, _ = node["id"].(string)
+			break
+		}
+	}
+	if groupFieldID == "" {
+		t.Fatal("cloud group editor missing from accessibility tree")
+	}
+	call("act", map[string]any{"id": groupFieldID, "action": "scrollIntoView"})
+	var fieldX, fieldY float64
+	for _, entry := range call("tree")["result"].(map[string]any)["nodes"].([]any) {
+		node := entry.(map[string]any)
+		if node["id"] == groupFieldID {
+			bounds := node["bounds"].(map[string]any)
+			fieldX = bounds["x"].(float64) + bounds["width"].(float64)/2
+			fieldY = bounds["y"].(float64) + bounds["height"].(float64)/2
+			if strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				t.Fatalf("cloud group editor disabled: %v", node["states"])
+			}
+			break
+		}
+	}
+	if fieldX == 0 {
+		t.Fatal("cloud group editor is not visible")
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "x": fieldX, "y": fieldY}}})
+	waitText("分组 / production-group")
+	var groupX, groupY float64
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		for _, entry := range result["nodes"].([]any) {
+			node := entry.(map[string]any)
+			if node["label"] == "分组 / production-group" {
+				bounds := node["bounds"].(map[string]any)
+				groupX = bounds["x"].(float64) + bounds["width"].(float64)/2
+				groupY = bounds["y"].(float64) + bounds["height"].(float64)/2
+				break
+			}
+		}
+		if groupX != 0 {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if groupX == 0 {
+		t.Fatal("cloud group option unavailable")
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "x": groupX, "y": groupY}}})
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		groups, e := client.listCloudGroups()
+		if e == nil && groups.Assignments[stored[0].ID] == "production-group" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	groups, e := client.listCloudGroups()
+	if e != nil || groups.Assignments[stored[0].ID] != "production-group" {
+		t.Fatal("native cloud group editor did not save", e)
 	}
 	call("act", map[string]any{"key": "nav-cloud", "action": "press"})
 	waitText("toggle-archive")

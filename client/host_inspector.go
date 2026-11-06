@@ -95,6 +95,7 @@ func (d *desktop) closeConnectionEditor() bool {
 		return false
 	}
 	d.editConnection = false
+	d.profileTagsCaretPending, d.profileGroupCaretPending = false, false
 	d.connectionFocusPending = false
 	d.showKeyOptions = false
 	d.showConnectionTools = false
