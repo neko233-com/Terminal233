@@ -242,22 +242,20 @@ func TestSplitLayoutChoiceAndPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := ui.NewTester(d.view, 1500, 900)
-	if err := view.Click("展开侧栏"); err != nil {
-		t.Fatal(err)
-	}
-	if err := view.Click("终端设置"); err != nil {
-		t.Fatal(err)
-	}
 	for _, tc := range []struct {
 		label, id string
 		stacked   bool
 	}{{"上下分屏", "stacked", true}, {"左右分屏", "side", false}} {
+		if err := view.Click("设置"); err != nil {
+			t.Fatal(err)
+		}
 		if err := view.Click("选择分屏布局"); err != nil {
 			t.Fatal(err)
 		}
 		if err := view.Click(tc.label); err != nil {
 			t.Fatal(err)
 		}
+		view.Key(0, ui.KeyEscape)
 		a, oka := view.Find("终端：first")
 		b, okb := view.Find("终端：second")
 		if !oka || !okb || d.splitLayout != tc.id {

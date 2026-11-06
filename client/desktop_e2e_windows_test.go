@@ -1822,7 +1822,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "已断开") {
 		t.Fatalf("local terminal failed to close: %s", tree)
 	}
-	call("act", map[string]any{"key": "terminal-settings-toggle", "action": "press"})
+	call("act", map[string]any{"key": "settings-toggle", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

@@ -37,6 +37,9 @@ func TestTransferErrorsAndLocalRefresh(t *testing.T) {
 func TestUpdateAvailabilityIsVisibleInWorkspace(t *testing.T) {
 	d := &desktop{updateAvailable: &updateCandidate{Version: "1.2.3"}, updateStatus: "发现新版 1.2.3；Windows 安装包未签名。"}
 	view := ui.NewTester(d.view, 1200, 1600)
+	if err := view.Click("设置（有更新）"); err != nil {
+		t.Fatal(err)
+	}
 	if !view.HasText("检查更新") || !view.HasText("下载安装包…") || !view.HasText(d.updateStatus) {
 		t.Fatal("update status or download action is missing")
 	}

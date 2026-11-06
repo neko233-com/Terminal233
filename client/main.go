@@ -60,7 +60,7 @@ type desktop struct {
 	foldedGroups                                                                            map[string]bool
 	cloudFoldedGroups                                                                       map[string]bool
 	profileFormat                                                                           int
-	showGroupControls, showTerminalSettings                                                 bool
+	showGroupControls, showSettings                                                         bool
 	showShortcutHelp                                                                        bool
 	showConnectionNavigation                                                                bool
 	showCompactProfileTools                                                                 bool
@@ -407,6 +407,14 @@ func (d *desktop) view(c *ui.Context) {
 				d.lightTheme = !d.lightTheme
 				d.savePreference("light", d.lightTheme)
 			}
+			settingsLabel := d.settingsButtonLabel()
+			settingsButton := terminalActionButton(c, "settings-toggle", settingsLabel, settingsIcon, d.showSettings || d.updateAvailable != nil, false)
+			if settingsButton.Clicked() {
+				d.showSettings = !d.showSettings
+			}
+			ui.PopoverBase(c, settingsButton, &d.showSettings, func(panel ui.Element) {
+				panel.AttachTo(settingsButton, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() { d.settingsView(c, height) })
+			})
 			terminalActionButton(c, "local-terminal", "本机终端", plusIcon, false, d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
 			if terminalActionButton(c, "disconnect", "关闭当前会话", closeIcon, false, d.busy || d.term == nil).Clicked() {
 				d.closeCurrentSession()
@@ -446,45 +454,6 @@ func (d *desktop) view(c *ui.Context) {
 						}
 						if navigationButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
 							d.workspace = "cloud"
-						}
-						settingsLabel := "终端设置"
-						if d.showTerminalSettings {
-							settingsLabel = "收起终端设置"
-						}
-						if ui.Button(c.Key("terminal-settings-toggle"), settingsLabel).Clicked() {
-							d.showTerminalSettings = !d.showTerminalSettings
-						}
-						if d.showTerminalSettings {
-							ui.Text(c, "终端字号").FontSize(12).TextColor(t.TextMuted)
-							ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-								if ui.Button(c.Key("font-smaller"), "A−").Label("缩小终端字号").Disabled(d.currentTerminalFontSize() <= minTerminalFontSize).Clicked() {
-									d.changeTerminalFont(terminal.Zoom{Steps: -1})
-								}
-								ui.Text(c, fmt.Sprint(d.currentTerminalFontSize())).Grow(1)
-								if ui.Button(c.Key("font-larger"), "A+").Label("放大终端字号").Disabled(d.currentTerminalFontSize() >= maxTerminalFontSize).Clicked() {
-									d.changeTerminalFont(terminal.Zoom{Steps: 1})
-								}
-								if ui.Button(c.Key("font-reset"), "重置").Disabled(d.currentTerminalFontSize() == defaultTerminalFontSize).Clicked() {
-									d.changeTerminalFont(terminal.Zoom{Reset: true})
-								}
-							})
-							ui.Text(c, "终端配色").FontSize(12).TextColor(t.TextMuted)
-							selectedTheme := terminalThemeLabel(d.terminalTheme)
-							if ui.Select(c.Key("terminal-theme"), &selectedTheme, terminalThemeLabels()).Label("选择终端配色").FillWidth().Changed() {
-								d.changeTerminalTheme(terminalThemeID(selectedTheme))
-							}
-							ui.Text(c, "终端分屏布局").FontSize(12).TextColor(t.TextMuted)
-							layout := splitLayoutLabel(d.splitLayout)
-							if ui.Select(c.Key("split-layout"), &layout, []string{"自动布局", "左右分屏", "上下分屏"}).Label("选择分屏布局").FillWidth().Changed() {
-								d.changeSplitLayout(splitLayoutID(layout))
-							}
-							if ui.Button(c.Key("save-panel-sizes"), "保存面板尺寸").Clicked() {
-								d.savePanelSizes()
-							}
-							if ui.Button(c.Key("reset-panel-sizes"), "恢复默认面板尺寸").Clicked() {
-								d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = 0, 0, 0
-								d.savePanelSizes()
-							}
 						}
 						filterLabel := "连接筛选"
 						if d.showConnectionNavigation {
@@ -628,13 +597,6 @@ func (d *desktop) view(c *ui.Context) {
 								})
 							}
 						}
-						if ui.Button(c.Key("shortcut-help-toggle"), "快捷键").Clicked() {
-							d.showShortcutHelp = !d.showShortcutHelp
-						}
-						if d.showShortcutHelp {
-							ui.Text(c, "Ctrl+Shift+1–4 切换工作区\nCtrl+Shift+T 打开本机终端\nCtrl+Shift+F 查找终端输出\nCtrl+Tab / Ctrl+Shift+Tab 切换会话").FontSize(11).TextColor(t.TextMuted).Wrap()
-						}
-						d.updateView(c)
 					})
 				})
 			}
@@ -976,7 +938,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.75"
+const version = "0.3.76"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

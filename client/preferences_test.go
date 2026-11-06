@@ -45,7 +45,7 @@ func TestPanelSizesSaveResetAndMerge(t *testing.T) {
 	}
 	d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = 68, 43, 57
 	view := ui.NewTester(d.view, 1200, 900)
-	if err := view.Click("终端设置"); err != nil {
+	if err := view.Click("设置"); err != nil {
 		t.Fatal(err)
 	}
 	if err := view.Click("保存面板尺寸"); err != nil {
@@ -152,10 +152,7 @@ func TestTerminalThemesPersistAndApplyToExistingAndNewSessions(t *testing.T) {
 	if color.R != workspaceTheme.Background.R || color.G != workspaceTheme.Background.G || color.B != workspaceTheme.Background.B {
 		t.Fatal("follow-interface theme did not apply to the existing terminal")
 	}
-	if err := view.Click("展开侧栏"); err != nil {
-		t.Fatal(err)
-	}
-	if err := view.Click("终端设置"); err != nil {
+	if err := view.Click("设置"); err != nil {
 		t.Fatal(err)
 	}
 	if err := view.Click("选择终端配色"); err != nil {
