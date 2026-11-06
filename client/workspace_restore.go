@@ -374,12 +374,12 @@ func (d *desktop) restoreWorkspaceTemplate(w savedWorkspace) {
 			}
 			d.splitSession, d.splitFirstSession = 0, 0
 			d.activateSession(ids[w.Active])
-			if w.SplitFirst >= 0 && w.SplitSecond >= 0 {
-				d.splitFirstSession = ids[w.SplitFirst]
-				if ids[w.SplitFirst] == d.currentSession {
-					d.splitSession = ids[w.SplitSecond]
-				} else {
-					d.splitSession = ids[w.SplitFirst]
+			grid := w.ViewMode == "grid" || (w.ViewMode == "" && w.SplitFirst >= 0 && w.SplitSecond >= 0)
+			groupErr := d.createTerminalGroup(w.Name, ids, ids[w.Active], grid)
+			if groupErr == nil {
+				if group := d.terminalGroupFor(ids[w.Active]); group != nil {
+					copy(group.rowPerc[:], w.RowPerc)
+					copy(group.columnPerc[:], w.ColumnPerc)
 				}
 			}
 			d.splitLayout = w.SplitLayout
@@ -387,6 +387,9 @@ func (d *desktop) restoreWorkspaceTemplate(w savedWorkspace) {
 			d.workspace = "terminal"
 			d.pendingTerminalFocus = d.currentSession
 			d.status = fmt.Sprintf("已恢复工作区 %s（%d 个会话）", w.Name, len(opened))
+			if groupErr != nil {
+				d.status = "会话已恢复，但无法组成工作区：" + groupErr.Error()
+			}
 			d.workspaceTemplatesStatus = ""
 		})
 	}()
@@ -440,7 +443,47 @@ func (d *desktop) workspaceTemplatesView(c *ui.Context) {
 		if ui.Button(c.Key("workspace-template-save"), "保存当前会话").Disabled(d.busy || len(d.sessions) == 0).Clicked() {
 			d.saveWorkspaceTemplate()
 		}
+		if ui.Button(c.Key("workspace-group-create"), "组成工作区").Disabled(d.busy || len(d.sessions) < 2 || d.terminalGroupFor(d.currentSession) != nil).Clicked() {
+			d.createGroupFromCurrentSessions()
+		}
 	})
+	selectionLabel := "选择终端"
+	if d.showTerminalGroupSelection {
+		selectionLabel = "使用全部终端"
+	}
+	if ui.Button(c.Key("workspace-group-select"), selectionLabel).Disabled(d.busy || len(d.sessions) < 2 || d.terminalGroupFor(d.currentSession) != nil).Clicked() {
+		d.showTerminalGroupSelection = !d.showTerminalGroupSelection
+		d.terminalGroupSelected = nil
+		if d.showTerminalGroupSelection {
+			d.terminalGroupSelected = map[int]bool{}
+			for _, session := range d.sessions {
+				if d.terminalGroupFor(session.id) == nil && session.term != nil && !terminalEnded(session.term) {
+					d.terminalGroupSelected[session.id] = true
+				}
+			}
+		}
+	}
+	if d.showTerminalGroupSelection {
+		ui.Scroll(c.Key("workspace-group-selection-list")).Label("选择工作区终端").Height(min(float32(150), float32(len(d.sessions)*38))).FillWidth().Children(func() {
+			for _, entry := range d.sessions {
+				session := entry
+				if d.terminalGroupFor(session.id) != nil || session.term == nil || terminalEnded(session.term) {
+					continue
+				}
+				selected := d.terminalGroupSelected[session.id]
+				if ui.Checkbox(c.Key(fmt.Sprintf("workspace-group-select-%d", session.id)), &selected, sessionDisplayLabel(session)).Label(fmt.Sprintf("选择终端：%s · %d", sessionDisplayLabel(session), session.id)).Changed() {
+					if d.terminalGroupSelected == nil {
+						d.terminalGroupSelected = map[int]bool{}
+					}
+					if selected {
+						d.terminalGroupSelected[session.id] = true
+					} else {
+						delete(d.terminalGroupSelected, session.id)
+					}
+				}
+			}
+		})
+	}
 	if len(d.workspaceTemplates) == 0 {
 		return
 	}

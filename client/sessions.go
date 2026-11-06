@@ -13,36 +13,19 @@ const maxWorkspaceSessions = 12
 type sessionDragID int
 
 func (d *desktop) neighborSession(id, delta int) int {
-	for i, s := range d.sessions {
-		if s.id == id && i+delta >= 0 && i+delta < len(d.sessions) {
-			return d.sessions[i+delta].id
+	tabs := d.terminalTopTabs()
+	for i, tab := range tabs {
+		for _, s := range tab.sessions {
+			if s.id == id && i+delta >= 0 && i+delta < len(tabs) {
+				return tabs[i+delta].representative
+			}
 		}
 	}
 	return 0
 }
 
-// moveSession changes tab order without changing the active or split sessions.
-func (d *desktop) moveSession(from, to int) {
-	a, b := -1, -1
-	for i, s := range d.sessions {
-		if s.id == from {
-			a = i
-		}
-		if s.id == to {
-			b = i
-		}
-	}
-	if a < 0 || b < 0 || a == b {
-		return
-	}
-	s := d.sessions[a]
-	if a < b {
-		copy(d.sessions[a:b], d.sessions[a+1:b+1])
-	} else {
-		copy(d.sessions[b+1:a+1], d.sessions[b:a])
-	}
-	d.sessions[b] = s
-}
+// Reorder whole top-level tabs, keeping grouped sessions together.
+func (d *desktop) moveSession(from, to int) { d.moveTerminalTopTab(from, to) }
 
 func terminalEnded(term *terminal.Terminal) bool {
 	if term == nil {
@@ -136,7 +119,13 @@ func (d *desktop) activateSessionWithRefresh(id int, refresh bool) {
 			d.stopMonitor()
 		}
 		d.saveSessionState()
-		if id == d.splitSession {
+		oldGroup, nextGroup := d.terminalGroupFor(d.currentSession), d.terminalGroupFor(id)
+		if oldGroup != nil || nextGroup != nil {
+			d.splitSession, d.splitFirstSession, d.splitFocusedSession = 0, 0, 0
+			if nextGroup != nil {
+				nextGroup.focused = id
+			}
+		} else if id == d.splitSession {
 			d.splitSession = d.currentSession
 		} else if d.splitSession != 0 && d.splitFirstSession == d.currentSession {
 			d.splitFirstSession = id
@@ -202,6 +191,7 @@ func (d *desktop) closeSession(id int) {
 		if s.id != id {
 			continue
 		}
+		nextGroupMember := d.detachGroupSession(id)
 		if id == d.monitorSession {
 			d.stopMonitor()
 		}
@@ -233,6 +223,11 @@ func (d *desktop) closeSession(id int) {
 		d.lastTerminalDir = ""
 		if len(d.sessions) == 0 {
 			d.workspace, d.status = "connections", "已断开"
+			return
+		}
+		if nextGroupMember != 0 {
+			d.activateSession(nextGroupMember)
+			d.status = "已关闭会话；已切换到工作区中的其他终端"
 			return
 		}
 		if i >= len(d.sessions) {
@@ -267,6 +262,8 @@ func (d *desktop) closeAllSessions() {
 		}
 	}
 	d.sessions = nil
+	d.terminalGroups = nil
+	d.confirmTerminalGroupClose = 0
 	d.term, d.shell, d.active = nil, nil, connectionSettings{}
 	d.currentSession, d.splitSession, d.splitFirstSession, d.pendingTerminalFocus = 0, 0, 0, 0
 }
@@ -274,6 +271,13 @@ func (d *desktop) closeAllSessions() {
 // toggleSplit displays a second, already open session without duplicating its terminal.
 func (d *desktop) toggleSplit() {
 	if !d.canSwitchSession() {
+		return
+	}
+	if group := d.terminalGroupFor(d.currentSession); group != nil {
+		if len(group.members) > 1 {
+			group.grid = !group.grid
+			d.pendingTerminalFocus = d.currentSession
+		}
 		return
 	}
 	if d.splitSession != 0 {
@@ -289,6 +293,10 @@ func (d *desktop) toggleSplit() {
 }
 
 func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
+	if group := d.terminalGroupFor(d.currentSession); group != nil {
+		d.terminalGroupView(c, group, width)
+		return
+	}
 	var second *workspaceSession
 	for _, s := range d.sessions {
 		if s.id == d.splitSession && s.id != d.currentSession && s.term != nil {
@@ -425,13 +433,24 @@ func (d *desktop) selectSession(id int) {
 }
 
 func (d *desktop) selectAdjacentSession(delta int) {
-	if !d.canSwitchSession() || len(d.sessions) < 2 {
+	if !d.canSwitchSession() {
 		return
 	}
-	for index, session := range d.sessions {
-		if session.id == d.currentSession {
-			next := (index + delta + len(d.sessions)) % len(d.sessions)
-			d.selectSession(d.sessions[next].id)
+	tabs := d.terminalTopTabs()
+	if len(tabs) < 2 {
+		return
+	}
+	for index, tab := range tabs {
+		for _, session := range tab.sessions {
+			if session.id != d.currentSession {
+				continue
+			}
+			next := tabs[(index+delta+len(tabs))%len(tabs)]
+			id := next.representative
+			if next.group != nil {
+				id = next.group.focused
+			}
+			d.selectSession(id)
 			return
 		}
 	}

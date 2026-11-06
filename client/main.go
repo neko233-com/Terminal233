@@ -50,6 +50,10 @@ type desktop struct {
 	sidebarCollapsed                                                                        bool
 	terminalNavigationOpen                                                                  bool
 	sessions                                                                                []*workspaceSession
+	terminalGroups                                                                          []*terminalGroup
+	nextTerminalGroupID, confirmTerminalGroupClose                                          int
+	terminalGroupSelected                                                                   map[int]bool
+	showTerminalGroupSelection                                                              bool
 	currentSession, nextSession, splitSession, splitFirstSession, splitFocusedSession       int
 	pendingTerminalFocus                                                                    int
 	showTeams, showAdmin, showInviteEntry                                                   bool
@@ -746,12 +750,20 @@ func (d *desktop) view(c *ui.Context) {
 								d.toggleMonitor()
 							}
 						}
-						splitLabel := "分屏查看"
-						if d.splitSession != 0 {
+						splitLabel, splitActive := "分屏查看", d.splitSession != 0
+						splitDisabled := !d.canSwitchSession() || (d.splitSession == 0 && len(d.sessions) < 2)
+						if group := d.terminalGroupFor(d.currentSession); group != nil {
+							splitActive = group.grid
+							splitDisabled = !d.canSwitchSession() || len(group.members) < 2
+						}
+						if splitActive {
 							splitLabel = "关闭分屏"
 						}
-						if terminalActionButton(c, "toggle-split", splitLabel, splitIcon, d.splitSession != 0, !d.canSwitchSession() || (d.splitSession == 0 && len(d.sessions) < 2)).Clicked() {
+						if terminalActionButton(c, "toggle-split", splitLabel, splitIcon, splitActive, splitDisabled).Clicked() {
 							d.toggleSplit()
+						}
+						if group := d.terminalGroupFor(d.currentSession); group != nil {
+							d.groupAddButton(c, group)
 						}
 						label := "打开文件面板"
 						if d.showFilePanel {
@@ -1064,7 +1076,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.97"
+const version = "0.3.98"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

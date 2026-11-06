@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -115,6 +116,25 @@ func TestDesktopRemotePanes(t *testing.T) {
 		return nil
 	}
 	press := func(key string) { waitKey(key); call("act", map[string]any{"key": key, "action": "press"}) }
+	waitGone := func(key string) {
+		t.Helper()
+		until := time.Now().Add(5 * time.Second)
+		for time.Now().Before(until) {
+			found := false
+			result := call("tree", nil)["result"].(map[string]any)
+			for _, item := range result["nodes"].([]any) {
+				if item.(map[string]any)["key"] == key {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+		t.Fatalf("control did not disappear: %s", key)
+	}
 	setPath := func(key, value string) {
 		t.Helper()
 		waitKey(key)
@@ -531,7 +551,9 @@ func TestDesktopRemotePanes(t *testing.T) {
 	// Save and restore a workspace with two SSH connections and one local
 	// terminal; the template must never contain their passwords.
 	press("session-close-5")
+	waitGone("session-close-5")
 	press("session-close-4")
+	waitGone("session-close-4")
 	press("session-3")
 	press("toggle-split")
 	waitKey("split-focus-1")
@@ -550,7 +572,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 	}
 	if err != nil || len(saved.Items) != 1 || len(saved.Items[0].Entries) != 3 {
-		t.Fatalf("workspace was not saved: %v", err)
+		t.Fatalf("workspace was not saved: %v; tree: %v", err, call("tree", nil))
 	}
 	data, err := os.ReadFile(workspaceFile)
 	if err != nil || strings.Contains(string(data), "test-password") {
@@ -558,14 +580,116 @@ func TestDesktopRemotePanes(t *testing.T) {
 	}
 	id := saved.Items[0].ID
 	press("session-close-3")
+	waitGone("session-close-3")
 	press("session-close-2")
+	waitGone("session-close-2")
 	press("session-close-1")
+	waitGone("session-close-1")
 	press("local-terminal")
 	waitKey("workspace-open-" + id)
 	press("workspace-open-" + id)
-	waitKey("session-8")
-	waitKey("split-focus-6")
+	waitKey("group-tab-1")
+	waitKey("group-focus-6")
+	waitKey("group-focus-7")
 	if !strings.Contains(fmt.Sprint(call("tree", nil)), "已恢复工作区") {
 		t.Fatal("restored workspace status missing")
 	}
+	press("toggle-split")
+	waitKey("group-rail-1")
+	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_FOCUS"); capturePath != "" {
+		result := call("capture", nil)["result"].(map[string]any)
+		png, decodeErr := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if writeErr := os.WriteFile(capturePath, png, 0600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	press("group-focus-7")
+	waitSelected("group-focus-7")
+	press("group-add-1")
+	press("group-add-local-1")
+	waitSelected("group-focus-9")
+	press("toggle-split")
+	waitKey("group-grid-1")
+	waitKey("group-focus-6")
+	waitKey("group-focus-7")
+	waitKey("group-focus-8")
+	press("group-close-member-9")
+	waitKey("group-tab-1")
+	// Save the grouped grid, close it, and restore the version-2 template.
+	press("local-terminal")
+	setPath("workspace-template-name", "分屏工作区")
+	press("workspace-template-save")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) {
+		saved, err = readWorkspaceTemplates(workspaceFile)
+		if err == nil && len(saved.Items) == 2 {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if err != nil || saved.Version != 2 || len(saved.Items) != 2 || saved.Items[1].ViewMode != "grid" || len(saved.Items[1].Entries) != 3 || len(saved.Items[1].ColumnPerc) != 12 {
+		t.Fatal("grouped workspace layout was not saved")
+	}
+	groupTemplateID := saved.Items[1].ID
+	press("group-close-1")
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(waitKey("group-close-1")["label"]), "确认关闭工作区") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(waitKey("group-close-1")["label"]), "确认关闭工作区") {
+		t.Fatal("group closure was not confirmed")
+	}
+	press("group-close-1")
+	waitGone("group-tab-1")
+	waitKey("workspace-open-" + groupTemplateID)
+	press("workspace-open-" + groupTemplateID)
+	waitKey("group-tab-2")
+	waitKey("group-grid-2")
+	waitKey("group-focus-10")
+	waitKey("group-focus-11")
+	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE"); capturePath != "" {
+		result := call("capture", nil)["result"].(map[string]any)
+		png, decodeErr := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if writeErr := os.WriteFile(capturePath, png, 0600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	drag("group-focus-10", "group-focus-11")
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) {
+		a := waitKey("group-focus-10")["bounds"].(map[string]any)
+		b := waitKey("group-focus-11")["bounds"].(map[string]any)
+		if b["x"].(float64) < a["x"].(float64) {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	firstBounds := waitKey("group-focus-10")["bounds"].(map[string]any)
+	secondBounds := waitKey("group-focus-11")["bounds"].(map[string]any)
+	if secondBounds["x"].(float64) >= firstBounds["x"].(float64) {
+		t.Fatal("workspace terminal drag did not reorder panes")
+	}
+	// Create another workspace from existing standalone sessions in the UI.
+	press("local-terminal")
+	press("new-tab-local")
+	waitKey("session-13")
+	press("local-terminal")
+	press("new-tab-local")
+	waitKey("session-14")
+	press("local-terminal")
+	setPath("workspace-template-name", "本地组")
+	press("workspace-group-select")
+	waitKey("workspace-group-select-13")
+	waitKey("workspace-group-select-14")
+	press("workspace-group-create")
+	waitKey("group-tab-3")
+	waitKey("group-focus-13")
+	press("group-focus-13")
+	waitSelected("group-focus-13")
 }

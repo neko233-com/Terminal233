@@ -13,6 +13,8 @@ import (
 func (d *desktop) openNewTab() {
 	if d.workspace != "new-tab" {
 		d.newTabReturn = d.workspace
+		d.showTerminalGroupSelection = false
+		d.terminalGroupSelected = nil
 	}
 	d.newTabOpen, d.workspace, d.terminalNavigationOpen = true, "new-tab", false
 	d.newTabStatus = ""

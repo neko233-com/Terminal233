@@ -852,7 +852,9 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "本机文件") {
 		t.Fatalf("local file workspace missing: %s", tree)
 	}
-	call("act", map[string]any{"key": "file-tools-toggle", "action": "press"})
+	if !strings.Contains(tree, "pick-batch-upload") {
+		call("act", map[string]any{"key": "file-tools-toggle", "action": "press"})
+	}
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1432,28 +1434,46 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	waitPaneAction("local-pane-file-pane-drag.txt")
 	waitPaneAction("file-refresh")
-	call("act", map[string]any{"key": "local-pane-file-pane-drag.txt", "action": "scrollIntoView"})
-	dragTree := call("tree")["result"].(map[string]any)
-	var sourceBounds, targetBounds map[string]any
-	for _, value := range dragTree["nodes"].([]any) {
-		node := value.(map[string]any)
-		if node["key"] == "local-pane-file-pane-drag.txt" {
-			sourceBounds, _ = node["bounds"].(map[string]any)
+	waitDragEndpoints := func(sourceKey, targetKey string) (map[string]any, map[string]any) {
+		t.Helper()
+		call("act", map[string]any{"key": sourceKey, "action": "scrollIntoView"})
+		var previous string
+		until := time.Now().Add(5 * time.Second)
+		for time.Now().Before(until) {
+			tree := call("tree")["result"].(map[string]any)
+			var source, target map[string]any
+			offscreen := true
+			for _, value := range tree["nodes"].([]any) {
+				node := value.(map[string]any)
+				if node["key"] == sourceKey {
+					source, _ = node["bounds"].(map[string]any)
+					offscreen = strings.Contains(fmt.Sprint(node["states"]), "offscreen")
+				}
+				if node["key"] == targetKey {
+					target, _ = node["bounds"].(map[string]any)
+				}
+			}
+			if source != nil && target != nil && !offscreen {
+				current := fmt.Sprint(source, target)
+				if current == previous {
+					return source, target
+				}
+				previous = current
+			}
+			time.Sleep(50 * time.Millisecond)
 		}
-		if node["key"] == "session-file-pane" {
-			targetBounds, _ = node["bounds"].(map[string]any)
-		}
+		t.Fatalf("dual-pane drag endpoints did not settle: %s, %s", sourceKey, targetKey)
+		return nil, nil
 	}
-	if sourceBounds == nil || targetBounds == nil {
-		t.Fatal("dual-pane drag endpoints were not exposed")
-	}
+	sourceBounds, targetBounds := waitDragEndpoints("local-pane-file-pane-drag.txt", "session-file-pane")
 	sx := sourceBounds["x"].(float64) + sourceBounds["width"].(float64)/2
 	sy := sourceBounds["y"].(float64) + sourceBounds["height"].(float64)/2
 	tx := targetBounds["x"].(float64) + targetBounds["width"].(float64)/2
-	ty := targetBounds["y"].(float64) + 18
+	ty := targetBounds["y"].(float64) + 120
 	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerDown", "x": sx, "y": sy}}})
 	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerMove", "x": tx, "y": ty}}})
 	call("tree")
+
 	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerUp", "x": tx, "y": ty}}})
 	deadline = time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
@@ -1466,25 +1486,11 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatalf("dual-pane drag upload failed: %s", fmt.Sprint(call("tree")))
 	}
 	waitPaneAction("file-batch-existing.txt")
-	call("act", map[string]any{"key": "file-batch-existing.txt", "action": "scrollIntoView"})
-	dragTree = call("tree")["result"].(map[string]any)
-	sourceBounds, targetBounds = nil, nil
-	for _, value := range dragTree["nodes"].([]any) {
-		node := value.(map[string]any)
-		if node["key"] == "file-batch-existing.txt" {
-			sourceBounds, _ = node["bounds"].(map[string]any)
-		}
-		if node["key"] == "local-file-pane" {
-			targetBounds, _ = node["bounds"].(map[string]any)
-		}
-	}
-	if sourceBounds == nil || targetBounds == nil {
-		t.Fatal("reverse drag endpoints were not exposed")
-	}
+	sourceBounds, targetBounds = waitDragEndpoints("file-batch-existing.txt", "local-file-pane")
 	sx = sourceBounds["x"].(float64) + sourceBounds["width"].(float64)/2
 	sy = sourceBounds["y"].(float64) + sourceBounds["height"].(float64)/2
 	tx = targetBounds["x"].(float64) + targetBounds["width"].(float64)/2
-	ty = targetBounds["y"].(float64) + 18
+	ty = targetBounds["y"].(float64) + 120
 	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerDown", "x": sx, "y": sy}}})
 	call("input", map[string]any{"events": []any{map[string]any{"type": "pointerMove", "x": tx, "y": ty}}})
 	call("tree")

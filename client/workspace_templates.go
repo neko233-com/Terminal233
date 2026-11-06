@@ -44,6 +44,9 @@ type savedWorkspace struct {
 	SplitFirst  int                      `json:"split_first"`
 	SplitSecond int                      `json:"split_second"`
 	SplitLayout string                   `json:"split_layout,omitempty"`
+	ViewMode    string                   `json:"view_mode,omitempty"`
+	RowPerc     []float32                `json:"row_percent,omitempty"`
+	ColumnPerc  []float32                `json:"column_percent,omitempty"`
 }
 type workspaceTemplatesFile struct {
 	Version int              `json:"version"`
@@ -58,10 +61,29 @@ func validateSavedWorkspace(w savedWorkspace) error {
 	if err != nil || len(id) != 16 || strings.TrimSpace(w.Name) != w.Name || w.Name == "" || !validWorkspaceText(w.Name, 120) || len(w.Entries) == 0 || len(w.Entries) > maxWorkspaceSessions || w.Active < 0 || w.Active >= len(w.Entries) {
 		return errors.New("工作区名称或会话无效")
 	}
+	if w.ViewMode != "" && w.ViewMode != "focus" && w.ViewMode != "grid" {
+		return errors.New("工作区视图无效")
+	}
+	for _, values := range [][]float32{w.RowPerc, w.ColumnPerc} {
+		if len(values) != 0 && len(values) != 12 {
+			return errors.New("工作区分屏尺寸无效")
+		}
+		for _, value := range values {
+			if value < 0 || value > 100 {
+				return errors.New("工作区分屏尺寸无效")
+			}
+		}
+	}
+	if w.ViewMode == "" && (len(w.RowPerc) != 0 || len(w.ColumnPerc) != 0) {
+		return errors.New("工作区视图无效")
+	}
 	if w.SplitLayout != "" && w.SplitLayout != "side" && w.SplitLayout != "stacked" {
 		return errors.New("工作区布局无效")
 	}
 	splitNone := w.SplitFirst == -1 && w.SplitSecond == -1
+	if w.ViewMode != "" && !splitNone {
+		return errors.New("工作区分屏数据冲突")
+	}
 	if !splitNone && (w.SplitFirst < 0 || w.SplitSecond < 0 || w.SplitFirst >= len(w.Entries) || w.SplitSecond >= len(w.Entries) || w.SplitFirst == w.SplitSecond || (w.Active != w.SplitFirst && w.Active != w.SplitSecond)) {
 		return errors.New("工作区分屏无效")
 	}
@@ -124,11 +146,14 @@ func readWorkspaceTemplates(filename string) (workspaceTemplatesFile, error) {
 	if err = dec.Decode(&struct{}{}); err != io.EOF {
 		return workspaceTemplatesFile{}, errors.New("工作区文件格式无效")
 	}
-	if saved.Version != 1 || len(saved.Items) > maxWorkspaceTemplates {
+	if (saved.Version != 1 && saved.Version != 2) || len(saved.Items) > maxWorkspaceTemplates {
 		return workspaceTemplatesFile{}, errors.New("工作区版本或数量无效")
 	}
 	seen := map[string]bool{}
 	for i, w := range saved.Items {
+		if saved.Version == 1 && (w.ViewMode != "" || len(w.RowPerc) != 0 || len(w.ColumnPerc) != 0) {
+			return workspaceTemplatesFile{}, errors.New("工作区版本与内容不符")
+		}
 		if validateSavedWorkspace(w) != nil || seen[w.ID] {
 			return workspaceTemplatesFile{}, errors.New("工作区内容无效")
 		}
@@ -168,6 +193,11 @@ func updateWorkspaceTemplates(filename string, update func(*workspaceTemplatesFi
 	}
 	if len(saved.Items) > maxWorkspaceTemplates {
 		return workspaceTemplatesFile{}, errors.New("工作区数量已达上限")
+	}
+	for _, w := range saved.Items {
+		if w.ViewMode != "" {
+			saved.Version = 2
+		}
 	}
 	data, err := json.MarshalIndent(saved, "", "  ")
 	if err != nil {
@@ -222,7 +252,18 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 	}
 	w := savedWorkspace{ID: hex.EncodeToString(id[:]), Name: name, Active: -1, SplitFirst: -1, SplitSecond: -1, SplitLayout: d.splitLayout}
 	d.saveSessionState()
-	for i, s := range d.sessions {
+	sessions := d.sessions
+	group := d.terminalGroupFor(d.currentSession)
+	if group != nil {
+		sessions = d.terminalGroupSessions(group)
+		w.RowPerc = append([]float32(nil), group.rowPerc[:]...)
+		w.ColumnPerc = append([]float32(nil), group.columnPerc[:]...)
+		w.ViewMode = "focus"
+		if group.grid {
+			w.ViewMode = "grid"
+		}
+	}
+	for i, s := range sessions {
 		if s.term == nil || terminalEnded(s.term) {
 			return savedWorkspace{}, fmt.Errorf("会话 %s 已结束，请先重新连接", s.label)
 		}
@@ -269,7 +310,7 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 			w.SplitSecond = i
 		}
 	}
-	if d.splitSession == 0 {
+	if group != nil || d.splitSession == 0 {
 		w.SplitFirst, w.SplitSecond = -1, -1
 	} else if w.SplitFirst == w.SplitSecond {
 		w.SplitSecond = w.Active
