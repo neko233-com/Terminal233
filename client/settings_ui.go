@@ -39,6 +39,11 @@ func (d *desktop) settingsView(c *ui.Context, height float32) {
 	ui.Scroll(c.Key("settings-scroll")).Label("设置面板").Width(320).Height(panelHeight).Background(c.Theme().Surface).Border(1, c.Theme().Border).Radius(8).Children(func() {
 		ui.Column(c).FillWidth().Padding(14).Gap(9).Children(func() {
 			ui.Text(c, "设置").FontSize(16).Bold()
+			if ui.Button(c.Key("agent-cli-copy"), "复制 Agent CLI 命令").Tooltip("agent hosts 列出主机；exec、ls、get、put 复用已保存的凭据和指纹").FillWidth().Clicked() {
+				if exe, err := os.Executable(); err == nil {
+					mygo.Clipboard.WriteText("& '" + strings.ReplaceAll(exe, "'", "''") + "' agent help")
+				}
+			}
 			ui.Text(c, "终端字号").FontSize(12).TextColor(c.Theme().TextMuted)
 			ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 				if ui.Button(c.Key("font-smaller"), "A−").Label("缩小终端字号").Disabled(d.currentTerminalFontSize() <= minTerminalFontSize).Clicked() {

@@ -113,6 +113,11 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "连接列表") {
 		t.Fatalf("missing native fields: %s", tree)
 	}
+	if !strings.Contains(tree, "key:workspace-rail-compact ") {
+		t.Fatal("fresh installs should show the text navigation")
+	}
+	call("act", map[string]any{"key": "workspace-rail-compact", "action": "press"})
+	tree = fmt.Sprint(call("tree"))
 	if !strings.Contains(tree, "key:workspace-rail-expand ") {
 		t.Fatal("compact icon navigation is missing")
 	}

@@ -29,12 +29,16 @@ try {
 $bundle = Join-Path $repo 'build\release-windows\windows-amd64'
 $builtExe = Join-Path $bundle 'Terminal233.exe'
 if ((& $builtExe --verify-broadcast | Out-String).Trim() -ne 'broadcast-input: available' -or $LASTEXITCODE -ne 0) { throw 'Packaged broadcast support verification failed.' }
+$agentHelp = (& $builtExe agent help | Out-String | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0 -or -not $agentHelp.ok -or $agentHelp.output -ne 'JSON' -or 'agent hosts' -notin $agentHelp.commands) { throw 'Packaged agent CLI verification failed.' }
 $installer = Join-Path $bundle "terminal233-setup-$version-amd64.exe"
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Installer not found.' }
 $process = Start-Process -FilePath $installer -ArgumentList @('/S', '/D=C:\App\nekossh') -WindowStyle Hidden -PassThru -Wait
 if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
 if ((& $installedExe --version | Out-String).Trim() -ne "Terminal233 $version") { throw 'Installed version verification failed.' }
 if ((& $installedExe --verify-broadcast | Out-String).Trim() -ne 'broadcast-input: available' -or $LASTEXITCODE -ne 0) { throw 'Installed broadcast support verification failed.' }
+$agentHelp = (& $installedExe agent help | Out-String | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0 -or -not $agentHelp.ok -or $agentHelp.output -ne 'JSON' -or 'agent hosts' -notin $agentHelp.commands) { throw 'Installed agent CLI verification failed.' }
 foreach ($name in @('Terminal233.exe','ghostty-vt.dll')) {
     if ((Get-FileHash -LiteralPath (Join-Path $bundle $name)).Hash -ne (Get-FileHash -LiteralPath (Join-Path $installRoot $name)).Hash) { throw "Installed file mismatch: $name" }
 }

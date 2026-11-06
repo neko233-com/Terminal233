@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -227,7 +228,7 @@ var workspaceTheme = func() *ui.Theme {
 	t.AccentPressed = ui.Hex("#186cb5")
 	t.Focus = ui.Hex("#58adf8")
 	t.Selection = ui.RGBA(32, 145, 246, .25)
-	t.Font, t.FontSize, t.Radius = "system-ui", 13, 8
+	t.Font, t.FontSize, t.Radius = "Microsoft YaHei UI", 13, 8
 	return t
 }()
 
@@ -245,7 +246,7 @@ var workspaceLightTheme = func() *ui.Theme {
 	t.AccentPressed = ui.Hex("#186cb5")
 	t.Focus = ui.Hex("#2091f6")
 	t.Selection = ui.RGBA(32, 145, 246, .20)
-	t.Font, t.FontSize, t.Radius = "system-ui", 13, 8
+	t.Font, t.FontSize, t.Radius = "Microsoft YaHei UI", 13, 8
 	return t
 }()
 
@@ -1300,6 +1301,14 @@ const version = "0.3.128"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "agent" {
+		store, err := agentProfileStore()
+		if err != nil {
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": false, "error": "无法找到本机配置目录"})
+			os.Exit(2)
+		}
+		os.Exit(runAgentCLI(os.Args[2:], store, os.Stdout))
+	}
 	showVersion := flag.Bool("version", false, "显示版本")
 	checkBroadcast := flag.Bool("verify-broadcast", false, "检查广播输入构建支持")
 	flag.Parse()

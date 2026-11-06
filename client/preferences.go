@@ -31,6 +31,7 @@ func readPreferences(path string) (workspacePreferences, error) {
 	p := workspacePreferences{Version: 1, TerminalFontSize: defaultTerminalFontSize}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		p.SidebarExpanded = true
 		return p, nil
 	}
 	if err != nil {

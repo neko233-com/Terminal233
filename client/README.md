@@ -47,5 +47,17 @@ Windows 桌面自动化验证：`pwsh -NoProfile -File client/test-desktop.ps1 -
 
 Windows 安装包：`task package:windows:local`。`pwsh -NoProfile -File client/install-local-windows.ps1` 要求干净且与远端一致的 `main`，执行测试并重新打包，再静默安装至 `C:\App\nekossh`，核验版本、文件哈希、开始菜单与卸载注册项；Windows 构建不带 Authenticode 签名。
 
+Agent CLI 与 GUI 使用同一个原生程序，无需启动图形窗口。设置中的“复制 Agent CLI 命令”可复制入口；PowerShell 示例：
+
+```powershell
+& 'C:\App\nekossh\Terminal233.exe' agent hosts
+& 'C:\App\nekossh\Terminal233.exe' agent exec --host 'local:主机ID' --command 'uname -a' --timeout 30s
+& 'C:\App\nekossh\Terminal233.exe' agent ls --host 'local:主机ID' --path /srv
+& 'C:\App\nekossh\Terminal233.exe' agent get --host 'local:主机ID' --path /srv/example.txt --local C:/Temp/example.txt
+& 'C:\App\nekossh\Terminal233.exe' agent put --host 'local:主机ID' --local C:/Temp/new.txt --path /srv/new.txt
+```
+
+先从 `agent hosts` 的 JSON 结果选择完整 `id`；CLI 仅使用当前 Windows 用户保存的本机主机和身份，复用 DPAPI 凭据及已核对指纹，不接受密码参数、不弹出密码提示、不自动信任新指纹、不开放监听端口。云端主机需要先在界面保存为本机主机。命令操作不申请 PTY，标准输入为 EOF；输出为单个 JSON 文档，stdout/stderr 各最多 2 MiB，并标记截断。远端非零退出码会成为 CLI 退出码；本机错误为 2，超时为 124。默认时限 30 秒，最多 10 分钟；超时关闭连接，但无法保证远端程序已终止。SFTP 支持普通文件（最多 64 MiB），拒绝覆盖已有目标。CLI 不保存命令或输出日志；命令输出由远端提供，应按不可信数据处理。
+
 
 本机终端使用 PowerShell 7（若安装了 PSReadLine 则加载命令语法高亮）；远程 shell 的高亮由远端配置决定。团队邀请可通过链接和密码注册或加入，邀请可撤销；邀请链接指向当前同步服务，接收方须将链接粘贴到 NekoSSH，自部署地址可显式选用，服务不匹配时不会发送邀请或密码；成员可直接选择，所有者可管理成员，管理员和所有者可管理邀请及团队连接，普通成员为只读；角色未知时需刷新团队列表；平台管理员通过动态验证码执行用户、团队和加密备份管理。默认云地址为 `https://nekossh.neko233.com`，已部署并作为默认地址。写入成功后的列表刷新失败会明确提示并保留已生成的邀请链接；连接列表可能过期时需刷新后再修改。服务能力探测失败时暂停更新或删除已有连接，刷新云端连接会重试探测；确认不支持并发保护的旧服务仍可使用，但会显示风险提示。切换团队时，连接列表加载成功但成员列表加载失败会保留可用连接并显示错误；连接列表加载失败则保留原空间。只有明确载入或由当前表单、会话成功创建的记录会被更新；每个同步空间分别记住服务端返回的记录编号，不再按相同主机、端口和用户名自动覆盖。首次复制到另一空间会新建记录。
