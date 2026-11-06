@@ -145,3 +145,60 @@ func TestCloudWorkspaceCapacity(t *testing.T) {
 		t.Fatal("accepted malformed split layout")
 	}
 }
+
+func TestWorkspaceTabNamesProtectLegacyClientsAndBackups(t *testing.T) {
+	s := setupTeams(t)
+	initial, err := s.store.listCloudWorkspaces("owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := cloudWorkspace{ID: "0123456789abcdef0123456789abcdef", Name: "workspace", Entries: []cloudWorkspaceEntry{{Kind: "local", Label: "host", TabName: "database"}}, SplitFirst: -1, SplitSecond: -1}
+	state, err := s.store.replaceCloudWorkspaces("owner", cloudWorkspaceMutation{Items: []cloudWorkspace{w}, ExpectedRevision: initial.Revision, SupportsTabNames: true})
+	if err != nil || s.store.doc.Version != 5 {
+		t.Fatal("alias not stored in version 5", err)
+	}
+	legacy := w
+	legacy.Entries = append([]cloudWorkspaceEntry(nil), w.Entries...)
+	legacy.Entries[0].TabName = ""
+	if _, err = s.store.replaceCloudWorkspaces("owner", cloudWorkspaceMutation{Items: []cloudWorkspace{legacy}, ExpectedRevision: state.Revision}); !errors.Is(err, errWorkspaceClientUpgrade) {
+		t.Fatal("legacy client could erase alias", err)
+	}
+	current, err := s.store.listCloudWorkspaces("owner")
+	if err != nil || current.Items[0].Entries[0].TabName != "database" || current.Revision != state.Revision {
+		t.Fatal("legacy write changed data", err)
+	}
+	if _, err = s.store.replaceCloudWorkspaces("owner", cloudWorkspaceMutation{Items: []cloudWorkspace{}, ExpectedRevision: state.Revision}); !errors.Is(err, errWorkspaceClientUpgrade) {
+		t.Fatal("legacy client deleted workspace aliases", err)
+	}
+	oldDocument := s.store.doc
+	oldDocument.Version = 4
+	if validateCloudWorkspaceDocument(oldDocument) == nil {
+		t.Fatal("accepted aliases in a legacy storage document")
+	}
+	backup, err := s.store.exportBackup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.store.replaceCloudWorkspaces("owner", cloudWorkspaceMutation{Items: []cloudWorkspace{}, ExpectedRevision: current.Revision, SupportsTabNames: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.store.importBackup(backup, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	current, err = s.store.listCloudWorkspaces("owner")
+	if err != nil || current.Items[0].Entries[0].TabName != "database" {
+		t.Fatal("backup lost alias", err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := openStore(s.store.path, "test-master-key-which-is-long")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	current, err = reopened.listCloudWorkspaces("owner")
+	if err != nil || current.Items[0].Entries[0].TabName != "database" {
+		t.Fatal("reopen lost alias", err)
+	}
+}

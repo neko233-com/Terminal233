@@ -22,6 +22,7 @@ const maxCloudWorkspaceBytes = 200 << 10
 type cloudWorkspaceEntry struct {
 	Kind        string `json:"kind"`
 	Label       string `json:"label,omitempty"`
+	TabName     string `json:"tabName,omitempty"`
 	Host        string `json:"host,omitempty"`
 	Port        string `json:"port,omitempty"`
 	User        string `json:"user,omitempty"`
@@ -53,10 +54,12 @@ type cloudWorkspaceSnapshot struct {
 type cloudWorkspaceMutation struct {
 	Items            []cloudWorkspace `json:"items"`
 	ExpectedRevision string           `json:"expectedRevision"`
+	SupportsTabNames bool             `json:"supportsTabNames,omitempty"`
 }
 
 var errWorkspaceConflict = errors.New("workspace state changed")
 var errInvalidWorkspace = errors.New("invalid workspace state")
+var errWorkspaceClientUpgrade = errors.New("workspace client upgrade required")
 
 func workspaceText(s string, maxLen int) bool {
 	return utf8.ValidString(s) && len(s) <= maxLen && strings.IndexFunc(s, unicode.IsControl) < 0
@@ -101,6 +104,9 @@ func validateCloudWorkspaces(items []cloudWorkspace) error {
 			}
 		}
 		for _, e := range w.Entries {
+			if e.TabName != strings.TrimSpace(e.TabName) || !workspaceText(e.TabName, 120) {
+				return errInvalidWorkspace
+			}
 			for _, text := range []string{e.Label, e.Host, e.Port, e.User, e.TeamID, e.AccountID, e.FileDir, e.TerminalDir} {
 				if !workspaceText(text, 4096) {
 					return errInvalidWorkspace
@@ -145,11 +151,25 @@ func validateCloudWorkspaceDocument(doc storeDocument) error {
 		return errInvalidWorkspace
 	}
 	for user, state := range doc.Workspaces {
+		if doc.Version < 5 && hasWorkspaceTabNames(state.Items) {
+			return errInvalidWorkspace
+		}
 		if _, ok := doc.Users[user]; !ok || doc.Version < 3 || validateCloudWorkspaces(state.Items) != nil {
 			return errInvalidWorkspace
 		}
 	}
 	return nil
+}
+
+func hasWorkspaceTabNames(items []cloudWorkspace) bool {
+	for _, w := range items {
+		for _, entry := range w.Entries {
+			if entry.TabName != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func cloneCloudWorkspaces(items []cloudWorkspace) []cloudWorkspace {
@@ -188,6 +208,9 @@ func (s *Store) replaceCloudWorkspaces(user string, input cloudWorkspaceMutation
 	if input.ExpectedRevision != workspaceView(state).Revision {
 		return cloudWorkspaceSnapshot{}, errWorkspaceConflict
 	}
+	if !input.SupportsTabNames && (hasWorkspaceTabNames(state.Items) || hasWorkspaceTabNames(input.Items)) {
+		return cloudWorkspaceSnapshot{}, errWorkspaceClientUpgrade
+	}
 	if state.Generation == ^uint64(0) || validateCloudWorkspaces(input.Items) != nil {
 		return cloudWorkspaceSnapshot{}, errInvalidWorkspace
 	}
@@ -198,6 +221,9 @@ func (s *Store) replaceCloudWorkspaces(user string, input cloudWorkspaceMutation
 		}
 		s.doc.Workspaces[user] = next
 		s.doc.Version = max(s.doc.Version, 3)
+		if hasWorkspaceTabNames(next.Items) {
+			s.doc.Version = max(s.doc.Version, 5)
+		}
 		return nil
 	})
 	if err != nil {
@@ -223,6 +249,8 @@ func (s *Server) workspaceResource(w http.ResponseWriter, r *http.Request, user 
 		switch {
 		case errors.Is(err, errWorkspaceConflict):
 			s.error(w, http.StatusConflict, "workspace_conflict", "云工作区已变化，请刷新后重试")
+		case errors.Is(err, errWorkspaceClientUpgrade):
+			s.error(w, http.StatusConflict, "workspace_client_upgrade", "请升级客户端以保护工作区终端名称")
 		case errors.Is(err, errInvalidWorkspace):
 			s.error(w, http.StatusBadRequest, "invalid_workspace", "云工作区内容无效")
 		case errors.Is(err, errTeamUnavailable):

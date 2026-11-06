@@ -28,18 +28,19 @@ type cloudAccount struct {
 }
 
 type cloudClient struct {
-	base               *url.URL
-	http               *http.Client
-	token              string
-	teamID             string
-	adminTOTP          string
-	conditionalUpdates bool
-	conditionalDeletes bool
-	cloudGroups        bool
-	cloudWorkspaces    bool
-	cloudWorkspaces16  bool
-	cloudTags          bool
-	capabilityUnknown  bool
+	base                *url.URL
+	http                *http.Client
+	token               string
+	teamID              string
+	adminTOTP           string
+	conditionalUpdates  bool
+	conditionalDeletes  bool
+	cloudGroups         bool
+	cloudWorkspaces     bool
+	cloudWorkspaces16   bool
+	cloudWorkspaceNames bool
+	cloudTags           bool
+	capabilityUnknown   bool
 }
 
 type cloudHTTPError struct {
@@ -63,6 +64,7 @@ func (c *cloudClient) discoverCapabilities() {
 	c.cloudGroups = false
 	c.cloudWorkspaces = false
 	c.cloudWorkspaces16 = false
+	c.cloudWorkspaceNames = false
 	c.cloudTags = false
 	c.capabilityUnknown = true
 	if c.request(http.MethodGet, "/healthz", nil, &health) != nil || health.Status != "ok" {
@@ -84,6 +86,9 @@ func (c *cloudClient) discoverCapabilities() {
 		}
 		if capability == "cloud-workspaces-16" {
 			c.cloudWorkspaces16 = true
+		}
+		if capability == "cloud-workspace-tab-names-v1" {
+			c.cloudWorkspaceNames = true
 		}
 		if capability == "account-tags-v1" {
 			c.cloudTags = true

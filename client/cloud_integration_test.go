@@ -76,7 +76,7 @@ func TestCloudAgainstGoServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.discoverCapabilities()
-	if !client.conditionalUpdates || !client.conditionalDeletes || !client.cloudGroups || !client.cloudWorkspaces || !client.cloudWorkspaces16 || !client.cloudTags {
+	if !client.conditionalUpdates || !client.conditionalDeletes || !client.cloudGroups || !client.cloudWorkspaces || !client.cloudWorkspaces16 || !client.cloudWorkspaceNames || !client.cloudTags {
 		t.Fatal("server conditional-update capability missing")
 	}
 	account := cloudAccount{Label: "sample", Host: "example.test", Port: 22, Username: "me", Password: "ssh-password", HostKeyFingerprint: "SHA256:verified", Tags: []string{"production", "database"}}
@@ -143,14 +143,30 @@ func TestCloudAgainstGoServer(t *testing.T) {
 	large.ViewMode = "grid"
 	large.RowPerc, large.ColumnPerc = make([]float32, 16), make([]float32, 16)
 	large.ColumnPerc[14] = 42
+	large.Entries[0].TabName = "database"
 	workspaceState.Items[0] = large
 	workspaceState, err = client.replaceCloudWorkspaces(workspaceState)
 	if err != nil || len(workspaceState.Items[0].Entries) != 16 || workspaceState.Items[0].ColumnPerc[14] != 42 {
 		t.Fatal("16-terminal workspace save failed", err)
 	}
 	workspaceState, err = client.listCloudWorkspaces()
-	if err != nil || len(workspaceState.Items[0].Entries) != 16 || workspaceState.Items[0].ColumnPerc[14] != 42 {
+	if err != nil || len(workspaceState.Items[0].Entries) != 16 || workspaceState.Items[0].ColumnPerc[14] != 42 || workspaceState.Items[0].Entries[0].TabName != "database" {
 		t.Fatal("16-terminal workspace read failed", err)
+	}
+	// Older clients ignore the unknown alias field; the server must refuse
+	// their replacement instead of silently erasing it.
+	legacyWorkspace := cloneCloudWorkspace(workspaceState.Items[0])
+	legacyWorkspace.Entries[0].TabName = ""
+	var legacyResult cloudWorkspaceSnapshot
+	legacyWrite := map[string]any{"items": []cloudWorkspace{legacyWorkspace}, "expectedRevision": workspaceState.Revision}
+	err = client.request(http.MethodPut, "/api/v1/workspaces", legacyWrite, &legacyResult)
+	var legacyError *cloudHTTPError
+	if !errors.As(err, &legacyError) || legacyError.Status != http.StatusConflict || legacyError.Code != "workspace_client_upgrade" {
+		t.Fatal("legacy client did not receive the workspace upgrade conflict", err)
+	}
+	workspaceState, err = client.listCloudWorkspaces()
+	if err != nil || workspaceState.Items[0].Entries[0].TabName != "database" {
+		t.Fatal("legacy request changed workspace", err)
 	}
 	groupState, err := client.listCloudGroups()
 	if err != nil {

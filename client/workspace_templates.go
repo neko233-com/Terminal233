@@ -23,6 +23,7 @@ const maxWorkspaceTemplates = 100
 type workspaceTemplateEntry struct {
 	Kind        string `json:"kind"`
 	Label       string `json:"label,omitempty"`
+	TabName     string `json:"tab_name,omitempty"`
 	Group       string `json:"group,omitempty"`
 	Host        string `json:"host,omitempty"`
 	Port        string `json:"port,omitempty"`
@@ -90,6 +91,9 @@ func validateSavedWorkspace(w savedWorkspace) error {
 		return errors.New("工作区分屏无效")
 	}
 	for _, e := range w.Entries {
+		if e.TabName != strings.TrimSpace(e.TabName) || !validWorkspaceText(e.TabName, 120) {
+			return errors.New("工作区终端名称无效")
+		}
 		for _, s := range []string{e.Label, e.Group, e.Host, e.Port, e.User, e.KeyPath, e.Fingerprint, e.FileDir, e.LocalDir, e.TerminalDir, e.CloudURL, e.CloudUser, e.CloudTeam, e.CloudID} {
 			if !validWorkspaceText(s, 4096) {
 				return errors.New("工作区内容无效")
@@ -154,7 +158,7 @@ func readWorkspaceTemplates(filename string) (workspaceTemplatesFile, error) {
 	if err = dec.Decode(&struct{}{}); err != io.EOF {
 		return workspaceTemplatesFile{}, errors.New("工作区文件格式无效")
 	}
-	if (saved.Version != 1 && saved.Version != 2 && saved.Version != 3 && saved.Version != 4) || len(saved.Items) > maxWorkspaceTemplates {
+	if (saved.Version != 1 && saved.Version != 2 && saved.Version != 3 && saved.Version != 4 && saved.Version != 5) || len(saved.Items) > maxWorkspaceTemplates {
 		return workspaceTemplatesFile{}, errors.New("工作区版本或数量无效")
 	}
 	seen := map[string]bool{}
@@ -164,6 +168,13 @@ func readWorkspaceTemplates(filename string) (workspaceTemplatesFile, error) {
 		}
 		if saved.Version == 1 && (w.ViewMode != "" || len(w.RowPerc) != 0 || len(w.ColumnPerc) != 0) {
 			return workspaceTemplatesFile{}, errors.New("工作区版本与内容不符")
+		}
+		if saved.Version < 5 {
+			for _, entry := range w.Entries {
+				if entry.TabName != "" {
+					return workspaceTemplatesFile{}, errors.New("工作区版本与终端名称不符")
+				}
+			}
 		}
 		if saved.Version < 3 {
 			for _, entry := range w.Entries {
@@ -220,6 +231,9 @@ func updateWorkspaceTemplates(filename string, update func(*workspaceTemplatesFi
 			saved.Version = 2
 		}
 		for _, entry := range w.Entries {
+			if entry.TabName != "" && saved.Version < 5 {
+				saved.Version = 5
+			}
 			if entry.TerminalDir != "" && saved.Version < 3 {
 				saved.Version = 3
 			}
@@ -291,6 +305,9 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 			return savedWorkspace{}, fmt.Errorf("会话 %s 已结束，请先重新连接", s.label)
 		}
 		e := workspaceTemplateEntry{FileDir: s.fileDir}
+		if group != nil {
+			e.TabName = group.tabNames[s.id]
+		}
 		if s.shell == nil {
 			e.Kind, e.Label = "local", s.label
 			if current, err := terminalDirectory(s.term.Dir(), true); err == nil {

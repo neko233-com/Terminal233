@@ -15,6 +15,7 @@ import (
 type cloudWorkspaceEntry struct {
 	Kind        string `json:"kind"`
 	Label       string `json:"label,omitempty"`
+	TabName     string `json:"tabName,omitempty"`
 	Host        string `json:"host,omitempty"`
 	Port        string `json:"port,omitempty"`
 	User        string `json:"user,omitempty"`
@@ -49,14 +50,17 @@ func portableWorkspace(w savedWorkspace, c *cloudClient, user string) (cloudWork
 	}
 	out := cloudWorkspace{ID: w.ID, Name: w.Name, Active: w.Active, SplitFirst: w.SplitFirst, SplitSecond: w.SplitSecond, SplitLayout: w.SplitLayout, ViewMode: w.ViewMode, RowPerc: append([]float32(nil), w.RowPerc...), ColumnPerc: append([]float32(nil), w.ColumnPerc...)}
 	for _, e := range w.Entries {
+		if e.TabName != "" && !c.cloudWorkspaceNames {
+			return cloudWorkspace{}, errors.New("同步服务需要升级才能保存工作区终端名称")
+		}
 		switch e.Kind {
 		case "local":
-			out.Entries = append(out.Entries, cloudWorkspaceEntry{Kind: "local", Label: e.Label})
+			out.Entries = append(out.Entries, cloudWorkspaceEntry{Kind: "local", Label: e.Label, TabName: e.TabName})
 		case "cloud":
 			if e.CloudURL != c.base.String() || e.CloudUser != user {
 				return cloudWorkspace{}, errors.New("工作区包含其他同步账号的主机")
 			}
-			out.Entries = append(out.Entries, cloudWorkspaceEntry{Kind: "cloud", Label: e.Label, Host: e.Host, Port: e.Port, User: e.User, TeamID: e.CloudTeam, AccountID: e.CloudID, FileDir: e.FileDir, TerminalDir: e.TerminalDir})
+			out.Entries = append(out.Entries, cloudWorkspaceEntry{Kind: "cloud", Label: e.Label, TabName: e.TabName, Host: e.Host, Port: e.Port, User: e.User, TeamID: e.CloudTeam, AccountID: e.CloudID, FileDir: e.FileDir, TerminalDir: e.TerminalDir})
 		default:
 			return cloudWorkspace{}, errors.New("本地主机需先保存到云端才能同步工作区")
 		}
@@ -75,7 +79,7 @@ func cloudWorkspaceLocal(w cloudWorkspace, c *cloudClient, user string, fingerpr
 			if e.Host != "" || e.Port != "" || e.User != "" || e.TeamID != "" || e.AccountID != "" || e.FileDir != "" || e.TerminalDir != "" {
 				return savedWorkspace{}, errors.New("云工作区内容无效")
 			}
-			out.Entries = append(out.Entries, workspaceTemplateEntry{Kind: "local", Label: e.Label})
+			out.Entries = append(out.Entries, workspaceTemplateEntry{Kind: "local", Label: e.Label, TabName: e.TabName})
 		case "cloud":
 			port, err := strconv.Atoi(e.Port)
 			if err != nil || port < 1 || port > 65535 || strconv.Itoa(port) != e.Port || e.AccountID == "" || len(e.AccountID) > 128 || len(e.TeamID) > 128 || strings.ContainsAny(e.AccountID+e.TeamID, "/\\") {
@@ -85,7 +89,7 @@ func cloudWorkspaceLocal(w cloudWorkspace, c *cloudClient, user string, fingerpr
 			if err != nil {
 				return savedWorkspace{}, fmt.Errorf("%s：%w", e.Host, err)
 			}
-			out.Entries = append(out.Entries, workspaceTemplateEntry{Kind: "cloud", Label: e.Label, Host: e.Host, Port: e.Port, User: e.User, Fingerprint: fp, CloudURL: c.base.String(), CloudUser: user, CloudTeam: e.TeamID, CloudID: e.AccountID, FileDir: e.FileDir, TerminalDir: e.TerminalDir})
+			out.Entries = append(out.Entries, workspaceTemplateEntry{Kind: "cloud", Label: e.Label, TabName: e.TabName, Host: e.Host, Port: e.Port, User: e.User, Fingerprint: fp, CloudURL: c.base.String(), CloudUser: user, CloudTeam: e.TeamID, CloudID: e.AccountID, FileDir: e.FileDir, TerminalDir: e.TerminalDir})
 		default:
 			return savedWorkspace{}, errors.New("云工作区包含不支持的会话")
 		}
@@ -146,7 +150,19 @@ func (c *cloudClient) replaceCloudWorkspaces(s cloudWorkspaceSnapshot) (cloudWor
 			}
 		}
 	}
-	if err := c.request(http.MethodPut, "/api/v1/workspaces", map[string]any{"items": s.Items, "expectedRevision": s.Revision}, &out); err != nil {
+	input := map[string]any{"items": s.Items, "expectedRevision": s.Revision}
+	if c.cloudWorkspaceNames {
+		input["supportsTabNames"] = true
+	} else {
+		for _, w := range s.Items {
+			for _, entry := range w.Entries {
+				if entry.TabName != "" {
+					return out, errors.New("同步服务需要升级才能保存工作区终端名称")
+				}
+			}
+		}
+	}
+	if err := c.request(http.MethodPut, "/api/v1/workspaces", input, &out); err != nil {
 		return out, err
 	}
 	if !validCloudWorkspaceSnapshot(out, c) {

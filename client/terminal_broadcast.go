@@ -166,9 +166,9 @@ func (d *desktop) broadcastMemberButton(c *ui.Context, group *terminalGroup, ses
 		return
 	}
 	selected := group.broadcastMembers[session.id]
-	label := fmt.Sprintf("加入广播：%s · 会话 %d", sessionDisplayLabel(session), session.id)
+	label := fmt.Sprintf("加入广播：%s · 会话 %d", groupSessionDisplayLabel(group, session), session.id)
 	if selected {
-		label = fmt.Sprintf("移出广播：%s · 会话 %d", sessionDisplayLabel(session), session.id)
+		label = fmt.Sprintf("移出广播：%s · 会话 %d", groupSessionDisplayLabel(group, session), session.id)
 	}
 	button := ui.Button(c.Key(fmt.Sprintf("group-broadcast-member-%d", session.id)), "").Label(label).Tooltip(label).Width(30).Height(30).Padding(6).BorderWidth(0).Background(c.Theme().Background).Radius(5).Selected(selected).Disabled(d.busy)
 	if selected {

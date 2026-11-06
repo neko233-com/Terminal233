@@ -39,3 +39,24 @@ func TestPortableWorkspaceRequiresLocalTrustAndOmitsDeviceData(t *testing.T) {
 		t.Fatal("local-only host accepted")
 	}
 }
+
+func TestCloudWorkspaceTabNamesRequireCapableServer(t *testing.T) {
+	c, err := newCloudClient("https://sync.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := sampleWorkspace("0123456789abcdef0123456789abcdef", "workspace")
+	w.Entries[0].TabName = "database"
+	if _, err = portableWorkspace(w, c, "owner"); err == nil || !strings.Contains(err.Error(), "升级") {
+		t.Fatal("older server accepted tab names", err)
+	}
+	c.cloudWorkspaceNames = true
+	portable, err := portableWorkspace(w, c, "owner")
+	if err != nil || portable.Entries[0].TabName != "database" {
+		t.Fatal("capable server lost tab name", err)
+	}
+	restored, err := cloudWorkspaceLocal(portable, c, "owner", func(cloudAccount) (string, error) { return "", errors.New("unused") })
+	if err != nil || restored.Entries[0].TabName != "database" {
+		t.Fatal("cloud tab name did not round-trip", err)
+	}
+}

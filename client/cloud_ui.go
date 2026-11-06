@@ -96,7 +96,7 @@ func (d *desktop) cloudRefresh() {
 		d.win.Update(func() {
 			d.busy = false
 			if d.cloud == client {
-				client.conditionalUpdates, client.conditionalDeletes, client.cloudGroups, client.cloudWorkspaces, client.cloudWorkspaces16, client.cloudTags, client.capabilityUnknown = probe.conditionalUpdates, probe.conditionalDeletes, probe.cloudGroups, probe.cloudWorkspaces, probe.cloudWorkspaces16, probe.cloudTags, probe.capabilityUnknown
+				client.conditionalUpdates, client.conditionalDeletes, client.cloudGroups, client.cloudWorkspaces, client.cloudWorkspaces16, client.cloudWorkspaceNames, client.cloudTags, client.capabilityUnknown = probe.conditionalUpdates, probe.conditionalDeletes, probe.cloudGroups, probe.cloudWorkspaces, probe.cloudWorkspaces16, probe.cloudWorkspaceNames, probe.cloudTags, probe.capabilityUnknown
 				d.setCloudWorkspaceState(workspaces, workspaceErr)
 			}
 			d.finishCloudRefresh(accounts, err)

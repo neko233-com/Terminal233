@@ -428,6 +428,14 @@ func (d *desktop) startWorkspaceWithCloudSource(w savedWorkspace, saved bool, cl
 			groupErr := d.createTerminalGroup(w.Name, ids, ids[w.Active], grid)
 			if groupErr == nil {
 				if group := d.terminalGroupFor(ids[w.Active]); group != nil {
+					for i, entry := range w.Entries {
+						if entry.TabName != "" {
+							if group.tabNames == nil {
+								group.tabNames = make(map[int]string)
+							}
+							group.tabNames[ids[i]] = entry.TabName
+						}
+					}
 					copy(group.rowPerc[:], w.RowPerc)
 					copy(group.columnPerc[:], w.ColumnPerc)
 					if saved {

@@ -27,8 +27,8 @@ func cloneCloudWorkspace(w cloudWorkspace) cloudWorkspace {
 // the group state rather than relying on repaint or mouse-event timing.
 func (d *desktop) workspaceGroupSignature(g *terminalGroup) [32]byte {
 	type member struct {
-		ID                                                             int
-		Label, Directory, FileDirectory, Host, Port, User, Fingerprint string
+		ID                                                                      int
+		Label, TabName, Directory, FileDirectory, Host, Port, User, Fingerprint string
 	}
 	type state struct {
 		Name, SplitLayout string
@@ -44,7 +44,7 @@ func (d *desktop) workspaceGroupSignature(g *terminalGroup) [32]byte {
 		if s.id == d.currentSession {
 			dir = d.fileDir
 		}
-		value.Members = append(value.Members, member{ID: s.id, Label: s.label, Directory: sessionTerminalDirectory(s), FileDirectory: dir, Host: s.active.Host, Port: s.active.Port, User: s.active.User, Fingerprint: s.active.Fingerprint})
+		value.Members = append(value.Members, member{ID: s.id, Label: s.label, TabName: g.tabNames[s.id], Directory: sessionTerminalDirectory(s), FileDirectory: dir, Host: s.active.Host, Port: s.active.Port, User: s.active.User, Fingerprint: s.active.Fingerprint})
 	}
 	// Rendering fills unset split percentages with the following defaults.
 	// Normalize them here so the first paint does not falsely mark a template dirty.
@@ -225,7 +225,7 @@ func (d *desktop) saveActiveWorkspaceGroup(g *terminalGroup) {
 			return
 		}
 		// Build the pending value offline; the actual service capability is checked before the write.
-		origin.cloudWorkspaces16 = true
+		origin.cloudWorkspaces16, origin.cloudWorkspaceNames = true, true
 		portable, e := portableWorkspace(state, origin, g.pendingCloud.user)
 		if e != nil {
 			g.pendingCloud.next = cloudWorkspace{}

@@ -190,7 +190,7 @@ func openStore(path, masterKey string) (result *Store, err error) {
 	return s, nil
 }
 func (s *Store) validateDocument() error {
-	if (s.doc.Version < 1 || s.doc.Version > 4) || s.doc.Users == nil || s.doc.Accounts == nil {
+	if (s.doc.Version < 1 || s.doc.Version > 5) || s.doc.Users == nil || s.doc.Accounts == nil {
 		return errors.New("数据文件版本不受支持")
 	}
 	if s.doc.Teams == nil {

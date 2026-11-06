@@ -89,7 +89,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version, "capabilities": []string{"conditional-account-update", "conditional-account-delete", "cloud-groups-v1", "cloud-workspaces-v1", "cloud-workspaces-16", "account-tags-v1"}})
+		s.json(w, http.StatusOK, map[string]any{"status": "ok", "service": "terminal233-server", "version": Version, "capabilities": []string{"conditional-account-update", "conditional-account-delete", "cloud-groups-v1", "cloud-workspaces-v1", "cloud-workspaces-16", "cloud-workspace-tab-names-v1", "account-tags-v1"}})
 	case r.URL.Path == "/api/v1/register" && r.Method == http.MethodPost:
 		s.register(w, r)
 	case r.URL.Path == "/api/v1/login" && r.Method == http.MethodPost:

@@ -620,6 +620,11 @@ func TestDesktopRemotePanes(t *testing.T) {
 		t.Fatal("workspace serialized a password")
 	}
 	id := saved.Items[0].ID
+	// A separately saved alias must reappear in the real native workspace.
+	if _, err = updateWorkspaceTemplates(workspaceFile, func(f *workspaceTemplatesFile) error { f.Items[0].Entries[1].TabName = "数据库终端"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	press("workspace-template-refresh")
 	press("session-close-3")
 	waitGone("session-close-3")
 	press("session-close-2")
@@ -640,7 +645,9 @@ func TestDesktopRemotePanes(t *testing.T) {
 		t.Fatal("workspace did not restore the remote directory")
 	}
 	waitKey("group-focus-6")
-	waitKey("group-focus-7")
+	if !strings.Contains(fmt.Sprint(waitKey("group-focus-7")["label"]), "数据库终端") {
+		t.Fatal("saved terminal name was not restored")
+	}
 	if !strings.Contains(fmt.Sprint(call("tree", nil)), "已恢复工作区") {
 		t.Fatal("restored workspace status missing")
 	}
@@ -660,7 +667,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 	call("input", map[string]any{"events": []any{map[string]any{"type": "key", "key": "Ctrl+S"}}})
 	waitGone("group-save-1")
 	updatedWorkspace, err := readWorkspaceTemplates(workspaceFile)
-	if err != nil || len(updatedWorkspace.Items) != 1 || updatedWorkspace.Items[0].ID != id || updatedWorkspace.Items[0].ViewMode != "focus" {
+	if err != nil || len(updatedWorkspace.Items) != 1 || updatedWorkspace.Items[0].ID != id || updatedWorkspace.Items[0].ViewMode != "focus" || updatedWorkspace.Items[0].Entries[1].TabName != "数据库终端" {
 		t.Fatal("saved workspace was not updated", err)
 	}
 	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_FOCUS"); capturePath != "" {
@@ -697,7 +704,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 		}
 		time.Sleep(30 * time.Millisecond)
 	}
-	if err != nil || saved.Version != 3 || len(saved.Items) != 2 || saved.Items[1].ViewMode != "grid" || len(saved.Items[1].Entries) != 3 || len(saved.Items[1].ColumnPerc) != 12 {
+	if err != nil || saved.Version != 5 || len(saved.Items) != 2 || saved.Items[1].ViewMode != "grid" || len(saved.Items[1].Entries) != 3 || len(saved.Items[1].ColumnPerc) != 12 {
 		t.Fatal("grouped workspace layout was not saved")
 	}
 	groupTemplateID := saved.Items[1].ID
