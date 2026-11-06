@@ -39,11 +39,25 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 			}
 		})
 	}
+	if d.newTabOpen {
+		ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
+			if workspaceButton(c, "new-tab-session", "新标签页", d.workspace == "new-tab").Label("切换到新标签页").Clicked() {
+				d.workspace = "new-tab"
+			}
+			if ui.Button(c.Key("new-tab-close"), "×").Label("关闭新标签页").Clicked() {
+				d.closeNewTab()
+			}
+		})
+	}
 	if moveSessionFrom != 0 {
 		d.moveSession(int(moveSessionFrom), int(moveSessionTo))
 		c.Invalidate()
 	}
 	if closeSessionID != 0 {
+		stayOnNewTab := d.workspace == "new-tab"
 		d.closeSession(closeSessionID)
+		if stayOnNewTab {
+			d.workspace = "new-tab"
+		}
 	}
 }

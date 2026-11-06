@@ -1143,6 +1143,38 @@ func TestDesktopNativeWindow(t *testing.T) {
 	}
 	call("act", map[string]any{"key": "toggle-file-panel", "action": "press"})
 	call("act", map[string]any{"key": "local-terminal", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "new-tab-search") && strings.Contains(tree, "new-tab-local") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "new-tab-search") || !strings.Contains(tree, "new-tab-local") {
+		t.Fatal("new tab search did not open")
+	}
+	call("act", map[string]any{"key": "new-tab-search", "action": "setValue", "text": "alice"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "new-tab-session-1") && !strings.Contains(tree, "new-tab-local") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "new-tab-session-1") || strings.Contains(tree, "new-tab-local") {
+		t.Fatal("new tab did not filter sessions")
+	}
+	call("act", map[string]any{"key": "new-tab-search", "action": "setValue", "text": ""})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "new-tab-local") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "new-tab-local", "action": "press"})
 	deadline = time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

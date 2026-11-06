@@ -16,6 +16,8 @@ import (
 
 type desktop struct {
 	workspace                                                                               string
+	newTabOpen                                                                              bool
+	newTabQuery, newTabReturn, newTabStatus                                                 string
 	editConnection                                                                          bool
 	showKeyOptions                                                                          bool
 	lightTheme                                                                              bool
@@ -202,7 +204,7 @@ func terminalActionButton(c *ui.Context, key, label string, icon *ui.SVG, active
 }
 
 func (d *desktop) sidebarVisible() bool {
-	if d.workspace == "terminal" && d.term != nil {
+	if (d.workspace == "terminal" && d.term != nil) || d.workspace == "new-tab" {
 		return d.terminalNavigationOpen
 	}
 	return !d.sidebarCollapsed
@@ -239,6 +241,8 @@ func (d *desktop) workspaceShortcuts(c *ui.Context) {
 		d.workspace = "cloud"
 	case c.Shortcut(mods, ui.KeyT):
 		d.openLocalTerminal()
+	case c.Shortcut(ui.Cmd, ui.KeyT):
+		d.openNewTab()
 	case c.Shortcut(mods, ui.KeyF):
 		if d.term != nil {
 			d.workspace, d.terminalSearchOpen = "terminal", true
@@ -352,7 +356,7 @@ func (d *desktop) connect() {
 
 func (d *desktop) view(c *ui.Context) {
 	d.workspaceShortcuts(c)
-	if d.workspace != "terminal" {
+	if d.workspace != "terminal" && d.workspace != "new-tab" {
 		d.terminalNavigationOpen = false
 	}
 	if d.workspace != "connections" && d.workspace != "" {
@@ -395,7 +399,7 @@ func (d *desktop) view(c *ui.Context) {
 				sidebarLabel = "展开侧栏"
 			}
 			if ui.Button(c.Key("toggle-sidebar"), "☰").Label(sidebarLabel).Tooltip(sidebarLabel).Width(38).Clicked() {
-				if d.workspace == "terminal" && d.term != nil {
+				if (d.workspace == "terminal" && d.term != nil) || d.workspace == "new-tab" {
 					d.terminalNavigationOpen = !d.terminalNavigationOpen
 				} else {
 					d.sidebarCollapsed = !d.sidebarCollapsed
@@ -405,12 +409,12 @@ func (d *desktop) view(c *ui.Context) {
 			if d.preferencesStatus != "" {
 				ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).Wrap()
 			}
-			if len(d.sessions) > 0 {
+			if len(d.sessions) > 0 || d.newTabOpen {
 				if workspaceButton(c, "workspace-hosts-tab", "主机", d.workspace == "" || d.workspace == "connections").Clicked() {
 					d.workspace = "connections"
 				}
 			}
-			if width >= 1100 && len(d.sessions) > 0 {
+			if width >= 1100 && (len(d.sessions) > 0 || d.newTabOpen) {
 				ui.ScrollHorizontal(c).Grow(1).Gap(6).Children(func() { d.sessionTabs(c) })
 			} else {
 				ui.Box(c).Grow(1)
@@ -431,9 +435,17 @@ func (d *desktop) view(c *ui.Context) {
 			ui.PopoverBase(c, settingsButton, &d.showSettings, func(panel ui.Element) {
 				panel.AttachTo(settingsButton, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() { d.settingsView(c, height) })
 			})
-			terminalActionButton(c, "local-terminal", "本机终端", plusIcon, false, d.busy || len(d.sessions) >= maxWorkspaceSessions).OnClick(d.openLocalTerminal)
-			if terminalActionButton(c, "disconnect", "关闭当前会话", closeIcon, false, d.busy || d.term == nil).Clicked() {
-				d.closeCurrentSession()
+			terminalActionButton(c, "local-terminal", "新建标签页", plusIcon, d.workspace == "new-tab", d.busy && !d.canSwitchSession()).OnClick(d.openNewTab)
+			closeLabel, closeDisabled := "关闭当前会话", d.busy || d.term == nil
+			if d.workspace == "new-tab" {
+				closeLabel, closeDisabled = "关闭新标签页", false
+			}
+			if terminalActionButton(c, "disconnect", closeLabel, closeIcon, false, closeDisabled).Clicked() {
+				if d.workspace == "new-tab" {
+					d.closeNewTab()
+				} else {
+					d.closeCurrentSession()
+				}
 			}
 		})
 		showSidebar := d.sidebarVisible()
@@ -620,9 +632,13 @@ func (d *desktop) view(c *ui.Context) {
 				d.stopMonitor()
 			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
-				if d.workspace == "terminal" {
+				if d.workspace == "terminal" || d.workspace == "new-tab" {
 					if width < 1100 {
 						ui.ScrollHorizontal(c).FillWidth().Padding(8, 12).Gap(6).Children(func() { d.sessionTabs(c) })
+					}
+					if d.workspace == "new-tab" {
+						ui.Scroll(c).Grow(1).FillWidth().Children(func() { d.newTabView(c) })
+						return
 					}
 					ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Padding(6, 12).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 						if width >= 900 {
@@ -950,7 +966,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.80"
+const version = "0.3.81"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
