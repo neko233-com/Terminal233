@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -81,6 +82,69 @@ func (d *desktop) groupTree() ([]string, map[string]int) {
 	}
 	sort.Strings(groups)
 	return groups, counts
+}
+
+// Group cards mirror the hierarchy shown in the sidebar. The current group
+// displays its immediate children; hosts still include descendants.
+func (d *desktop) profileGroupCards(c *ui.Context, cardWidth float32, draftBlocked bool) {
+	groups, counts := d.groupTree()
+	cloud := d.profileSource == "cloud"
+	if cloud {
+		groups, counts = d.cloudGroupTree()
+	}
+	var children []string
+	for _, group := range groups {
+		parent := ""
+		if i := strings.LastIndex(group, "/"); i >= 0 {
+			parent = group[:i]
+		}
+		if parent == d.profileFilter {
+			children = append(children, group)
+		}
+	}
+	if len(children) == 0 {
+		return
+	}
+	ui.Text(c, "分组").FontSize(13).TextColor(c.Theme().TextMuted)
+	ui.Row(c).FillWidth().Wrap().Gap(10).Children(func() {
+		for _, name := range children {
+			group := name
+			card := ui.Button(c.Key("group-card-"+group), "").Label("打开分组：" + group).Tooltip(group).Width(cardWidth).Height(66).Padding(10).Gap(10).Justify(ui.Start).Background(c.Theme().Surface).BorderWidth(0).Radius(10).Disabled(d.busy || draftBlocked)
+			card.Children(func() {
+				ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() { ui.Icon(c, fileIcon).Width(19).Height(19).TextColor(c.Theme().AccentText) })
+				ui.Column(c).Grow(1).Gap(3).Children(func() {
+					ui.Text(c, groupLeaf(group)).FontSize(14).Bold().Wrap()
+					ui.Text(c, fmt.Sprintf("%d 个连接", counts[group])).FontSize(12).TextColor(c.Theme().TextMuted)
+				})
+			})
+			card.ContextMenu(func(menu *ui.Menu) {
+				if menu.Item("管理分组").Disabled(draftBlocked).Chosen() {
+					if d.editConnection {
+						d.closeConnectionEditor()
+					}
+					d.profileFilter, d.showGroupControls, d.confirmGroupDelete = group, true, false
+				}
+			})
+			if card.Clicked() {
+				if d.editConnection {
+					d.closeConnectionEditor()
+				}
+				d.profileFilter, d.confirmGroupDelete = group, false
+				d.profileFavorites, d.profileRecent = false, false
+				d.showProfileInspector = false
+				d.profileInspectorAt = time.Time{}
+			}
+			if cloud {
+				if dragged, ok := ui.Drop[cloudGroupDragID](card); ok && !d.busy && !draftBlocked {
+					d.cloudGroupOperation("move", string(dragged), group)
+				}
+			} else {
+				if dragged, ok := ui.Drop[profileID](card); ok && !d.busy && !draftBlocked {
+					d.moveProfileToGroup(dragged, group)
+				}
+			}
+		}
+	})
 }
 
 func validGroupName(name string) bool {

@@ -468,13 +468,21 @@ func TestDesktopNativeWindow(t *testing.T) {
 	localTerminalID = ""
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "quick-name") && strings.Contains(tree, "命令目标：本机终端 2（会话 2）") {
+		if strings.Contains(tree, "quick-new") && strings.Contains(tree, "命令目标：本机终端 2（会话 2）") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !strings.Contains(tree, "命令目标：本机终端 2（会话 2）") {
 		t.Fatal("quick command target not visible")
+	}
+	call("act", map[string]any{"key": "quick-new", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "quick-name") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	commandResult := filepath.Join(t.TempDir(), "quick-command-result.txt")
 	quickText := "Set-Content -LiteralPath '" + strings.ReplaceAll(commandResult, "'", "''") + "' -Value 'quick-command-ok'"
@@ -534,7 +542,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		result := call("tree")["result"].(map[string]any)
-		if strings.Contains(fmt.Sprint(result), "terminal-search-input") || strings.Contains(fmt.Sprint(result), "quick-name") {
+		if strings.Contains(fmt.Sprint(result), "terminal-search-input") || strings.Contains(fmt.Sprint(result), "quick-side-scroll") || strings.Contains(fmt.Sprint(result), "quick-compact-scroll") {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
@@ -1523,12 +1531,11 @@ func TestDesktopNativeWindow(t *testing.T) {
 	call("act", map[string]any{"key": "profile-1", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(fmt.Sprint(call("tree")), "inspector-edit") {
+		if strings.Contains(fmt.Sprint(call("tree")), "connection-back") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	call("act", map[string]any{"key": "inspector-edit", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1565,12 +1572,12 @@ func TestDesktopNativeWindow(t *testing.T) {
 	call("act", map[string]any{"key": "profile-1", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(fmt.Sprint(call("tree")), "inspector-connect") {
+		if strings.Contains(fmt.Sprint(call("tree")), "connect-trusted") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	call("act", map[string]any{"key": "inspector-connect", "action": "press"})
+	call("act", map[string]any{"key": "connect-trusted", "action": "press"})
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

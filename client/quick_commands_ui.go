@@ -22,11 +22,11 @@ func (d *desktop) reloadQuickCommands() {
 	d.quickStatus = "快速命令已刷新"
 }
 
-func (d *desktop) saveQuickCommand() {
+func (d *desktop) saveQuickCommand() bool {
 	item, err := newQuickCommand(d.quickName, d.quickText)
 	if err != nil {
 		d.quickStatus = err.Error()
-		return
+		return false
 	}
 	expected := d.quickEdit
 	items, err := updateQuickCommands(d.quickPath, func(items []quickCommand) ([]quickCommand, error) {
@@ -50,11 +50,12 @@ func (d *desktop) saveQuickCommand() {
 	})
 	if err != nil {
 		d.quickStatus = "保存失败：" + err.Error()
-		return
+		return false
 	}
 	d.quickCommands, d.quickEdit, d.quickConfirm = items, nil, ""
 	d.quickName, d.quickText = "", ""
 	d.quickStatus = "快速命令已保存到本机"
+	return true
 }
 
 func (d *desktop) deleteQuickCommand(expected quickCommand) {
@@ -161,6 +162,76 @@ func (d *desktop) quickCommandsView(c *ui.Context) {
 						}
 					})
 				}
+			})
+		}
+	})
+}
+
+// The wide terminal uses a side panel: the list stays in view and editing is
+// opened explicitly, leaving the terminal itself at full height.
+func (d *desktop) quickCommandsSideView(c *ui.Context) {
+	ui.Column(c).FillWidth().Padding(14).Gap(10).Children(func() {
+		ui.Text(c, "快速命令").FontSize(16).Bold()
+		ui.Text(c, "命令目标："+d.quickCommandTarget()).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+			if ui.Button(c.Key("quick-new"), "+ 新建命令").Disabled(d.quickEditorOpen).Clicked() {
+				d.quickEditorOpen = true
+				d.quickEdit, d.quickName, d.quickText, d.quickConfirm = nil, "", "", ""
+			}
+			if ui.Button(c.Key("quick-refresh"), "刷新").Disabled(d.quickEditorOpen).Clicked() {
+				d.reloadQuickCommands()
+			}
+		})
+		if d.quickEditorOpen {
+			ui.Text(c, "命令保存在本机明文文件中，请勿填写密码或令牌。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+			ui.TextInput(c.Key("quick-name"), &d.quickName).Label("命令名称").Placeholder("命令名称").FillWidth()
+			ui.TextInput(c.Key("quick-text"), &d.quickText).Label("单行命令").Placeholder("单行命令").FillWidth()
+			ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+				if ui.PrimaryButton(c.Key("quick-save"), "保存命令").Clicked() && d.saveQuickCommand() {
+					d.quickEditorOpen = false
+				}
+				if ui.Button(c.Key("quick-cancel-edit"), "取消编辑").Clicked() {
+					d.quickEditorOpen = false
+					d.quickEdit, d.quickName, d.quickText = nil, "", ""
+				}
+			})
+		}
+		if d.quickStatus != "" {
+			ui.Text(c, d.quickStatus).FontSize(12).Wrap()
+		}
+		if len(d.quickCommands) == 0 {
+			ui.Text(c, "还没有快速命令").FontSize(12).TextColor(c.Theme().TextMuted)
+			return
+		}
+		ui.TextInput(c.Key("quick-filter"), &d.quickFilter).Label("搜索快速命令").Placeholder("搜索命令").FillWidth()
+		visible := filterQuickCommands(d.quickCommands, d.quickFilter)
+		if len(visible) == 0 {
+			ui.Text(c, "没有匹配的快速命令").FontSize(12).TextColor(c.Theme().TextMuted)
+		}
+		for _, command := range visible {
+			item := command
+			ui.Column(c).FillWidth().Padding(10).Gap(6).Background(c.Theme().Background).Radius(8).Children(func() {
+				ui.Text(c, item.Name).Bold().Wrap()
+				ui.Text(c, item.Command).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+				ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+					if ui.Button(c.Key("quick-insert-"+item.ID), "插入").Disabled(terminalEnded(d.term)).Clicked() {
+						d.sendQuickCommand(item, false)
+					}
+					if ui.Button(c.Key("quick-run-"+item.ID), "发送并回车").Disabled(terminalEnded(d.term)).Clicked() {
+						d.sendQuickCommand(item, true)
+					}
+					if ui.Button(c.Key("quick-edit-"+item.ID), "编辑").Disabled(d.quickEditorOpen).Clicked() {
+						d.quickEditorOpen = true
+						d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
+					}
+					label := "删除"
+					if d.quickConfirm == item.ID {
+						label = "确认删除"
+					}
+					if ui.Button(c.Key("quick-delete-"+item.ID), label).Disabled(d.quickEditorOpen).Clicked() {
+						d.deleteQuickCommand(item)
+					}
+				})
 			})
 		}
 	})

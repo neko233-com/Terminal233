@@ -142,7 +142,8 @@ func (d *desktop) openProfileConnection(p profile) {
 func (d *desktop) profileView(c *ui.Context) {
 	width, _ := c.Size()
 	inspectorCapable := d.connectionInspectorDocked(width)
-	docked := d.connectionInspectorDocked(width) && (d.editConnection || d.inspectedProfileAvailable())
+	draftBlocked := d.hasUnsavedConnection()
+	docked := d.connectionInspectorDocked(width) && d.editConnection
 	if !d.sidebarCollapsed {
 		width -= workspaceSidebarWidth(width)
 	}
@@ -176,7 +177,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			title = "分组 / " + d.profileFilter
 		}
 		ui.Text(c, title).FontSize(22).Bold().Grow(1)
-		if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Disabled(d.editConnection).Clicked() {
+		if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Disabled(draftBlocked).Clicked() {
 			d.settings = connectionSettings{Port: "22"}
 			d.settingsFromCloud = false
 			d.cloudFormSources = nil
@@ -187,16 +188,34 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.changedFingerprint = ""
 			d.expectedFingerprint = ""
 			d.selectedProfile = ""
+			d.selectedCloudProfile = ""
 			d.showProfileInspector = false
 			d.profileInspectorAt = time.Time{}
 			d.editConnection = true
 			d.captureConnectionDraft()
 		}
 	})
+	if d.profileFilter != "" {
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			if ui.Button(c.Key("profile-group-parent"), "‹").Label("返回上级分组").Tooltip("返回上级分组").Width(36).Disabled(draftBlocked).Clicked() {
+				if d.editConnection {
+					d.closeConnectionEditor()
+				}
+				if i := strings.LastIndex(d.profileFilter, "/"); i >= 0 {
+					d.profileFilter = d.profileFilter[:i]
+				} else {
+					d.profileFilter = ""
+				}
+				d.confirmGroupDelete, d.showProfileInspector = false, false
+				d.profileInspectorAt = time.Time{}
+			}
+			ui.Text(c, d.profileFilter).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+		})
+	}
 	if d.profileSort != "" && !d.profileRecent {
 		ui.Text(c, "按所选列排序；切换到自定义顺序后可拖动连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
-	if d.status != "" {
+	if d.status != "" && !d.editConnection {
 		ui.Text(c, d.status).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
 	if d.profileStoreConflict {
@@ -222,7 +241,13 @@ func (d *desktop) profileView(c *ui.Context) {
 		}
 	}
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
-		ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接或快速连接").Placeholder("搜索连接，或输入 ssh 用户@主机 -p 端口").Disabled(d.editConnection).Grow(1).OnSubmit(d.submitConnectionSearch)
+		ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("搜索连接或快速连接").Placeholder("搜索连接，或输入 ssh 用户@主机 -p 端口").Grow(1).OnSubmit(func() {
+			if d.hasUnsavedConnection() {
+				d.status = "请先保存或关闭当前主机详情。"
+				return
+			}
+			d.submitConnectionSearch()
+		})
 		label := "分组管理"
 		if d.showGroupControls {
 			label = "收起分组管理"
@@ -232,7 +257,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			d.confirmGroupDelete = false
 		}
 		if looksLikeQuickConnection(d.profileSearch) {
-			if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy || d.editConnection).Clicked() {
+			if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy || draftBlocked).Clicked() {
 				d.submitConnectionSearch()
 			}
 		}
@@ -364,6 +389,9 @@ func (d *desktop) profileView(c *ui.Context) {
 		}
 	}
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
+	if query == "" && !d.profileFavorites && !d.profileRecent {
+		d.profileGroupCards(c, cardWidth, draftBlocked)
+	}
 	showLocal := d.profileSource != "cloud" && d.profileFilter == "" && !d.profileFavorites && !d.profileRecent &&
 		(query == "" || strings.Contains("本机终端 local terminal powershell", query))
 	ui.Text(c, "主机").FontSize(13).TextColor(c.Theme().TextMuted)
@@ -435,12 +463,12 @@ func (d *desktop) profileView(c *ui.Context) {
 					})
 				})
 				if d.selectedProfile == string(p.ID) {
-					row = row.Background(c.Theme().SurfacePressed)
+					row = row.Background(c.Theme().SurfacePressed).BorderWidth(1).BorderColor(c.Theme().Accent)
 				}
 				if !d.profileRecent && d.profileSort == "" {
 					row = row.Drag(p.ID)
 				}
-				blockedByEditor := d.editConnection
+				blockedByEditor := draftBlocked
 				row.ContextMenu(func(menu *ui.Menu) {
 					if menu.Item("连接").Disabled(d.busy || blockedByEditor || len(d.sessions) >= maxWorkspaceSessions).Chosen() {
 						d.openProfileConnection(p)
@@ -468,7 +496,11 @@ func (d *desktop) profileView(c *ui.Context) {
 				} else if row.Clicked() {
 					if blockedByEditor {
 						d.status = "请先保存或关闭当前主机详情。"
-					} else if !d.editConnection {
+					} else if d.editConnection {
+						if d.settingsFromCloud || d.selectedProfile != string(p.ID) {
+							d.loadProfile(p)
+						}
+					} else {
 						d.selectedProfile = string(p.ID)
 						d.selectedCloudProfile = ""
 						d.confirmProfileDelete = ""
@@ -604,9 +636,9 @@ func (d *desktop) profileView(c *ui.Context) {
 						})
 					})
 					if d.selectedCloudProfile == account.ID {
-						row = row.Background(c.Theme().SurfacePressed)
+						row = row.Background(c.Theme().SurfacePressed).BorderWidth(1).BorderColor(c.Theme().Accent)
 					}
-					blockedByEditor := d.editConnection
+					blockedByEditor := draftBlocked
 					row.ContextMenu(func(menu *ui.Menu) {
 						if menu.Item("连接").Disabled(d.busy || blockedByEditor).Chosen() {
 							d.loadCloudAccount(account)
@@ -617,7 +649,11 @@ func (d *desktop) profileView(c *ui.Context) {
 					} else if row.Clicked() {
 						if blockedByEditor {
 							d.status = "请先保存或关闭当前主机详情。"
-						} else if !d.editConnection {
+						} else if d.editConnection {
+							if !d.settingsFromCloud || d.selectedCloudProfile != account.ID {
+								d.loadCloudAccount(account)
+							}
+						} else {
 							d.selectedCloudProfile = account.ID
 							d.selectedProfile = ""
 							d.scheduleProfileInspector(c)

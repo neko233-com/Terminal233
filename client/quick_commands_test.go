@@ -86,7 +86,10 @@ func TestQuickCommandSendsOnlyToSelectedTerminal(t *testing.T) {
 	if err := view.Click("快速命令"); err != nil {
 		t.Fatal(err)
 	}
-	if !view.HasText("单行命令") || !view.HasText("快速命令保存在本机明文文件中；请勿保存密码或令牌。发送目标为当前选中的会话，发送并回车会与当前输入行一起执行。 ") {
+	if err := view.Click("+ 新建命令"); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasText("单行命令") || !view.HasText("命令保存在本机明文文件中，请勿填写密码或令牌。") {
 		t.Fatal("quick command editor or plaintext warning missing")
 	}
 	if !view.HasText("命令目标：相同名称（会话 2）") {
@@ -126,8 +129,34 @@ func TestQuickCommandSearchFiltersByNameAndContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	view.Type("journal")
-	if !view.HasText("日志 · journalctl -xe") || view.HasText("磁盘 · df -h") {
+	if !view.HasText("日志") || !view.HasText("journalctl -xe") || view.HasText("磁盘") {
 		t.Fatal("search input did not filter the command list")
+	}
+}
+
+func TestQuickSideEditorOpensAndClosesAfterSaving(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{workspace: "terminal", term: term, quickOpen: true, quickPath: filepath.Join(t.TempDir(), "commands.json")}
+	view := ui.NewTester(d.view, 1280, 800)
+	if view.HasText("单行命令") {
+		t.Fatal("editor should start collapsed")
+	}
+	if err := view.Click("+ 新建命令"); err != nil {
+		t.Fatal(err)
+	}
+	d.quickName, d.quickText = "磁盘", "df -h"
+	view.Frame()
+	if err := view.Click("保存命令"); err != nil {
+		t.Fatal(err)
+	}
+	if d.quickEditorOpen || len(d.quickCommands) != 1 || !view.HasText("磁盘") {
+		t.Fatal("saving did not return to the command list")
 	}
 }
 

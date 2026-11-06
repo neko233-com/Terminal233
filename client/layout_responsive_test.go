@@ -65,6 +65,35 @@ func TestTerminalRemainsVisibleWithPanelsAtMinimumWindow(t *testing.T) {
 	}
 }
 
+func TestWideTerminalPlacesQuickCommandsBesideTerminal(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	term, err := terminal.New(terminal.Options{Conn: left, NoClipboardWrite: true, ImageLimit: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	d := &desktop{workspace: "terminal", term: term, currentSession: 1, sessions: []*workspaceSession{{id: 1, label: "local", term: term}}, quickOpen: true}
+	view := ui.NewTester(d.view, 1280, 800)
+	terminalRect, terminalOK := view.Find("Terminal")
+	panelRect, panelOK := view.Find("快速命令面板")
+	if !terminalOK || !panelOK || terminalRect.W < 300 || terminalRect.H < 200 || panelRect.X < terminalRect.X+terminalRect.W-1 {
+		t.Fatalf("quick commands should be beside a usable terminal: terminal=%+v panel=%+v", terminalRect, panelRect)
+	}
+	if err := view.Click("打开文件面板"); err != nil {
+		t.Fatal(err)
+	}
+	if d.quickOpen || !d.showFilePanel {
+		t.Fatal("opening files should replace the quick commands panel")
+	}
+	if err := view.Click("快速命令"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.quickOpen || d.showFilePanel {
+		t.Fatal("opening quick commands should replace the file panel")
+	}
+}
+
 func TestTerminalFilePanelResizesByPointerAndKeyboard(t *testing.T) {
 	left, peer := net.Pipe()
 	defer peer.Close()

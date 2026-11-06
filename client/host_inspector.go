@@ -3,11 +3,8 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
-	"net"
 	"time"
 
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -34,12 +31,15 @@ func (d *desktop) captureConnectionDraft() {
 	d.confirmDiscardConnection = false
 }
 
+func (d *desktop) hasUnsavedConnection() bool {
+	return d.editConnection && d.connectionDraftSet && d.currentConnectionDraft() != d.connectionDraft
+}
+
 func (d *desktop) closeConnectionEditor() bool {
 	if d.busy {
 		return false
 	}
-	current := d.currentConnectionDraft()
-	if d.connectionDraftSet && current != d.connectionDraft && !d.confirmDiscardConnection {
+	if d.hasUnsavedConnection() && !d.confirmDiscardConnection {
 		d.confirmDiscardConnection = true
 		d.status = "主机详情有未保存的修改；再次点击返回可放弃修改。"
 		return false
@@ -65,8 +65,9 @@ func (d *desktop) scheduleProfileInspector(c *ui.Context) {
 	if d.showProfileInspector {
 		return
 	}
-	d.profileInspectorAt = time.Now().Add(350 * time.Millisecond)
-	c.After(350 * time.Millisecond)
+	delay := hostInspectorDelay()
+	d.profileInspectorAt = time.Now().Add(delay)
+	c.After(delay)
 }
 
 func (d *desktop) inspectedProfile() *profile {
@@ -93,69 +94,4 @@ func (d *desktop) inspectedCloudAccount() *cloudAccount {
 		}
 	}
 	return nil
-}
-
-func (d *desktop) inspectedProfileAvailable() bool {
-	return d.inspectedProfile() != nil || d.inspectedCloudAccount() != nil
-}
-
-func (d *desktop) profileInspectorView(c *ui.Context) {
-	local, cloud := d.inspectedProfile(), d.inspectedCloudAccount()
-	if local == nil && cloud == nil {
-		return
-	}
-	name, address, user, group, source := "", "", "", "", "本机"
-	if local != nil {
-		name, user, group = local.Label, local.Settings.User, local.Group
-		address = net.JoinHostPort(local.Settings.Host, local.Settings.Port)
-	} else {
-		name, user, source = cloud.Label, cloud.Username, d.cloudScopeName()
-		group = d.cloudGroupSnapshot.Assignments[cloud.ID]
-		address = net.JoinHostPort(cloud.Host, fmt.Sprint(cloud.Port))
-	}
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "主机详情").FontSize(17).Bold().Grow(1)
-		if ui.Button(c.Key("inspector-close"), "×").Label("关闭主机详情").Tooltip("关闭").Width(36).Clicked() {
-			d.showProfileInspector = false
-			d.profileInspectorAt = time.Time{}
-		}
-	})
-	ui.Text(c, source).FontSize(12).TextColor(c.Theme().TextMuted)
-	ui.Column(c).FillWidth().Padding(14).Gap(6).Background(c.Theme().Background).Radius(8).Children(func() {
-		ui.Text(c, name).FontSize(16).Bold().Wrap()
-		ui.Text(c, user+" · SSH").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-		ui.Text(c, address).FontSize(13).Wrap()
-		if group != "" {
-			ui.Text(c, "分组："+group).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-		}
-	})
-	ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-		if ui.PrimaryButton(c.Key("inspector-connect"), "连接").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
-			if local != nil {
-				d.openProfileConnection(*local)
-			} else {
-				d.loadCloudAccount(*cloud)
-			}
-		}
-		if ui.Button(c.Key("inspector-edit"), "编辑主机").Disabled(d.busy).Clicked() {
-			if local != nil {
-				d.loadProfile(*local)
-			} else {
-				d.loadCloudAccount(*cloud)
-			}
-		}
-		if ui.Button(c.Key("inspector-copy"), "复制地址").Clicked() {
-			mygo.Clipboard.WriteText(address)
-			d.status = "已复制地址：" + name
-		}
-		if local != nil {
-			label := "收藏"
-			if local.Favorite {
-				label = "取消收藏"
-			}
-			if ui.Button(c.Key("inspector-favorite"), label).Disabled(d.busy).Clicked() {
-				d.toggleProfileFavorite(local.ID)
-			}
-		}
-	})
 }
