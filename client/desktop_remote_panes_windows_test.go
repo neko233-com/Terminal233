@@ -86,7 +86,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 			t.Fatal(err)
 		}
 		if result["error"] != nil {
-			t.Fatalf("automation %s: %v", method, result["error"])
+			t.Fatalf("automation %s %v: %v", method, params, result["error"])
 		}
 		return result
 	}
@@ -116,7 +116,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 		t.Fatalf("control unavailable: %s; tree: %v", key, call("tree", nil))
 		return nil
 	}
-	press := func(key string) { waitKey(key); call("act", map[string]any{"key": key, "action": "press"}) }
+	press := func(key string) { t.Helper(); waitKey(key); call("act", map[string]any{"key": key, "action": "press"}) }
 	waitGone := func(key string) {
 		t.Helper()
 		until := time.Now().Add(5 * time.Second)
