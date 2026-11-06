@@ -32,22 +32,24 @@ function global:prompt {
 }
 `
 
-// openLocalTerminal starts a local interactive shell, without an SSH client or server.
-func (d *desktop) openLocalTerminal() {
-	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
-		return
-	}
-	options := d.terminalOptions()
+// newLocalTerminal starts a local interactive shell without an SSH client.
+func newLocalTerminal(options terminal.Options) (*terminal.Terminal, error) {
 	options.Env = []string{"TERM=xterm-256color", "COLORTERM=truecolor"}
 	if runtime.GOOS == "windows" {
 		shell, err := exec.LookPath("pwsh.exe")
 		if err != nil {
-			d.status = "未找到 PowerShell 7（pwsh），请先安装并加入 PATH。"
-			return
+			return nil, fmt.Errorf("未找到 PowerShell 7（pwsh），请先安装并加入 PATH：%w", err)
 		}
 		options.Command = []string{shell, "-NoLogo", "-NoExit", "-Command", powerShellIntegration}
 	}
-	t, err := terminal.New(options)
+	return terminal.New(options)
+}
+
+func (d *desktop) openLocalTerminal() {
+	if d.busy || len(d.sessions) >= maxWorkspaceSessions {
+		return
+	}
+	t, err := newLocalTerminal(d.terminalOptions())
 	if err != nil {
 		d.status = fmt.Sprintf("本机终端启动失败：%v", err)
 		return

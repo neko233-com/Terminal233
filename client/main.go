@@ -145,6 +145,11 @@ type desktop struct {
 	win                                                                                     *mygo.Window
 	settings                                                                                connectionSettings
 	settingsFromCloud                                                                       bool
+	workspaceTemplatesPath, workspaceTemplateName, workspaceTemplatesStatus                 string
+	workspaceTemplates                                                                      []savedWorkspace
+	showWorkspaceTemplates                                                                  bool
+	confirmWorkspaceRemove                                                                  string
+	workspaceRestore                                                                        *workspaceRestore
 	cloudFormSources                                                                        map[string]string
 	cloudFormVersions                                                                       map[string]string
 	fingerprint, status                                                                     string
@@ -333,7 +338,12 @@ func (d *desktop) connect() {
 	settings.Fingerprint = d.fingerprint
 	profileID := d.selectedProfile
 	var cloudSources, cloudVersions map[string]string
+	cloudOriginURL, cloudOriginUser, cloudOriginTeam, cloudOriginID := "", "", "", ""
 	if d.settingsFromCloud && d.cloud != nil {
+		if d.cloud.base != nil {
+			cloudOriginURL = d.cloud.base.String()
+		}
+		cloudOriginUser, cloudOriginTeam, cloudOriginID = d.cloudUser, d.cloud.teamID, d.selectedCloudProfile
 		cloudSources = cloneCloudSources(d.cloudFormSources)
 		cloudVersions = cloneCloudSources(d.cloudFormVersions)
 	}
@@ -361,6 +371,8 @@ func (d *desktop) connect() {
 				if session.id == d.currentSession {
 					session.cloudSources = cloudSources
 					session.cloudVersions = cloudVersions
+					session.sourceProfileID = profileID
+					session.cloudOriginURL, session.cloudOriginUser, session.cloudOriginTeam, session.cloudOriginID = cloudOriginURL, cloudOriginUser, cloudOriginTeam, cloudOriginID
 					break
 				}
 			}
@@ -468,6 +480,11 @@ func (d *desktop) view(c *ui.Context) {
 				ui.ScrollHorizontal(c).Grow(1).Gap(6).Children(func() { d.sessionTabs(c) })
 			} else {
 				ui.Box(c).Grow(1)
+			}
+			if d.workspaceRestore != nil && d.workspace != "new-tab" {
+				if ui.Button(c.Key("workspace-restore-cancel-header"), "取消恢复").Disabled(d.workspaceRestore.cancelling).Clicked() {
+					d.cancelWorkspaceRestore()
+				}
 			}
 			themeLabel := "浅色"
 			if d.lightTheme {
@@ -1047,7 +1064,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.96"
+const version = "0.3.97"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -1082,6 +1099,16 @@ func main() {
 			d.quickCommands, d.quickPackages = saved.Items, saved.Packages
 		}
 	}
+	if dir, err := os.UserConfigDir(); err == nil {
+		d.workspaceTemplatesPath = filepath.Join(dir, "NekoSSH", "workspaces.json")
+		if saved, readErr := readWorkspaceTemplates(d.workspaceTemplatesPath); readErr != nil {
+			d.workspaceTemplatesStatus = "读取工作区失败（原文件已保留）：" + readErr.Error()
+		} else {
+			d.workspaceTemplates = saved.Items
+		}
+	} else {
+		d.workspaceTemplatesStatus = "工作区存储不可用：" + err.Error()
+	}
 	mygo.Theme.SetSource(mygo.ThemeDark)
 	mygo.App.WhenReady(func() {
 		d.win = mygo.NewWindow(mygo.WindowOptions{Title: "NekoSSH", Width: 1200, Height: 760, MinWidth: 640, MinHeight: 480, Content: ui.View(d.view)})
@@ -1089,6 +1116,7 @@ func main() {
 			if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
 				d.flushProfileAutosave()
 			}
+			d.closeWorkspaceRestore()
 			d.stopExternalEdits()
 			d.closeAllSessions()
 		})

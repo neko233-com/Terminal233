@@ -263,6 +263,7 @@ func (d *desktop) newTabView(c *ui.Context) {
 	ui.Row(c).FillWidth().Padding(40, 24).Justify(ui.Center).Children(func() {
 		ui.Column(c).Width(contentWidth).Gap(16).Children(func() {
 			ui.TextInput(c.Key("new-tab-search"), &d.newTabQuery).Label("搜索主机或会话").Placeholder("搜索主机、会话或 SSH 地址").FillWidth().AutoFocus().OnTextKey(d.newTabTextKey)
+			d.workspaceTemplatesView(c)
 			if d.newTabStatus != "" {
 				ui.Text(c, d.newTabStatus).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 			}

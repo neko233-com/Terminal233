@@ -146,3 +146,7 @@ client/mygo_windows_*.syso
 *.db-shm
 *.db.lock
 *.json.lock
+
+# Local workspace templates may contain host names and paths
+workspaces.json
+.workspaces-*.tmp

@@ -527,4 +527,44 @@ func TestDesktopRemotePanes(t *testing.T) {
 	if !strings.EqualFold(fmt.Sprint(currentDir["value"]), localDir) {
 		t.Fatal("left retry changed the right directory")
 	}
+	// Save and restore a workspace with two SSH connections and one local
+	// terminal; the template must never contain their passwords.
+	press("session-close-5")
+	press("session-close-4")
+	press("session-3")
+	press("toggle-split")
+	waitKey("split-focus-1")
+	press("local-terminal")
+	press("workspace-templates-toggle")
+	setPath("workspace-template-name", "测试工作区")
+	press("workspace-template-save")
+	workspaceFile := filepath.Join(configDir, "NekoSSH", "workspaces.json")
+	until = time.Now().Add(10 * time.Second)
+	var saved workspaceTemplatesFile
+	for time.Now().Before(until) {
+		saved, err = readWorkspaceTemplates(workspaceFile)
+		if err == nil && len(saved.Items) == 1 {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if err != nil || len(saved.Items) != 1 || len(saved.Items[0].Entries) != 3 {
+		t.Fatalf("workspace was not saved: %v", err)
+	}
+	data, err := os.ReadFile(workspaceFile)
+	if err != nil || strings.Contains(string(data), "test-password") {
+		t.Fatal("workspace serialized a password")
+	}
+	id := saved.Items[0].ID
+	press("session-close-3")
+	press("session-close-2")
+	press("session-close-1")
+	press("local-terminal")
+	waitKey("workspace-open-" + id)
+	press("workspace-open-" + id)
+	waitKey("session-8")
+	waitKey("split-focus-6")
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "已恢复工作区") {
+		t.Fatal("restored workspace status missing")
+	}
 }

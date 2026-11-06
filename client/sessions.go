@@ -71,28 +71,30 @@ func sessionDisplayLabel(s *workspaceSession) string {
 // Each tab owns its terminal and remote file selection. Session credentials
 // stay in memory; saved host credentials are protected separately.
 type workspaceSession struct {
-	id                                                       int
-	label                                                    string
-	term                                                     *terminal.Terminal
-	shell                                                    *remoteShell
-	active                                                   connectionSettings
-	fileDir, fileLocal, fileStatus, selectedFile             string
-	fileFilter, fileSort                                     string
-	fileSortDescending, fileHideDotfiles, fileFollowTerminal bool
-	lastTerminalDir                                          string
-	files                                                    []remoteFile
-	fileHistory                                              fileHistory
-	filePaneSelection                                        paneSelection
-	fileBatchErrors                                          []string
-	fileBatchDetails                                         bool
-	fileChecked                                              map[string]bool
-	fileCheckedDir, fileBatchTarget                          string
-	terminalSearchOpen                                       bool
-	terminalSearchText                                       string
-	refreshPending                                           bool
-	cloudSources                                             map[string]string
-	cloudVersions                                            map[string]string
-	forwards                                                 []*localForward
+	id                                                              int
+	label                                                           string
+	term                                                            *terminal.Terminal
+	shell                                                           *remoteShell
+	active                                                          connectionSettings
+	fileDir, fileLocal, fileStatus, selectedFile                    string
+	fileFilter, fileSort                                            string
+	fileSortDescending, fileHideDotfiles, fileFollowTerminal        bool
+	lastTerminalDir                                                 string
+	files                                                           []remoteFile
+	fileHistory                                                     fileHistory
+	filePaneSelection                                               paneSelection
+	fileBatchErrors                                                 []string
+	fileBatchDetails                                                bool
+	fileChecked                                                     map[string]bool
+	fileCheckedDir, fileBatchTarget                                 string
+	terminalSearchOpen                                              bool
+	terminalSearchText                                              string
+	refreshPending                                                  bool
+	cloudOriginURL, cloudOriginUser, cloudOriginTeam, cloudOriginID string
+	sourceProfileID                                                 string
+	cloudSources                                                    map[string]string
+	cloudVersions                                                   map[string]string
+	forwards                                                        []*localForward
 }
 
 func (d *desktop) canSwitchSession() bool {
