@@ -277,6 +277,8 @@ func (d *desktop) profileView(c *ui.Context) {
 }
 
 func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspectorCapable, draftBlocked bool) {
+	localDragSelection := d.selectedLocalHostDragItems()
+	cloudDragSelection := d.selectedCloudHostDragItems()
 	if d.profileRecent {
 		ui.Text(c, "最近连接").FontSize(13).TextColor(c.Theme().TextMuted)
 	} else if d.profileFavorites {
@@ -465,6 +467,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 		d.hostListHeader(c, cardWidth, "local")
 	}
 	var moveFrom, moveTo profileID
+	var moveSource, moveTarget localHostDrag
 	shown := 0
 	ui.Row(c).FillWidth().Wrap().Gap(d.hostLayoutGap()).AlignItems(ui.Start).Children(func() {
 		if showLocal {
@@ -533,7 +536,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 					d.hostSummary(c, serverIcon, p.Label, net.JoinHostPort(p.Settings.Host, p.Settings.Port), p.Settings.User, cardWidth)
 				})
 				if !d.busy {
-					row = row.Drag(p.ID)
+					row = row.Drag(d.localHostDragFor(p, localDragSelection))
 				}
 				blockedByEditor := draftBlocked
 				row.ContextMenu(func(menu *ui.Menu) {
@@ -613,8 +616,18 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 					})
 				}
 				if !d.profileRecent && d.profileSort == "" {
-					if dragged, ok := ui.Drop[profileID](row); ok {
-						moveFrom, moveTo = dragged, p.ID
+					if dragged, ok := ui.Drop[localHostDrag](row); ok {
+						if d.validLocalHostDrag(dragged) {
+							moveFrom, moveTo = dragged.ID, p.ID
+							moveSource = dragged
+							target := p
+							if target.Tags != nil {
+								target.Tags = append([]string{}, target.Tags...)
+							}
+							moveTarget = localHostDrag{ID: p.ID, Items: []profile{target}}
+						} else {
+							d.status = "主机已改变，请重新拖拽"
+						}
 					}
 				}
 				showActions := d.showCompactProfileTools || len(d.checkedProfiles) > 0 || (!inspectorCapable && d.selectedProfile == string(p.ID))
@@ -758,7 +771,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				_, isChecked := d.checkedCloud[account.ID]
 				card := d.hostLayoutCard(c, cardWidth, d.selectedCloudProfile == account.ID || isChecked)
 				card.Children(func() {
-					row := ui.Button(c.Key("profile-cloud-"+account.ID), "").Label(label).FillWidth().BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).Background(ui.Transparent).Disabled(d.busy).Drag(cloudGroupDragID(account.ID))
+					row := ui.Button(c.Key("profile-cloud-"+account.ID), "").Label(label).FillWidth().BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).Background(ui.Transparent).Disabled(d.busy).Drag(d.cloudHostDragFor(account, cloudDragSelection))
 					row.Children(func() {
 						d.hostSummary(c, cloudIcon, account.Label, net.JoinHostPort(account.Host, fmt.Sprint(account.Port)), account.Username, cardWidth)
 					})
@@ -844,9 +857,18 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 		ui.Text(c, "没有匹配的连接").TextColor(c.Theme().TextMuted)
 	}
 	if moveFrom != "" && d.prepareConnectionNavigation() {
+		if !d.validLocalHostDrag(moveSource) || !d.validLocalHostDrag(moveTarget) {
+			d.status = "主机已改变，请重新拖拽"
+			return
+		}
+		if moveFrom == moveTo {
+			return
+		}
+		original := append([]profile(nil), d.profiles...)
 		d.moveProfile(moveFrom, moveTo)
 		if err := d.saveProfiles(); err != nil {
-			d.status = "排序已调整，但本机保存失败：" + err.Error()
+			d.profiles = original
+			d.status = "排序未保存，连接顺序未更改：" + err.Error()
 		} else {
 			d.status = "连接顺序已调整"
 		}

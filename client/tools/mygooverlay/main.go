@@ -104,8 +104,8 @@ func run() error {
 			return err
 		}
 	}
-	// MyGo normally refreshes dragged values on each frame. File operations
-	// require the original connection, directory and selection snapshot.
+	// MyGo normally refreshes dragged values on each frame. Marked operations
+	// require the original source, space and selection snapshot.
 	dragOriginal := filepath.Join(mod.Dir, "ui", "dragdrop.go")
 	dragData, err := os.ReadFile(dragOriginal)
 	if err != nil {

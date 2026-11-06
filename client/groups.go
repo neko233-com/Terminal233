@@ -153,12 +153,12 @@ func (d *desktop) profileGroupCards(c *ui.Context, cardWidth float32, draftBlock
 				d.profileInspectorAt = time.Time{}
 			}
 			if cloud {
-				if dragged, ok := ui.Drop[cloudGroupDragID](card); ok && !d.busy && !draftBlocked && d.prepareConnectionNavigation() {
-					d.moveDraggedCloudProfilesToGroup(string(dragged), group)
+				if dragged, ok := ui.Drop[cloudHostDrag](card); ok && !d.busy && !draftBlocked && d.prepareConnectionNavigation() {
+					d.moveCloudHostDrag(dragged, group)
 				}
 			} else {
-				if dragged, ok := ui.Drop[profileID](card); ok && !d.busy && !draftBlocked && d.prepareConnectionNavigation() {
-					d.moveDraggedProfilesToGroup(dragged, group)
+				if dragged, ok := ui.Drop[localHostDrag](card); ok && !d.busy && !draftBlocked && d.prepareConnectionNavigation() {
+					d.moveLocalHostDrag(dragged, group)
 				}
 			}
 		}

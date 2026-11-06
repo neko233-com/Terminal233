@@ -16,8 +16,8 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 	var moveFrom, moveTo sessionDragID
 	var splitFrom, splitTo sessionDragID
 	var hostTarget int
-	var localHost profileID
-	var cloudHost cloudGroupDragID
+	var localHost localHostDrag
+	var cloudHost cloudHostDrag
 	// MyGo accepts one drop type per element; inspect the value after accepting it.
 	handleDrop := func(tab ui.Element, target int) {
 		value, ok := ui.Drop[any](tab)
@@ -31,10 +31,18 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 			} else {
 				moveFrom, moveTo = dragged, sessionDragID(target)
 			}
-		case profileID:
-			localHost, hostTarget = dragged, target
-		case cloudGroupDragID:
-			cloudHost, hostTarget = dragged, target
+		case localHostDrag:
+			if d.validLocalHostDrag(dragged) {
+				localHost, hostTarget = dragged, target
+			} else {
+				d.status = "主机已改变，请重新拖拽"
+			}
+		case cloudHostDrag:
+			if d.validCloudHostDrag(dragged) {
+				cloudHost, hostTarget = dragged, target
+			} else {
+				d.status = "云空间或主机已改变，请重新拖拽"
+			}
 		}
 	}
 	tabs := d.terminalTopTabs()
@@ -163,8 +171,14 @@ func (d *desktop) sessionTabs(c *ui.Context) {
 			container.ScrollIntoView()
 		}
 	}
-	if hostTarget != 0 {
-		d.startWorkspaceHostDrop(hostTarget, localHost, cloudHost)
+	if hostTarget != 0 && d.prepareConnectionNavigation() {
+		if localHost.ID != "" && d.validLocalHostDrag(localHost) {
+			d.startWorkspaceHostDrop(hostTarget, localHost.ID, "")
+		} else if cloudHost.ID != "" && d.validCloudHostDrag(cloudHost) {
+			d.startWorkspaceHostDrop(hostTarget, "", cloudHost.ID)
+		} else {
+			d.status = "主机或云空间已改变，请重新拖拽"
+		}
 		c.Invalidate()
 	}
 	if splitFrom != 0 {

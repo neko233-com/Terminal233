@@ -805,12 +805,12 @@ func (d *desktop) view(c *ui.Context) {
 									}
 								}
 								if isCloudGroups {
-									if dragged, ok := ui.Drop[cloudGroupDragID](button); ok && !d.busy && d.prepareConnectionNavigation() {
-										d.moveDraggedCloudProfilesToGroup(string(dragged), name)
+									if dragged, ok := ui.Drop[cloudHostDrag](button); ok && !d.busy && d.prepareConnectionNavigation() {
+										d.moveCloudHostDrag(dragged, name)
 									}
 								} else {
-									if dragged, ok := ui.Drop[profileID](button); ok && !d.busy && d.prepareConnectionNavigation() {
-										d.moveDraggedProfilesToGroup(dragged, name)
+									if dragged, ok := ui.Drop[localHostDrag](button); ok && !d.busy && d.prepareConnectionNavigation() {
+										d.moveLocalHostDrag(dragged, name)
 									}
 								}
 							})
