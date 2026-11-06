@@ -431,6 +431,18 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if secretErr != nil || password != settings.Password {
 		t.Fatal("native editor credential cannot be restored")
 	}
+	call("act", map[string]any{"key": "profile-tags", "action": "setValue", "text": "production, database"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		saved, err = os.ReadFile(filepath.Join(configDir, "NekoSSH", "profiles.json"))
+		if err == nil && json.Unmarshal(saved, &savedProfiles) == nil && savedProfiles.Version == 4 && len(savedProfiles.Items[0].Tags) == 2 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil || savedProfiles.Version != 4 || len(savedProfiles.Items[0].Tags) != 2 || strings.Contains(string(saved), settings.Password) {
+		t.Fatal("native tag editor did not save safely")
+	}
 	call("act", map[string]any{"key": "connection-options", "action": "press"})
 	call("act", map[string]any{"key": "profile-add", "action": "press"})
 	// The primary action inspects an unknown host before it can authenticate.
@@ -1826,7 +1838,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "profile-search") {
 		t.Fatalf("connection list missing after navigation: %s", tree)
 	}
-	call("act", map[string]any{"key": "profile-search", "action": "setValue", "text": settings.Host})
+	call("act", map[string]any{"key": "profile-search", "action": "setValue", "text": "production"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -1836,8 +1848,9 @@ func TestDesktopNativeWindow(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !strings.Contains(tree, "profile-1") || strings.Contains(tree, "profile-local-terminal") {
-		t.Fatalf("saved connection missing from search: %s", tree)
+		t.Fatalf("tagged connection missing from search: %s", tree)
 	}
+	call("act", map[string]any{"key": "profile-search", "action": "setValue", "text": settings.Host})
 	profileBoundsForClick := func() map[string]any {
 		t.Helper()
 		call("act", map[string]any{"key": "profile-1", "action": "scrollIntoView"})

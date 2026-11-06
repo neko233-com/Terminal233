@@ -85,7 +85,7 @@ type desktop struct {
 	showCompactProfileTools                                                                 bool
 	groupInput                                                                              string
 	confirmGroupDelete                                                                      bool
-	profileSearch, profileGroup, selectedProfile, quickConnect                              string
+	profileSearch, profileGroup, profileTags, selectedProfile, quickConnect                 string
 	showProfileInspector                                                                    bool
 	profileInspectorAt                                                                      time.Time
 	connectionDraft                                                                         connectionDraft
@@ -955,6 +955,9 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 		ui.Text(c, "通用").FontSize(15).Bold()
 		ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("名称（可选）").OnChange(markMetadataChanged).FillWidth()
 		ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("分组（可选）").OnChange(markMetadataChanged).FillWidth()
+		if !d.settingsFromCloud {
+			ui.TextInput(c.Key("profile-tags"), &d.profileTags).Label("主机标签（本机）").Placeholder("标签，用逗号分隔").OnChange(markMetadataChanged).FillWidth()
+		}
 	})
 	ui.Column(c).FillWidth().Padding(sectionPadding).Gap(sectionGap).Background(sectionColor).Radius(10).Children(func() {
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
@@ -1096,7 +1099,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.105"
+const version = "0.3.106"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

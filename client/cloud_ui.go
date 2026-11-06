@@ -366,6 +366,7 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.showProfileInspector = false
 	d.profileInspectorAt = time.Time{}
 	d.profileGroup = ""
+	d.profileTags = ""
 	d.profileLabel = account.Label
 	d.settings = connectionSettings{Host: account.Host, Port: strconv.Itoa(account.Port), User: account.Username, Password: account.Password}
 	d.settingsFromCloud = true

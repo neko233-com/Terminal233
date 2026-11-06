@@ -103,7 +103,7 @@ func (d *desktop) newTabResults(query string) []newTabResult {
 			name = p.Settings.User + "@" + p.Settings.Host
 		}
 		address := p.Settings.User + "@" + net.JoinHostPort(p.Settings.Host, p.Settings.Port)
-		if newTabMatches(query, name+" "+address+" "+p.Settings.User+"@"+p.Settings.Host+" "+p.Settings.Host+" "+p.Settings.User+" "+p.Group) {
+		if newTabMatches(query, name+" "+address+" "+p.Settings.User+"@"+p.Settings.Host+" "+p.Settings.Host+" "+p.Settings.User+" "+p.Group+" "+strings.Join(p.Tags, " ")) {
 			results = append(results, newTabResult{key: "new-tab-profile-" + string(p.ID), label: name, detail: address + " · 本机", accessible: "打开主机：" + name + " · 本机", kind: "profile", id: string(p.ID), enabled: !openDisabled})
 		}
 	}

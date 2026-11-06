@@ -30,7 +30,7 @@ func connectionDraftHash(values ...string) [32]byte {
 
 func (d *desktop) currentConnectionDraft() connectionDraft {
 	return connectionDraft{
-		metadata: connectionDraftHash(d.settings.Host, d.settings.Port, d.settings.User, d.settings.KeyPath, d.profileLabel, d.profileGroup),
+		metadata: connectionDraftHash(d.settings.Host, d.settings.Port, d.settings.User, d.settings.KeyPath, d.profileLabel, d.profileGroup, d.profileTags),
 		secrets:  connectionDraftHash(d.settings.Password, d.settings.Passphrase),
 	}
 }

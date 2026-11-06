@@ -97,12 +97,12 @@ func (d *desktop) openQuickConnection() {
 	d.settingsFromCloud = false
 	d.cloudFormSources = nil
 	d.cloudFormVersions = nil
-	d.quickConnect, d.profileGroup, d.profileLabel, d.selectedProfile = "", "", "", ""
+	d.quickConnect, d.profileGroup, d.profileLabel, d.profileTags, d.selectedProfile = "", "", "", "", ""
 	d.fingerprint, d.expectedFingerprint = "", ""
 	d.changedFingerprint = ""
 	d.editConnection = true
 	d.status = "请填写认证信息，获取并核对服务器指纹。"
 	d.captureConnectionDraft()
-	d.connectionDraft.metadata = connectionDraftHash("", "", "", "", "", "")
+	d.connectionDraft.metadata = connectionDraftHash("", "", "", "", "", "", "")
 	d.profileAutoDirty = true
 }

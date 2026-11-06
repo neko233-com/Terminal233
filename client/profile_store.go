@@ -15,9 +15,10 @@ import (
 // passphrases can only be serialized as an OS-protected ciphertext.
 type diskProfile struct {
 	Group, Label, Host, Port, User, KeyPath, Fingerprint string
-	EncryptedCredentials                                 string `json:",omitempty"`
-	Favorite                                             bool   `json:",omitempty"`
-	LastConnected                                        int64  `json:",omitempty"`
+	EncryptedCredentials                                 string   `json:",omitempty"`
+	Favorite                                             bool     `json:",omitempty"`
+	LastConnected                                        int64    `json:",omitempty"`
+	Tags                                                 []string `json:",omitempty"`
 }
 
 type diskProfiles struct {
@@ -50,7 +51,7 @@ func (d *desktop) loadProfiles(path string) error {
 	if err := json.Unmarshal(data, &saved); err != nil {
 		return fmt.Errorf("连接列表格式无效：%w", err)
 	}
-	if (saved.Version != 1 && saved.Version != 2 && saved.Version != 3) || len(saved.Items) > 10000 || len(saved.Groups) > 10000 {
+	if saved.Version < 1 || saved.Version > 4 || len(saved.Items) > 10000 || len(saved.Groups) > 10000 {
 		return errors.New("连接列表版本或数量无效")
 	}
 	profiles := make([]profile, 0, len(saved.Items))
@@ -62,7 +63,10 @@ func (d *desktop) loadProfiles(path string) error {
 		if len(p.EncryptedCredentials) > 65536 || (saved.Version < 3 && p.EncryptedCredentials != "") {
 			return errors.New("连接凭据格式无效")
 		}
-		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Group: p.Group, Label: p.Label, Favorite: p.Favorite, LastConnected: p.LastConnected, Settings: settings, EncryptedCredentials: p.EncryptedCredentials})
+		if (saved.Version < 4 && len(p.Tags) > 0) || !validStoredProfileTags(p.Tags) {
+			return errors.New("连接标签格式无效")
+		}
+		profiles = append(profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Settings: settings, EncryptedCredentials: p.EncryptedCredentials})
 	}
 	d.profiles, d.nextProfileID, d.profilePath = profiles, len(profiles), path
 	d.profileGroups, d.confirmGroupDelete = saved.Groups, false
@@ -85,16 +89,22 @@ func (d *desktop) saveProfiles() error {
 	if len(d.profileGroups) != 0 || d.profileFormat == 2 {
 		version = 2
 	}
-	if d.profileFormat == 3 {
-		version = 3
+	if d.profileFormat >= 3 {
+		version = d.profileFormat
 	}
 	saved := diskProfiles{Version: version, Items: make([]diskProfile, 0, len(d.profiles)), Groups: d.profileGroups}
 	for _, p := range d.profiles {
 		s := p.Settings
 		if p.EncryptedCredentials != "" {
-			version = 3
+			version = max(version, 3)
 		}
-		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Favorite: p.Favorite, LastConnected: p.LastConnected, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint, EncryptedCredentials: p.EncryptedCredentials})
+		if !validStoredProfileTags(p.Tags) {
+			return errors.New("连接标签格式无效")
+		}
+		if len(p.Tags) > 0 {
+			version = 4
+		}
+		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint, EncryptedCredentials: p.EncryptedCredentials})
 	}
 	saved.Version = version
 	data, err := json.MarshalIndent(saved, "", "  ")

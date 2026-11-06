@@ -23,6 +23,7 @@ func workspaceSidebarWidth(width float32) float32 {
 type profile struct {
 	ID                   profileID
 	Group, Label         string
+	Tags                 []string
 	Favorite             bool
 	LastConnected        int64
 	Settings             connectionSettings
@@ -31,6 +32,10 @@ type profile struct {
 
 func (d *desktop) addProfile() error {
 	if _, err := d.settings.address(); err != nil {
+		return err
+	}
+	tags, err := parseProfileTags(d.profileTags)
+	if err != nil {
 		return err
 	}
 	safe := d.settings
@@ -53,12 +58,12 @@ func (d *desktop) addProfile() error {
 		if safe.Fingerprint == "" && old.Settings.Host == safe.Host && old.Settings.Port == safe.Port && old.Settings.User == safe.User {
 			safe.Fingerprint = old.Settings.Fingerprint
 		}
-		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: label, Favorite: old.Favorite, LastConnected: old.LastConnected, Settings: safe, EncryptedCredentials: old.EncryptedCredentials}
+		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: label, Tags: tags, Favorite: old.Favorite, LastConnected: old.LastConnected, Settings: safe, EncryptedCredentials: old.EncryptedCredentials}
 		return nil
 	}
 	d.nextProfileID++
 	id := profileID(fmt.Sprint(d.nextProfileID))
-	d.profiles = append(d.profiles, profile{ID: id, Group: strings.TrimSpace(d.profileGroup), Label: label, Settings: safe})
+	d.profiles = append(d.profiles, profile{ID: id, Group: strings.TrimSpace(d.profileGroup), Label: label, Tags: tags, Settings: safe})
 	d.selectedProfile = string(id)
 	return nil
 }
@@ -107,6 +112,7 @@ func (d *desktop) loadProfile(p profile) {
 	}
 	d.profileGroup = p.Group
 	d.profileLabel = p.Label
+	d.profileTags = strings.Join(p.Tags, ", ")
 	d.expectedFingerprint = p.Settings.Fingerprint
 	d.fingerprint = ""
 	d.changedFingerprint = ""
@@ -218,6 +224,7 @@ func (d *desktop) profileView(c *ui.Context) {
 				d.cloudFormVersions = nil
 				d.profileGroup = d.profileFilter
 				d.profileLabel = ""
+				d.profileTags = ""
 				d.fingerprint = ""
 				d.changedFingerprint = ""
 				d.expectedFingerprint = ""
@@ -580,6 +587,19 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 						d.scheduleProfileInspector(c)
 					}
 				}
+				if len(p.Tags) > 0 {
+					ui.Row(c).FillWidth().Wrap().Gap(4).Children(func() {
+						for i, tag := range p.Tags {
+							tag := tag
+							if ui.Button(c.Key(fmt.Sprintf("profile-tag-%s-%d", p.ID, i)), tag).Label("搜索标签："+tag).Tooltip("搜索标签："+tag).Padding(3, 7).BorderWidth(0).Background(c.Theme().SurfaceHover).Disabled(draftBlocked).Clicked() {
+								if d.closeConnectionForNavigation() {
+									d.profileFilter, d.profileSearch = "", tag
+									d.profileFavorites, d.profileRecent = false, false
+								}
+							}
+						}
+					})
+				}
 				if !d.profileRecent && d.profileSort == "" {
 					if dragged, ok := ui.Drop[profileID](row); ok {
 						moveFrom, moveTo = dragged, p.ID
@@ -791,7 +811,7 @@ func (d *desktop) profileVisible(p profile) bool {
 		return false
 	}
 	query := strings.ToLower(strings.TrimSpace(d.profileSearch))
-	return query == "" || strings.Contains(strings.ToLower(p.Label+" "+p.Group+" "+p.Settings.Host+" "+p.Settings.User), query)
+	return query == "" || strings.Contains(strings.ToLower(p.Label+" "+p.Group+" "+p.Settings.Host+" "+p.Settings.User+" "+strings.Join(p.Tags, " ")), query)
 }
 
 func (d *desktop) toggleProfileFavorite(id profileID) {
