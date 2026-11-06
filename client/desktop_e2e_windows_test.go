@@ -1998,12 +1998,15 @@ func TestDesktopNativeWindow(t *testing.T) {
 	call("act", map[string]any{"key": "profile-1", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(fmt.Sprint(call("tree")), "使用已信任指纹连接") {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "使用已信任指纹连接") || strings.Contains(tree, "session-5") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	call("act", map[string]any{"key": "connect", "action": "press"})
+	if !strings.Contains(tree, "session-5") {
+		call("act", map[string]any{"key": "connect", "action": "press"})
+	}
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

@@ -781,8 +781,8 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 						ui.Icon(c, icon).Width(16).Height(16).Shrink(0).TextColor(color)
 						ui.Text(c, f.Name)
 					})
-					if d.shell != nil && eligibleBatchFile(f) {
-						row = row.Drag(remotePaneDrag{directory: d.fileDir, name: f.Name, sessionID: d.currentSession, shell: d.shell})
+					if (d.shell != nil || d.secondaryPane.sessionID != 0) && eligibleBatchFile(f) {
+						row = row.Drag(d.rightPaneDrag(f.Name))
 					}
 					if d.selectedFile == f.Name {
 						row = row.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
@@ -792,11 +792,17 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 							d.openSessionDirectory(f, local)
 						}
 						if eligibleBatchFile(f) {
-							if d.workspace == "files" && d.shell != nil {
-								item := remotePaneDrag{directory: d.fileDir, name: f.Name, sessionID: d.currentSession, shell: d.shell}
-								_, targetErr := d.paneDownloadTarget(item)
-								if menu.Item("复制到本机当前目录").Disabled(targetErr != nil).Chosen() {
-									d.downloadPaneFile(item)
+							if d.workspace == "files" && (d.shell != nil || d.secondaryPane.sessionID != 0) {
+								item := d.rightPaneDrag(f.Name)
+								if d.secondaryPane.sessionID == 0 {
+									_, targetErr := d.paneDownloadTarget(item)
+									if menu.Item("复制到本机当前目录").Disabled(targetErr != nil).Chosen() {
+										d.downloadPaneFile(item)
+									}
+								} else {
+									if menu.Item("复制到左侧当前目录").Disabled(!d.canCopyRightToSecondary(item)).Chosen() {
+										d.copyRightToSecondary(item)
+									}
 								}
 							}
 							label := "下载到…"

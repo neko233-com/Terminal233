@@ -31,9 +31,15 @@ type localPaneDrag struct {
 }
 
 type remotePaneDrag struct {
-	directory, name string
-	sessionID       int
-	shell           *remoteShell
+	directory, name     string
+	sessionID           int
+	shell               *remoteShell
+	secondaryID         int
+	secondaryShell      *remoteShell
+	secondaryDir        string
+	secondaryGeneration uint64
+	localDirectory      string
+	localGeneration     uint64
 }
 
 func sameLocalDirectory(a, b string) bool {
@@ -57,7 +63,11 @@ func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
 			}
 		}
 		ui.Row(c).FillWidth().Gap(8).Children(func() {
-			if workspaceButton(c, "narrow-file-local", "本机文件", d.narrowFilePane == "local").Clicked() {
+			leftLabel := "本机文件"
+			if d.secondaryPane.sessionID != 0 {
+				leftLabel = "左侧文件"
+			}
+			if workspaceButton(c, "narrow-file-local", leftLabel, d.narrowFilePane == "local").Clicked() {
 				d.narrowFilePane = "local"
 			}
 			if workspaceButton(c, "narrow-file-session", "会话文件", d.narrowFilePane == "session").Clicked() {
@@ -72,7 +82,13 @@ func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
 			if listHeight > 520 {
 				listHeight = 520
 			}
-			ui.Column(c).FillWidth().Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() { d.localFilePaneView(c, listHeight) })
+			ui.Column(c).FillWidth().Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
+				if d.secondaryPane.sessionID == 0 {
+					d.localFilePaneView(c, listHeight)
+				} else {
+					d.secondaryFilePaneView(c, listHeight)
+				}
+			})
 		} else {
 			d.fileView(c, false)
 		}
@@ -87,18 +103,46 @@ func (d *desktop) fileWorkspace(c *ui.Context, width, height float32) {
 		listHeight = 520
 	}
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Start).Children(func() {
-		local := ui.Column(c.Key("local-file-pane")).Label("本机文件面板").Width(paneWidth).MinHeight(listHeight + 210).Shrink(0).Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8)
-		local.Children(func() { d.localFilePaneView(c, listHeight) })
+		leftLabel := "本机文件面板"
+		if d.secondaryPane.sessionID != 0 {
+			leftLabel = "第二会话文件面板"
+		}
+		local := ui.Column(c.Key("local-file-pane")).Label(leftLabel).Width(paneWidth).MinHeight(listHeight + 210).Shrink(0).Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8)
+		local.Children(func() {
+			if d.secondaryPane.sessionID == 0 {
+				d.localFilePaneView(c, listHeight)
+			} else {
+				d.secondaryFilePaneView(c, listHeight)
+			}
+		})
 		if item, ok := ui.Drop[remotePaneDrag](local); ok {
-			d.downloadPaneFile(item)
+			if item.secondaryID != d.secondaryPane.sessionID {
+				d.fileStatus = "目标面板已改变，请重新选择文件"
+			} else if d.secondaryPane.sessionID == 0 {
+				if item.localDirectory != d.localPane.directory || item.localGeneration != d.localPane.generation {
+					d.fileStatus = "目标目录已改变，请重新选择文件"
+				} else {
+					d.downloadPaneFile(item)
+				}
+			} else {
+				d.copyRightToSecondary(item)
+			}
 		}
 		remote := ui.Column(c.Key("session-file-pane")).Label("会话文件面板").Width(paneWidth).MinHeight(listHeight + 210).Shrink(0).Padding(12).Gap(8).Background(c.Theme().Surface).Radius(8)
 		remote.Children(func() { d.fileView(c, true) })
 		if files := remote.DroppedFiles(); len(files) > 0 {
 			d.handleFileDrop(files)
 		}
-		if item, ok := ui.Drop[localPaneDrag](remote); ok {
-			d.uploadPaneFile(item)
+		// MyGo accepts one typed value drop per element. Register only the
+		// currently visible left pane's drag type.
+		if d.secondaryPane.sessionID == 0 {
+			if item, ok := ui.Drop[localPaneDrag](remote); ok {
+				d.uploadPaneFile(item)
+			}
+		} else {
+			if item, ok := ui.Drop[secondaryPaneDrag](remote); ok {
+				d.copySecondaryToRight(item)
+			}
 		}
 	})
 }
@@ -164,7 +208,7 @@ func (d *desktop) navigateLocalPane(offset int) {
 
 func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 	d.initializeLocalPane()
-	ui.Row(c).FillWidth().Height(36).AlignItems(ui.Center).Children(func() { ui.Text(c, "本机").FontSize(16).Bold() })
+	ui.Row(c).FillWidth().Height(36).AlignItems(ui.Center).Children(func() { d.secondaryFilePicker(c) })
 	ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 		_, _, back := d.localPane.history.target(-1)
 		_, _, forward := d.localPane.history.target(1)

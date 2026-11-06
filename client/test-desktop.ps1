@@ -5,5 +5,5 @@ if ($Quiet) {
     $env:GOMAXPROCS = '1'
     $env:GOFLAGS = '-p=1'
 }
-go -C $PSScriptRoot test -p 1 -tags desktope2e -run '^TestDesktop(NativeWindow|CloudWorkflows)$' -count 1 .
+go -C $PSScriptRoot test -p 1 -tags desktope2e -run '^TestDesktop(NativeWindow|CloudWorkflows|RemotePanes)$' -count 1 .
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

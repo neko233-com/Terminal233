@@ -146,6 +146,13 @@ func uploadFile(shell *remoteShell, local, dir string) error {
 	return uploadFileContext(context.Background(), shell, local, dir, nil)
 }
 func uploadFileContext(ctx context.Context, shell *remoteShell, local, dir string, progress func(int64)) error {
+	before, err := os.Lstat(local)
+	if err != nil {
+		return err
+	}
+	if !before.Mode().IsRegular() {
+		return errors.New("只能上传普通文件")
+	}
 	file, err := os.Open(local)
 	if err != nil {
 		return err
@@ -155,7 +162,7 @@ func uploadFileContext(ctx context.Context, shell *remoteShell, local, dir strin
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() {
+	if !info.Mode().IsRegular() || !os.SameFile(before, info) {
 		return errors.New("只能上传普通文件")
 	}
 	name := filepath.Base(local)
@@ -220,6 +227,79 @@ func downloadFileContext(ctx context.Context, shell *remoteShell, remote, local 
 		}
 		return nil
 	})
+}
+
+// Copy between SSH sessions without a persistent local staging file. Exclusive
+// creation protects an existing destination, and incomplete files are removed.
+func copyRemoteFileContext(ctx context.Context, source, target *remoteShell, sourceDir, targetDir, name string, progress func(int64)) error {
+	if source == nil || target == nil || strings.TrimSpace(sourceDir) == "" || strings.TrimSpace(targetDir) == "" || !validDirectoryName(name) {
+		return errors.New("请选择有效的远程普通文件和目标目录")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	sourcePath, targetPath := path.Join(sourceDir, name), path.Join(targetDir, name)
+	return withSFTP(source, func(srcClient *sftp.Client) error {
+		info, err := srcClient.Lstat(sourcePath)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return errors.New("只能传输普通文件")
+		}
+		src, err := srcClient.Open(sourcePath)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		return withSFTP(target, func(dstClient *sftp.Client) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			dst, err := dstClient.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+			if err != nil {
+				return err
+			}
+			copyErr := copyTransfer(ctx, dst, src, progress)
+			closeErr := dst.Close()
+			if copyErr != nil || closeErr != nil {
+				if removeErr := dstClient.Remove(targetPath); removeErr != nil {
+					return fmt.Errorf("传输未完成，清理远程目标文件失败：%w", removeErr)
+				}
+				if copyErr != nil {
+					return copyErr
+				}
+				return closeErr
+			}
+			return nil
+		})
+	})
+}
+
+// Either endpoint can be the local file system; two remote endpoints are
+// streamed directly without a temporary local copy.
+func copyPaneFileContext(ctx context.Context, source *remoteShell, sourceDir string, target *remoteShell, targetDir, name string, progress func(int64)) error {
+	if source == nil && target == nil {
+		return errors.New("请选择至少一个远程主机")
+	}
+	if !validDirectoryName(name) {
+		return errors.New("文件名无效")
+	}
+	if source == nil {
+		local, err := localItemPath(sourceDir, name)
+		if err != nil {
+			return err
+		}
+		return uploadFileContext(ctx, target, local, targetDir, progress)
+	}
+	if target == nil {
+		local, err := localItemPath(targetDir, name)
+		if err != nil {
+			return err
+		}
+		return downloadFileContext(ctx, source, path.Join(sourceDir, name), local, progress)
+	}
+	return copyRemoteFileContext(ctx, source, target, sourceDir, targetDir, name, progress)
 }
 func deleteRemote(shell *remoteShell, remote string) error {
 	if remote == "" || remote == "/" || remote == "." || remote == ".." {
