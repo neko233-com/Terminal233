@@ -2579,4 +2579,66 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if attempts.Load() != beforeAttempts+1 {
 		t.Fatal("shared identity did not authenticate to the isolated SSH fixture")
 	}
+	// Revoke the fixture's local host key only after all connection checks.
+	navigate("nav-known-hosts")
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "key:known-host-search ") && strings.Contains(tree, fingerprint) {
+			break
+		}
+		if strings.Contains(tree, "key:nav-known-hosts ") {
+			call("act", map[string]any{"key": "nav-known-hosts", "action": "press"})
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !strings.Contains(tree, fingerprint) {
+		t.Fatal("verified fixture key missing from known hosts")
+	}
+	keyID := knownHostKeyID(knownHostKey{Host: settings.Host, Port: settings.Port, Fingerprint: fingerprint})
+	forgetKey := "known-host-forget-" + keyID
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		result := call("tree")["result"].(map[string]any)
+		ready := false
+		for _, value := range result["nodes"].([]any) {
+			node := value.(map[string]any)
+			if node["key"] == forgetKey && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				ready = true
+				break
+			}
+		}
+		if ready {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": forgetKey, "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "确认撤销") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": forgetKey, "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "下次连接需要重新核对指纹") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree")), "下次连接需要重新核对指纹") {
+		t.Fatal("known-host revocation did not complete")
+	}
+	var afterRevocation desktop
+	if err := afterRevocation.loadProfiles(filepath.Join(configDir, "NekoSSH", "profiles.json")); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range afterRevocation.profiles {
+		if p.Settings.Host == settings.Host && p.Settings.Port == settings.Port && p.Settings.Fingerprint == fingerprint {
+			t.Fatal("known-host revocation did not persist")
+		}
+	}
 }

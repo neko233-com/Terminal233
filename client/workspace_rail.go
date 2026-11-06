@@ -27,7 +27,7 @@ func railButton(c *ui.Context, key, label string, icon *ui.SVG, active bool) ui.
 // Compact navigation keeps the same accessible names and destinations as the
 // expanded navigation. The filter action reveals the full group tree.
 func (d *desktop) compactWorkspaceNavigation(c *ui.Context) {
-	ui.Column(c).FillWidth().Padding(12, 14).Gap(7).AlignItems(ui.Center).Children(func() {
+	ui.Column(c).FillWidth().Padding(12, 14).Gap(4).AlignItems(ui.Center).Children(func() {
 		if railButton(c, "nav-connections", "SSH 连接", serverIcon, d.workspace == "" || d.workspace == "connections").Clicked() {
 			d.workspace = "connections"
 			if d.editConnection {
@@ -52,6 +52,11 @@ func (d *desktop) compactWorkspaceNavigation(c *ui.Context) {
 		if railButton(c, "nav-identities", "身份", identityIcon, d.workspace == "identities").Clicked() {
 			if d.closeConnectionForNavigation() {
 				d.workspace = "identities"
+			}
+		}
+		if railButton(c, "nav-known-hosts", "已知主机", knownHostIcon, d.workspace == "known-hosts").Clicked() {
+			if d.closeConnectionForNavigation() {
+				d.workspace = "known-hosts"
 			}
 		}
 		if railButton(c, "nav-cloud", "云同步与团队", cloudIcon, d.workspace == "cloud").Clicked() {

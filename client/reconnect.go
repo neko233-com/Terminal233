@@ -28,6 +28,10 @@ func (d *desktop) reconnectCurrentSession() {
 		return
 	}
 	id, settings, oldTerm := d.currentSession, d.active, d.term
+	if settings.Fingerprint == "" {
+		d.status = "该主机的信任已撤销，请在主机详情中重新连接并核对指纹。"
+		return
+	}
 	options := d.terminalOptions()
 	d.busy = true
 	d.status = "正在重新连接并验证主机指纹…"

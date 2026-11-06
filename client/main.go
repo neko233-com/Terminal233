@@ -81,6 +81,7 @@ type desktop struct {
 	identityDraft                                                                           identityDraft
 	identityEditing, identityConfirmDelete                                                  string
 	identityStatus                                                                          string
+	knownHostSearch, knownHostStatus, knownHostConfirm                                      string
 	profileGroups                                                                           []string
 	foldedGroups                                                                            map[string]bool
 	cloudFoldedGroups                                                                       map[string]bool
@@ -451,6 +452,9 @@ func (d *desktop) connect() {
 func (d *desktop) view(c *ui.Context) {
 	d.serviceProfileAutosave(c)
 	d.workspaceShortcuts(c)
+	if d.workspace != "known-hosts" {
+		d.knownHostConfirm = ""
+	}
 	if d.workspace != "terminal" && d.workspace != "new-tab" {
 		d.terminalNavigationOpen = false
 	}
@@ -597,6 +601,11 @@ func (d *desktop) view(c *ui.Context) {
 						if navigationButton(c, "nav-identities", "身份", d.workspace == "identities").Clicked() {
 							if d.closeConnectionForNavigation() {
 								d.workspace = "identities"
+							}
+						}
+						if navigationButton(c, "nav-known-hosts", "已知主机", d.workspace == "known-hosts").Clicked() {
+							if d.closeConnectionForNavigation() {
+								d.workspace = "known-hosts"
 							}
 						}
 						if navigationButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
@@ -937,6 +946,8 @@ func (d *desktop) view(c *ui.Context) {
 							ui.Column(c).FillWidth().MaxWidth(680).Children(func() { d.quickCommandsSideView(c) })
 						case "identities":
 							d.identityView(c)
+						case "known-hosts":
+							d.knownHostsView(c)
 						case "cloud":
 							ui.Text(c, "云端工作区").FontSize(22).Bold()
 							d.cloudView(c)
@@ -1164,7 +1175,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.116"
+const version = "0.3.117"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
