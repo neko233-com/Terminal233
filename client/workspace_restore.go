@@ -41,9 +41,19 @@ func (d *desktop) resolveWorkspace(w savedWorkspace) ([]workspaceRestoreTarget, 
 		return nil, fmt.Errorf("会话数量超过上限 %d", maxWorkspaceSessions)
 	}
 	targets := make([]workspaceRestoreTarget, 0, len(w.Entries))
+	serialPorts := map[string]bool{}
 	for i, e := range w.Entries {
 		target := workspaceRestoreTarget{entry: e, label: "本机终端"}
 		switch e.Kind {
+		case "serial":
+			if serialPorts[e.Serial.Port] {
+				return nil, fmt.Errorf("第 %d 个串口 %s 在工作区中重复", i+1, e.Serial.Port)
+			}
+			serialPorts[e.Serial.Port] = true
+			target.label = e.Label
+			if target.label == "" {
+				target.label = "串口 · " + e.Serial.Port
+			}
 		case "local":
 			if e.Label != "" {
 				target.label = e.Label
@@ -338,7 +348,9 @@ func (d *desktop) startWorkspaceWithCloudSource(w savedWorkspace, saved bool, cl
 				var shell *remoteShell
 				var term *terminal.Terminal
 				var err error
-				if target.entry.Kind == "local" {
+				if target.entry.Kind == "serial" {
+					term, err = openSerialTerminal(ctx, *target.entry.Serial, options)
+				} else if target.entry.Kind == "local" {
 					localOptions := options
 					localOptions.Dir = target.entry.LocalDir
 					term, err = newLocalTerminal(localOptions)
@@ -409,7 +421,12 @@ func (d *desktop) startWorkspaceWithCloudSource(w savedWorkspace, saved bool, cl
 			d.splitSession, d.splitFirstSession = 0, 0
 			ids := make([]int, 0, len(opened))
 			for _, item := range opened {
-				d.addSession(item.term, item.shell, item.target.settings, item.target.label)
+				var serial *serialSettings
+				if item.target.entry.Serial != nil {
+					settings := *item.target.entry.Serial
+					serial = &settings
+				}
+				d.addSessionWithSerial(item.term, item.shell, item.target.settings, item.target.label, serial)
 				id := d.currentSession
 				ids = append(ids, id)
 				entry := item.target.entry

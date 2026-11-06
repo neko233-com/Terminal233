@@ -7,6 +7,7 @@ require (
 	github.com/egoist/mygo v0.7.4
 	github.com/gofrs/flock v0.13.1
 	github.com/pkg/sftp v1.13.12
+	go.bug.st/serial v1.8.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
 )

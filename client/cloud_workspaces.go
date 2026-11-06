@@ -54,6 +54,8 @@ func portableWorkspace(w savedWorkspace, c *cloudClient, user string) (cloudWork
 			return cloudWorkspace{}, errors.New("同步服务需要升级才能保存工作区终端名称")
 		}
 		switch e.Kind {
+		case "serial":
+			return cloudWorkspace{}, errors.New("串口属于本机设备，暂不能同步工作区")
 		case "local":
 			out.Entries = append(out.Entries, cloudWorkspaceEntry{Kind: "local", Label: e.Label, TabName: e.TabName})
 		case "cloud":

@@ -76,6 +76,9 @@ func (s *workspaceSession) fileAvailable() bool {
 	if s == nil {
 		return false
 	}
+	if s.serial != nil {
+		return false
+	}
 	if s.fileOnly {
 		return s.shell != nil && !transportEnded(s.shell)
 	}
@@ -83,6 +86,9 @@ func (s *workspaceSession) fileAvailable() bool {
 }
 
 func (d *desktop) fileSessionUnavailable() bool {
+	if d.currentSerialSession() != nil {
+		return true
+	}
 	if d.term != nil {
 		return terminalEnded(d.term)
 	}
@@ -102,6 +108,9 @@ func sessionDisplayLabel(s *workspaceSession) string {
 		return "SFTP · " + s.label
 	}
 	if terminalEnded(s.term) {
+		if s.serial != nil {
+			return s.label + " · 已断开"
+		}
 		if s.shell != nil {
 			return s.label + " · 已断开"
 		}
@@ -118,6 +127,7 @@ type workspaceSession struct {
 	fileOnly                                                        bool
 	completion                                                      terminalCompletion
 	term                                                            *terminal.Terminal
+	serial                                                          *serialSettings
 	shell                                                           *remoteShell
 	jumpParent                                                      *workspaceSession
 	jumpFingerprint                                                 string
@@ -226,15 +236,21 @@ func (d *desktop) activateSessionWithRefresh(id int, refresh bool) {
 }
 
 func (d *desktop) addSession(term *terminal.Terminal, shell *remoteShell, active connectionSettings, label string) {
+	d.addSessionWithSerial(term, shell, active, label, nil)
+}
+
+func (d *desktop) addSessionWithSerial(term *terminal.Terminal, shell *remoteShell, active connectionSettings, label string, serial *serialSettings) {
 	d.saveSessionState()
 	if term != nil {
 		term.SetFont(terminal.Font{Size: float32(d.currentTerminalFontSize())})
 		term.SetTheme(d.terminalLightTheme, d.terminalDarkTheme)
 	}
 	d.nextSession++
-	s := &workspaceSession{id: d.nextSession, label: label, term: term, shell: shell, active: active, fileHideDotfiles: true, fileOnly: term == nil && shell != nil}
+	s := &workspaceSession{id: d.nextSession, label: label, term: term, shell: shell, serial: serial, active: active, fileHideDotfiles: true, fileOnly: term == nil && shell != nil}
 	d.bindTerminalBroadcast(s)
-	if shell != nil {
+	if serial != nil {
+		s.fileDir = ""
+	} else if shell != nil {
 		s.fileDir = "."
 	} else {
 		s.fileDir, _ = os.UserHomeDir()

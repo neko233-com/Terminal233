@@ -69,7 +69,7 @@ func (d *desktop) terminalGroupSessions(g *terminalGroup) []*workspaceSession {
 }
 
 func sessionTerminalDirectory(s *workspaceSession) string {
-	if s == nil || s.term == nil {
+	if s == nil || s.term == nil || s.serial != nil {
 		return ""
 	}
 	dir, err := terminalDirectory(s.term.Dir(), s.shell == nil)

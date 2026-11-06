@@ -13,6 +13,7 @@ import (
 func (d *desktop) openNewTab() {
 	if d.workspace != "new-tab" {
 		d.newTabReturn = d.workspace
+		d.showSerialSetup = false
 		d.showTerminalGroupSelection = false
 		d.terminalGroupSelected = nil
 		d.showWorkspaceHostSelection = false
@@ -24,6 +25,7 @@ func (d *desktop) openNewTab() {
 
 func (d *desktop) closeNewTab() {
 	d.newTabOpen = false
+	d.showSerialSetup = false
 	d.newTabQuery, d.newTabStatus = "", ""
 	d.newTabSelected, d.newTabSelectionQuery = "", ""
 	if d.workspace != "new-tab" {
@@ -86,6 +88,9 @@ func (d *desktop) newTabResults(query string) []newTabResult {
 	if newTabMatches(query, "本机终端 local terminal powershell") {
 		results = append(results, newTabResult{key: "new-tab-local", label: "本机终端", detail: "PowerShell 7", accessible: "打开本机终端", kind: "local", enabled: !localDisabled})
 	}
+	if newTabMatches(query, "串口 serial com") {
+		results = append(results, newTabResult{key: "new-tab-serial", label: "串口连接", detail: "COM", accessible: "打开串口连接", kind: "serial", enabled: !localDisabled})
+	}
 	for _, s := range d.sessions {
 		if newTabMatches(query, s.label) {
 			label := sessionDisplayLabel(s)
@@ -146,6 +151,13 @@ func (d *desktop) activateNewTabResult(key string) {
 			} else {
 				d.newTabStatus = d.status
 			}
+		case "serial":
+			d.showSerialSetup = true
+			if d.serialDraft.BaudRate == "" {
+				d.serialDraft = defaultSerialDraft()
+			}
+			d.newTabStatus = ""
+			d.refreshSerialPorts()
 		case "session":
 			d.selectSession(result.sessionID)
 		case "profile":
@@ -302,6 +314,9 @@ func (d *desktop) newTabView(c *ui.Context) {
 			if d.workspaceTemplatesStatus != "" && d.showWorkspaceHostSelection && d.workspaceRestore == nil {
 				ui.Text(c, d.workspaceTemplatesStatus).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 			}
+			if d.showSerialSetup && !d.showWorkspaceHostSelection {
+				d.serialSetupView(c)
+			}
 			if d.showWorkspaceHostSelection {
 				ui.TextInput(c.Key("workspace-template-name"), &d.workspaceTemplateName).Label("新工作区名称").Placeholder("工作区名称（可选）").FillWidth()
 			}
@@ -336,7 +351,7 @@ func (d *desktop) newTabView(c *ui.Context) {
 					}
 					button.Children(func() {
 						icon := serverIcon
-						if r.kind == "local" || r.kind == "session" {
+						if r.kind == "local" || r.kind == "session" || r.kind == "serial" {
 							icon = terminalIcon
 						} else if r.kind == "cloud" {
 							icon = cloudIcon

@@ -591,8 +591,9 @@ func (d *desktop) fileView(c *ui.Context, compact bool) { d.filePaneView(c, comp
 
 func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 	d.syncCheckedDirectory()
-	local := d.term != nil && d.shell == nil
-	emptyFilePane := d.fileSessionUnavailable() && d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0
+	serialSession := d.currentSerialSession() != nil
+	local := d.term != nil && d.shell == nil && !serialSession
+	emptyFilePane := serialSession || (d.fileSessionUnavailable() && d.term == nil && len(d.files) == 0 && d.cancelTransfer == nil && len(d.fileBatchErrors) == 0)
 	var optionsButton ui.Element
 	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
 		sessionLabel := "选择主机"
@@ -626,7 +627,7 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 				d.openTerminalFromSFTP(s)
 			}
 		}
-		if d.term != nil {
+		if d.term != nil && !serialSession {
 			if ui.Button(c.Key("file-terminal-dir"), "◎").Label("定位终端目录").Tooltip("定位终端目录").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 				d.followReportedDirectory(true)
 			}
@@ -668,7 +669,11 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 				ui.Icon(c, fileIcon).Width(24).Height(24).TextColor(c.Theme().TextMuted)
 			})
 			ui.Text(c, "选择主机").FontSize(17).Bold().TextAlign(ui.Center)
-			ui.Text(c, "连接后即可浏览和传输文件").FontSize(13).TextColor(c.Theme().TextMuted).Wrap().TextAlign(ui.Center)
+			description := "连接后即可浏览和传输文件"
+			if serialSession {
+				description = "串口会话不支持文件浏览，请选择主机"
+			}
+			ui.Text(c, description).FontSize(13).TextColor(c.Theme().TextMuted).Wrap().TextAlign(ui.Center)
 			ui.Row(c).FillWidth().Wrap().Gap(8).Justify(ui.Center).Children(func() {
 				if ui.PrimaryButton(c.Key("files-open-connections"), "选择 SSH 连接").Clicked() {
 					d.fileReturnAfterConnect = true
@@ -684,6 +689,9 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 		}
 		if d.fileStatus != "" {
 			ui.Text(c, d.fileStatus).FontSize(12).Wrap()
+		}
+		if serialSession && d.cancelTransfer != nil && ui.Button(c.Key("serial-cancel-transfer"), "取消传输").Clicked() {
+			d.cancelFileTransfer()
 		}
 		return
 	}

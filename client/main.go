@@ -198,6 +198,10 @@ type desktop struct {
 	cancelTransfer                                                                          context.CancelFunc
 	transferSessionID                                                                       int
 	term                                                                                    *terminal.Terminal
+	serialDraft                                                                             serialDraft
+	serialPorts                                                                             []string
+	serialPortStatus                                                                        string
+	serialPortLoading, showSerialSetup                                                      bool
 	active                                                                                  connectionSettings
 	cloud                                                                                   *cloudClient
 	cloudURL, cloudUser, cloudPassword, cloudRegistration, cloudStatus                      string
@@ -877,7 +881,9 @@ func (d *desktop) view(c *ui.Context) {
 						}
 						status := d.status
 						if terminalEnded(d.term) && !d.busy {
-							if d.shell != nil {
+							if d.currentSerialSession() != nil {
+								status = "串口已断开"
+							} else if d.shell != nil {
 								status = "SSH 已断开"
 							} else {
 								status = "本机终端已退出"
@@ -954,7 +960,7 @@ func (d *desktop) view(c *ui.Context) {
 						if d.showFilePanel {
 							label = "收起文件面板"
 						}
-						if terminalActionButton(c, "toggle-file-panel", label, fileIcon, d.showFilePanel, d.term == nil || !d.canSwitchSession()).Clicked() {
+						if terminalActionButton(c, "toggle-file-panel", label, fileIcon, d.showFilePanel && d.currentSerialSession() == nil, d.term == nil || !d.canSwitchSession() || d.currentSerialSession() != nil).Clicked() {
 							d.showFilePanel = !d.showFilePanel
 							if d.showFilePanel {
 								d.quickOpen = false
@@ -1003,12 +1009,17 @@ func (d *desktop) view(c *ui.Context) {
 						if terminalEnded(d.term) {
 							ui.Row(c).FillWidth().Padding(8, 12).Gap(10).Wrap().Children(func() {
 								message := "本机终端已退出；输出仍可查看。"
-								if d.shell != nil {
+								if d.currentSerialSession() != nil {
+									message = "串口已断开；输出仍可查看。"
+								} else if d.shell != nil {
 									message = "SSH 会话已断开；文件操作已暂停。"
 								}
 								ui.Text(c, message).Grow(1).Wrap()
 								if d.shell != nil && ui.Button(c.Key("session-reconnect"), "重新连接").Disabled(d.busy).Clicked() {
 									d.reconnectCurrentSession()
+								}
+								if serial := d.currentSerialSession(); serial != nil && ui.Button(c.Key("serial-reconnect"), "重新连接").Disabled(d.busy).Clicked() {
+									d.reconnectSerialSession(serial)
 								}
 							})
 						}

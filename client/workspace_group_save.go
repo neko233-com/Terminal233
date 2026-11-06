@@ -11,6 +11,12 @@ import (
 
 func cloneSavedWorkspace(w savedWorkspace) savedWorkspace {
 	w.Entries = slices.Clone(w.Entries)
+	for i := range w.Entries {
+		if w.Entries[i].Serial != nil {
+			settings := *w.Entries[i].Serial
+			w.Entries[i].Serial = &settings
+		}
+	}
 	w.RowPerc = slices.Clone(w.RowPerc)
 	w.ColumnPerc = slices.Clone(w.ColumnPerc)
 	return w
@@ -29,6 +35,7 @@ func (d *desktop) workspaceGroupSignature(g *terminalGroup) [32]byte {
 	type member struct {
 		ID, JumpSession                                                                    int
 		Label, TabName, Directory, FileDirectory, Host, Port, User, Fingerprint, JumpRoute string
+		Serial                                                                             *serialSettings
 	}
 	type state struct {
 		Name, SplitLayout string
@@ -48,7 +55,7 @@ func (d *desktop) workspaceGroupSignature(g *terminalGroup) [32]byte {
 		if s.jumpParent != nil {
 			jumpSession = s.jumpParent.id
 		}
-		value.Members = append(value.Members, member{ID: s.id, JumpSession: jumpSession, Label: s.label, TabName: g.tabNames[s.id], Directory: sessionTerminalDirectory(s), FileDirectory: dir, Host: s.active.Host, Port: s.active.Port, User: s.active.User, Fingerprint: s.active.Fingerprint, JumpRoute: s.active.savedRouteSignature()})
+		value.Members = append(value.Members, member{ID: s.id, JumpSession: jumpSession, Label: s.label, TabName: g.tabNames[s.id], Directory: sessionTerminalDirectory(s), FileDirectory: dir, Host: s.active.Host, Port: s.active.Port, User: s.active.User, Fingerprint: s.active.Fingerprint, JumpRoute: s.active.savedRouteSignature(), Serial: s.serial})
 	}
 	// Rendering fills unset split percentages with the following defaults.
 	// Normalize them here so the first paint does not falsely mark a template dirty.

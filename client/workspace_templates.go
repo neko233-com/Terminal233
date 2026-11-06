@@ -21,23 +21,24 @@ import (
 const maxWorkspaceTemplates = 100
 
 type workspaceTemplateEntry struct {
-	Kind        string `json:"kind"`
-	Label       string `json:"label,omitempty"`
-	TabName     string `json:"tab_name,omitempty"`
-	Group       string `json:"group,omitempty"`
-	Host        string `json:"host,omitempty"`
-	Port        string `json:"port,omitempty"`
-	User        string `json:"user,omitempty"`
-	KeyPath     string `json:"key_path,omitempty"`
-	Fingerprint string `json:"fingerprint,omitempty"`
-	JumpRoute   string `json:"jump_route,omitempty"`
-	FileDir     string `json:"file_dir,omitempty"`
-	LocalDir    string `json:"local_dir,omitempty"`
-	TerminalDir string `json:"terminal_dir,omitempty"`
-	CloudURL    string `json:"cloud_url,omitempty"`
-	CloudUser   string `json:"cloud_user,omitempty"`
-	CloudTeam   string `json:"cloud_team,omitempty"`
-	CloudID     string `json:"cloud_id,omitempty"`
+	Kind        string          `json:"kind"`
+	Label       string          `json:"label,omitempty"`
+	TabName     string          `json:"tab_name,omitempty"`
+	Group       string          `json:"group,omitempty"`
+	Host        string          `json:"host,omitempty"`
+	Port        string          `json:"port,omitempty"`
+	User        string          `json:"user,omitempty"`
+	KeyPath     string          `json:"key_path,omitempty"`
+	Fingerprint string          `json:"fingerprint,omitempty"`
+	JumpRoute   string          `json:"jump_route,omitempty"`
+	Serial      *serialSettings `json:"serial,omitempty"`
+	FileDir     string          `json:"file_dir,omitempty"`
+	LocalDir    string          `json:"local_dir,omitempty"`
+	TerminalDir string          `json:"terminal_dir,omitempty"`
+	CloudURL    string          `json:"cloud_url,omitempty"`
+	CloudUser   string          `json:"cloud_user,omitempty"`
+	CloudTeam   string          `json:"cloud_team,omitempty"`
+	CloudID     string          `json:"cloud_id,omitempty"`
 }
 
 type savedWorkspace struct {
@@ -92,6 +93,9 @@ func validateSavedWorkspace(w savedWorkspace) error {
 		return errors.New("工作区分屏无效")
 	}
 	for _, e := range w.Entries {
+		if (e.Kind == "serial") != (e.Serial != nil) {
+			return errors.New("串口会话配置无效")
+		}
 		if e.TabName != strings.TrimSpace(e.TabName) || !validWorkspaceText(e.TabName, 120) {
 			return errors.New("工作区终端名称无效")
 		}
@@ -107,6 +111,13 @@ func validateSavedWorkspace(w savedWorkspace) error {
 			}
 		}
 		switch e.Kind {
+		case "serial":
+			if err := e.Serial.validate(); err != nil {
+				return err
+			}
+			if e.Group != "" || e.Host != "" || e.Port != "" || e.User != "" || e.KeyPath != "" || e.Fingerprint != "" || e.FileDir != "" || e.LocalDir != "" || e.TerminalDir != "" || e.CloudID != "" || e.CloudURL != "" || e.CloudUser != "" || e.CloudTeam != "" {
+				return errors.New("串口会话包含无关的主机或目录信息")
+			}
 		case "local":
 			if e.Host != "" || e.Port != "" || e.User != "" || e.KeyPath != "" || e.Fingerprint != "" || e.TerminalDir != "" || e.CloudID != "" || e.CloudURL != "" || e.CloudUser != "" || e.CloudTeam != "" {
 				return errors.New("本机会话内容无效")
@@ -165,11 +176,18 @@ func readWorkspaceTemplates(filename string) (workspaceTemplatesFile, error) {
 	if err = dec.Decode(&struct{}{}); err != io.EOF {
 		return workspaceTemplatesFile{}, errors.New("工作区文件格式无效")
 	}
-	if (saved.Version != 1 && saved.Version != 2 && saved.Version != 3 && saved.Version != 4 && saved.Version != 5) || len(saved.Items) > maxWorkspaceTemplates {
+	if (saved.Version < 1 || saved.Version > 6) || len(saved.Items) > maxWorkspaceTemplates {
 		return workspaceTemplatesFile{}, errors.New("工作区版本或数量无效")
 	}
 	seen := map[string]bool{}
 	for i, w := range saved.Items {
+		if saved.Version < 6 {
+			for _, entry := range w.Entries {
+				if entry.Kind == "serial" || entry.Serial != nil {
+					return workspaceTemplatesFile{}, errors.New("工作区版本与串口会话不符")
+				}
+			}
+		}
 		if saved.Version < 4 && (len(w.Entries) > legacyWorkspaceSessions || len(w.RowPerc) > legacyWorkspaceSessions || len(w.ColumnPerc) > legacyWorkspaceSessions) {
 			return workspaceTemplatesFile{}, errors.New("工作区版本与会话数量不符")
 		}
@@ -238,6 +256,9 @@ func updateWorkspaceTemplates(filename string, update func(*workspaceTemplatesFi
 			saved.Version = 2
 		}
 		for _, entry := range w.Entries {
+			if entry.Kind == "serial" && saved.Version < 6 {
+				saved.Version = 6
+			}
 			if entry.TabName != "" && saved.Version < 5 {
 				saved.Version = 5
 			}
@@ -321,7 +342,11 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 		if group != nil {
 			e.TabName = group.tabNames[s.id]
 		}
-		if s.shell == nil {
+		if s.serial != nil {
+			e.Kind, e.Label, e.FileDir = "serial", s.label, ""
+			settings := *s.serial
+			e.Serial = &settings
+		} else if s.shell == nil {
 			e.Kind, e.Label = "local", s.label
 			if current, err := terminalDirectory(s.term.Dir(), true); err == nil {
 				e.LocalDir = current

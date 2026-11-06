@@ -3,7 +3,7 @@ package main
 import "github.com/egoist/mygo/ui"
 
 func (d *desktop) terminalMainView(c *ui.Context, width float32, compact bool) {
-	if !d.showFilePanel {
+	if !d.showFilePanel || d.currentSerialSession() != nil {
 		ui.Column(c).Grow(1).FillWidth().Children(func() { d.terminalWorkspace(c, width) })
 		return
 	}
