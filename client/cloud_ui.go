@@ -353,6 +353,7 @@ func (d *desktop) loadCloudAccount(account cloudAccount) {
 	d.editConnection = true
 	d.connectionFocusPending = false
 	d.showKeyOptions = false
+	d.showConnectionTools = false
 	d.selectedProfile = ""
 	d.selectedCloudProfile = account.ID
 	d.showProfileInspector = false

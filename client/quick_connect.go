@@ -90,6 +90,7 @@ func (d *desktop) openQuickConnection() {
 	d.profileSecretError = false
 	d.connectionFocusPending = false
 	d.showKeyOptions = false
+	d.showConnectionTools = false
 	d.settingsFromCloud = false
 	d.cloudFormSources = nil
 	d.cloudFormVersions = nil

@@ -22,6 +22,7 @@ type desktop struct {
 	editConnection                                                                          bool
 	connectionFocusPending                                                                  bool
 	showKeyOptions                                                                          bool
+	showConnectionTools                                                                     bool
 	profileSecretError                                                                      bool
 	lightTheme                                                                              bool
 	terminalFontSize                                                                        int
@@ -830,6 +831,9 @@ func (d *desktop) connectionHeader(c *ui.Context, docked bool) {
 				ui.Text(c, source).FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 			}
 		})
+		if ui.Button(c.Key("connection-options"), "⋯").Label("更多主机操作").Tooltip("更多主机操作").Width(36).Clicked() {
+			d.showConnectionTools = !d.showConnectionTools
+		}
 		if ui.Button(c.Key("connection-back"), back).Label("返回连接列表").Tooltip("返回连接列表").Disabled(d.busy).Clicked() {
 			d.closeConnectionEditor()
 		}
@@ -842,9 +846,6 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 	if !stickyActions {
 		d.connectionHeader(c, false)
 	}
-	if !docked {
-		ui.Text(c, "填写连接信息，核对主机指纹后连接。可将连接保存到列表。").TextColor(c.Theme().TextMuted).Wrap()
-	}
 	sectionColor, sectionPadding, sectionGap := c.Theme().Surface, float32(18), float32(10)
 	if docked {
 		sectionColor, sectionPadding, sectionGap = c.Theme().SurfaceHover, 12, 6
@@ -855,28 +856,31 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 	ui.Column(c).FillWidth().Padding(sectionPadding).Gap(sectionGap).Background(sectionColor).Radius(10).Children(func() {
 		ui.Text(c, "地址").FontSize(15).Bold()
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Width(34).Height(34).Radius(8).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+				ui.Icon(c, serverIcon).Width(18).Height(18).TextColor(c.Theme().AccentText)
+			})
 			host := ui.TextInput(c.Key("host"), &d.settings.Host).Label("主机地址").Placeholder("主机名或 IP").OnChange(resetFingerprint).Grow(1)
 			if d.connectionFocusPending {
 				host.Focus()
 				d.connectionFocusPending = false
 			}
-			ui.Text(c, "端口").FontSize(12).TextColor(c.Theme().TextMuted)
-			ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("22").OnChange(resetFingerprint).Width(78)
 		})
 	})
 	ui.Column(c).FillWidth().Padding(sectionPadding).Gap(sectionGap).Background(sectionColor).Radius(10).Children(func() {
 		ui.Text(c, "通用").FontSize(15).Bold()
-		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "名称").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
-			ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("可选").OnChange(markMetadataChanged).Grow(1)
-		})
-		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "分组").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
-			ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("可选").OnChange(markMetadataChanged).Grow(1)
-		})
+		ui.TextInput(c.Key("profile-label"), &d.profileLabel).Label("连接名称").Placeholder("名称（可选）").OnChange(markMetadataChanged).FillWidth()
+		ui.TextInput(c.Key("profile-group"), &d.profileGroup).Label("连接分组").Placeholder("分组（可选）").OnChange(markMetadataChanged).FillWidth()
 	})
 	ui.Column(c).FillWidth().Padding(sectionPadding).Gap(sectionGap).Background(sectionColor).Radius(10).Children(func() {
-		ui.Text(c, "SSH").FontSize(15).Bold()
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "SSH").FontSize(15).Bold()
+			if !d.settingsFromCloud {
+				ui.Text(c, "本机加密保存").FontSize(11).TextColor(c.Theme().TextMuted).Tooltip("密码和私钥口令由当前 Windows 用户加密保存")
+			}
+			ui.Box(c).Grow(1)
+			ui.Text(c, "端口").FontSize(12).TextColor(c.Theme().TextMuted)
+			ui.TextInput(c.Key("port"), &d.settings.Port).Label("端口").Placeholder("22").OnChange(resetFingerprint).Width(78)
+		})
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "用户").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
 			ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint).Grow(1)
@@ -885,7 +889,6 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 			ui.Text(c, "密码").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
 			ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().OnChange(markDraftChanged).Grow(1)
 		})
-		ui.Text(c, "凭据由 Windows 当前用户加密保存。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		keyExpanded := d.showKeyOptions || d.settings.KeyPath != "" || d.settings.Passphrase != ""
 		if !keyExpanded {
 			if ui.Button(c.Key("key-options-toggle"), "使用私钥…").Clicked() {
@@ -914,33 +917,22 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 	}
 	if trusted := d.trustedProfileFingerprint(); trusted != "" {
 		ui.Text(c, "本机已信任指纹："+trusted).FontSize(12).Wrap()
-		ui.Text(c, "重连时仍会验证服务器指纹；若指纹变化，将在发送凭据前阻止连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 	}
 	if d.changedFingerprint != "" && !stickyActions {
 		ui.Text(c, "原指纹："+d.expectedFingerprint).FontSize(12).Wrap()
 		ui.Text(c, "新指纹："+d.changedFingerprint).FontSize(12).Wrap()
 		ui.Text(c, "请先通过可信渠道核实新指纹；确认前不会发送认证信息。").FontSize(12).Wrap()
 	}
-	if d.changedFingerprint != "" && stickyActions {
-		ui.Text(c, "请先通过可信渠道核实新指纹；确认前不会发送认证信息。").FontSize(12).Wrap()
-	}
 	if d.fingerprint != "" && !stickyActions {
 		ui.Text(c, d.fingerprint).FontSize(12)
 	}
 	if d.cloud != nil {
-		ui.Text(c, "同步目标："+d.cloudScopeName()+"；团队空间的成员可访问共享连接。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
-		if d.cloud.capabilityUnknown {
-			ui.Text(c, "无法确认服务的并发保护能力；更新已有连接前请刷新云端连接。").FontSize(12).Wrap()
-		} else if !d.cloud.conditionalUpdates {
-			ui.Text(c, "未确认同步服务支持并发修改保护；更新可能覆盖其他设备的更改。").FontSize(12).Wrap()
-		}
-		if d.cloudListStale {
-			ui.Text(c, "云端列表需要先刷新后才能同步。").FontSize(12).Wrap()
-		}
-		if d.formCloudSource() != "" {
-			ui.Text(c, "将更新已载入的云端连接；其他相同地址的连接不会被修改。").FontSize(12).Wrap()
-		} else {
-			ui.Text(c, "将新建云端连接；相同地址不会自动覆盖。").FontSize(12).Wrap()
+		if d.showConnectionTools {
+			if d.formCloudSource() != "" {
+				ui.Text(c, "将更新已载入的云端连接；其他相同地址的连接不会被修改。").FontSize(12).Wrap()
+			} else {
+				ui.Text(c, "将新建云端连接；相同地址不会自动覆盖。").FontSize(12).Wrap()
+			}
 		}
 	}
 	if !stickyActions {
@@ -952,26 +944,49 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	if d.changedFingerprint != "" {
 		ui.Text(c, "原指纹："+d.expectedFingerprint).FontSize(11).Wrap()
 		ui.Text(c, "新指纹："+d.changedFingerprint).FontSize(11).Wrap()
-		ui.Text(c, "请先通过可信渠道核实新指纹。").FontSize(11).Wrap()
+		ui.Text(c, "请先通过可信渠道核实新指纹；确认前不会发送认证信息。").FontSize(11).Wrap()
 		ui.Button(c.Key("accept-changed-fingerprint"), "已核实，使用新指纹").Disabled(d.busy).OnClick(d.acceptChangedFingerprint)
 	} else if d.fingerprint != "" {
 		ui.Text(c, "请核对指纹："+d.fingerprint).FontSize(11).Wrap()
 	}
-	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
-		if ui.Button(c.Key("profile-add"), "保存").Label("保存到连接列表").Tooltip("保存到连接列表").Disabled(d.busy).Clicked() {
-			if err := d.saveCurrentProfile(); err != nil {
-				d.status = "保存失败，表单内容仍保留：" + err.Error()
-			} else {
-				d.status = "连接已保存"
-				current := d.currentConnectionDraft()
-				d.connectionDraft.metadata = current.metadata
-				if !d.settingsFromCloud {
-					d.connectionDraft.secrets = current.secrets
-				}
-				d.profileAutoDirty, d.profileAutoAt = false, time.Time{}
-			}
+	if d.cloud != nil {
+		scope := "同步目标：" + d.cloudScopeName()
+		if d.cloud.teamID != "" {
+			scope += "（团队成员可访问）"
 		}
-		ui.Button(c.Key("inspect"), "获取指纹").Label("获取主机指纹").Tooltip("获取主机指纹").Disabled(d.busy).OnClick(d.inspect)
+		operation := "同步时新建连接"
+		if d.formCloudSource() != "" {
+			operation = "同步时更新当前云端连接"
+		}
+		ui.Text(c, scope+" · "+operation).FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+		if d.cloud.capabilityUnknown {
+			ui.Text(c, "无法确认服务的并发保护能力；更新已有连接前请刷新云端连接。").FontSize(11).Wrap()
+		} else if !d.cloud.conditionalUpdates {
+			ui.Text(c, "未确认同步服务支持并发修改保护；更新可能覆盖其他设备的更改。").FontSize(11).Wrap()
+		}
+		if d.cloudListStale {
+			ui.Text(c, "云端列表需要先刷新后才能同步。").FontSize(11).Wrap()
+		}
+	}
+	if d.showConnectionTools {
+		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+			if ui.Button(c.Key("profile-add"), "保存").Label("保存到连接列表").Tooltip("保存到连接列表").Disabled(d.busy).Clicked() {
+				if err := d.saveCurrentProfile(); err != nil {
+					d.status = "保存失败，表单内容仍保留：" + err.Error()
+				} else {
+					d.status = "连接已保存"
+					current := d.currentConnectionDraft()
+					d.connectionDraft.metadata = current.metadata
+					if !d.settingsFromCloud {
+						d.connectionDraft.secrets = current.secrets
+					}
+					d.profileAutoDirty, d.profileAutoAt = false, time.Time{}
+				}
+			}
+			ui.Button(c.Key("inspect"), "获取指纹").Label("获取主机指纹").Tooltip("获取主机指纹").Disabled(d.busy).OnClick(d.inspect)
+		})
+	}
+	ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 		if d.cloud != nil {
 			ui.Button(c.Key("cloudsave-form"), "同步").Label("确认指纹并同步密码连接").Tooltip("确认指纹并同步密码连接").Disabled(d.busy || !d.canWriteCloudScope() || d.cloudListStale || d.fingerprint == "" || d.settings.Password == "" || d.settings.KeyPath != "").OnClick(d.cloudSaveForm)
 		}
@@ -981,7 +996,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 		} else if d.trustedProfileFingerprint() != "" {
 			accessible = "使用已信任指纹连接"
 		}
-		if ui.PrimaryButton(c.Key("connect"), label).Label(accessible).Disabled(d.busy || d.changedFingerprint != "" || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
+		if ui.PrimaryButton(c.Key("connect"), label).Label(accessible).Grow(1).Disabled(d.busy || d.changedFingerprint != "" || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
 			if d.fingerprint != "" {
 				d.connect()
 			} else if d.trustedProfileFingerprint() != "" {
@@ -996,7 +1011,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.87"
+const version = "0.3.88"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

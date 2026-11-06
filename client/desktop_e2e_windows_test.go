@@ -431,6 +431,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if secretErr != nil || password != settings.Password {
 		t.Fatal("native editor credential cannot be restored")
 	}
+	call("act", map[string]any{"key": "connection-options", "action": "press"})
 	call("act", map[string]any{"key": "profile-add", "action": "press"})
 	// The primary action inspects an unknown host before it can authenticate.
 	call("act", map[string]any{"key": "connect", "action": "press"})
@@ -1920,6 +1921,7 @@ func TestDesktopNativeWindow(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	call("act", map[string]any{"key": "key", "action": "setValue", "text": keyPath})
+	call("act", map[string]any{"key": "connection-options", "action": "press"})
 	call("act", map[string]any{"key": "profile-add", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

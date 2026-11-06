@@ -86,6 +86,7 @@ func (d *desktop) flushProfileAutosave() {
 	}
 	if err := d.saveCurrentProfile(); err != nil {
 		d.status = "自动保存失败，表单内容仍保留：" + err.Error()
+		d.showConnectionTools = true
 		return
 	}
 	d.connectionDraft = current

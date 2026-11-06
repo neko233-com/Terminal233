@@ -136,7 +136,8 @@ func TestHostInspectorKeepsHeaderAndCloudActionVisible(t *testing.T) {
 	header, headerOK := view.Find("返回连接列表")
 	scroll, scrollOK := view.Find("主机详情内容")
 	cloud, cloudOK := view.Find("确认指纹并同步密码连接")
-	if !headerOK || !scrollOK || !cloudOK || cloud.Y+cloud.H > 600 {
+	target, targetOK := view.Find("同步目标：个人空间 · 同步时新建连接")
+	if !headerOK || !scrollOK || !cloudOK || !targetOK || cloud.Y+cloud.H > 600 {
 		t.Fatalf("header, form or cloud action missing: header=%+v form=%+v cloud=%+v", header, scroll, cloud)
 	}
 	view.Scroll(scroll.X+scroll.W/2, scroll.Y+scroll.H/2, 0, 500)
@@ -144,12 +145,35 @@ func TestHostInspectorKeepsHeaderAndCloudActionVisible(t *testing.T) {
 	if !ok || after.Y != header.Y {
 		t.Fatal("host details header moved when the form scrolled")
 	}
+	if afterTarget, ok := view.Find("同步目标：个人空间 · 同步时新建连接"); !ok || afterTarget.Y != target.Y {
+		t.Fatal("sync destination must remain visible next to the action")
+	}
+}
+
+func TestHostInspectorShowsPrimaryActionAndRevealsSecondaryActions(t *testing.T) {
+	d := &desktop{workspace: "connections", editConnection: true, settings: connectionSettings{Host: "one.test", Port: "22", User: "alice"}}
+	view := ui.NewTester(d.view, 1280, 760)
+	if !view.HasText("连接并核验主机指纹") || !view.HasText("本机加密保存") || view.HasText("保存到连接列表") || view.HasText("获取主机指纹") {
+		t.Fatal("inspector did not prioritize the connection action")
+	}
+	if err := view.Click("更多主机操作"); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasText("保存到连接列表") || !view.HasText("获取主机指纹") {
+		t.Fatal("secondary operations are not available")
+	}
+	if err := view.Click("更多主机操作"); err != nil {
+		t.Fatal(err)
+	}
+	if view.HasText("保存到连接列表") || view.HasText("获取主机指纹") {
+		t.Fatal("secondary operations did not close")
+	}
 }
 
 func TestChangedHostKeyGuidanceStaysWithConfirmation(t *testing.T) {
 	d := &desktop{workspace: "connections", editConnection: true, settings: connectionSettings{Host: "example.test", Port: "22", User: "alice"}, expectedFingerprint: "SHA256:old", changedFingerprint: "SHA256:new"}
 	view := ui.NewTester(d.view, 1200, 600)
-	warning, warningOK := view.Find("请先通过可信渠道核实新指纹。")
+	warning, warningOK := view.Find("请先通过可信渠道核实新指纹；确认前不会发送认证信息。")
 	confirm, confirmOK := view.Find("已核实，使用新指纹")
 	if !warningOK || !confirmOK || warning.Y+warning.H > confirm.Y || confirm.Y+confirm.H > 600 {
 		t.Fatalf("verification guidance or confirmation is not visible: warning=%+v confirm=%+v", warning, confirm)

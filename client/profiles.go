@@ -88,6 +88,7 @@ func (d *desktop) loadProfile(p profile) {
 	d.editConnection = true
 	d.connectionFocusPending = false
 	d.showKeyOptions = false
+	d.showConnectionTools = false
 	d.showProfileInspector = false
 	d.profileInspectorAt = time.Time{}
 	d.selectedCloudProfile = ""
@@ -202,6 +203,7 @@ func (d *desktop) profileView(c *ui.Context) {
 				d.settings = connectionSettings{Port: "22"}
 				d.profileSecretError = false
 				d.showKeyOptions = false
+				d.showConnectionTools = false
 				d.settingsFromCloud = false
 				d.cloudFormSources = nil
 				d.cloudFormVersions = nil

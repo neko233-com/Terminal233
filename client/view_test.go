@@ -215,7 +215,7 @@ func TestChangedHostKeyRequiresExplicitVerification(t *testing.T) {
 func TestConnectionFormNamesCloudSyncDestination(t *testing.T) {
 	d := &desktop{workspace: "connections", editConnection: true, cloud: &cloudClient{teamID: "team"}, teams: []cloudTeam{{ID: "team", Name: "研发"}}, settings: connectionSettings{Host: "example.test", Port: "22", User: "alice", Password: "secret"}, fingerprint: "SHA256:verified"}
 	view := ui.NewTester(d.view, 1200, 1800)
-	if !view.HasText("同步目标：研发；团队空间的成员可访问共享连接。") || !view.HasText("确认指纹并同步密码连接") {
+	if !view.HasText("同步目标：研发（团队成员可访问） · 同步时新建连接") || !view.HasText("确认指纹并同步密码连接") {
 		t.Fatal("connection form did not clearly identify the sync destination")
 	}
 }
@@ -869,12 +869,12 @@ func TestCloudUpdateUsesOnlyExplicitSourceAndScope(t *testing.T) {
 	d.loadCloudAccount(account)
 	d.fingerprint = "SHA256:key"
 	view := ui.NewTester(d.view, 1200, 1600)
-	if !view.HasText("将更新已载入的云端连接；其他相同地址的连接不会被修改。") {
+	if !view.HasText("同步时更新当前云端连接") {
 		t.Fatal("explicit update target is unclear")
 	}
 	d.cloud.teamID = "team-two"
 	view.Frame()
-	if !view.HasText("将新建云端连接；相同地址不会自动覆盖。") {
+	if !view.HasText("同步时新建连接") {
 		t.Fatal("cross-team save did not switch to create")
 	}
 	d.currentSession = 1
