@@ -9,6 +9,8 @@ func workspaceIcon(body string) *ui.SVG {
 }
 
 var (
+	menuIcon        = workspaceIcon(`<path d="M4 6h16M4 12h16M4 18h16"/>`)
+	appearanceIcon  = workspaceIcon(`<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>`)
 	serverIcon      = workspaceIcon(`<rect x="3" y="3" width="18" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/>`)
 	terminalIcon    = workspaceIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/>`)
 	fileIcon        = workspaceIcon(`<path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>`)

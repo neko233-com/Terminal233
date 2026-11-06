@@ -113,6 +113,73 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "连接列表") {
 		t.Fatalf("missing native fields: %s", tree)
 	}
+	if !strings.Contains(tree, "key:host-entry-address ") {
+		t.Fatal("fresh native workspace should show the centered host entry")
+	}
+	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_HOST_ENTRY"); capturePath != "" {
+		capture := call("capture")["result"].(map[string]any)
+		pixels, err := base64.StdEncoding.DecodeString(fmt.Sprint(capture["png"]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(capturePath, pixels, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call("act", map[string]any{"key": "host-entry-address", "action": "setValue", "text": "onboarding.example.invalid"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		ready := false
+		for _, entry := range call("tree")["result"].(map[string]any)["nodes"].([]any) {
+			node := entry.(map[string]any)
+			if node["key"] == "host-entry-continue" && !strings.Contains(fmt.Sprint(node["states"]), "disabled") {
+				ready = true
+				break
+			}
+		}
+		if ready {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "host-entry-continue", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "key:host ") && strings.Contains(tree, "onboarding.example.invalid") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "key:host ") || !strings.Contains(tree, "onboarding.example.invalid") {
+		t.Fatalf("host entry did not open its native editor: %s", tree)
+	}
+	// The prefilled address is an unfinished draft and must require an explicit
+	// second close before it can be discarded.
+	call("act", map[string]any{"key": "connection-back", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "再次点击返回可放弃修改") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "再次点击返回可放弃修改") {
+		t.Fatal("host entry discarded its incomplete draft without confirmation")
+	}
+	call("act", map[string]any{"key": "connection-back", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "key:host-entry-address ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "key:host-entry-address ") {
+		t.Fatal("host entry did not return after closing the draft")
+	}
 	if !strings.Contains(tree, "key:workspace-rail-compact ") {
 		t.Fatal("fresh installs should show the text navigation")
 	}

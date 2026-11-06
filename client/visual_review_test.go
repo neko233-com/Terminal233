@@ -19,13 +19,14 @@ func TestWorkspaceVisualReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, state := range []struct {
-		name             string
-		width, height    int
-		light, inspector bool
+		name                    string
+		width, height           int
+		light, inspector, empty bool
 	}{
-		{"hosts-dark", 1200, 760, false, false}, {"hosts-light", 1200, 760, true, false},
-		{"hosts-wide", 1600, 900, false, false}, {"hosts-compact", 640, 760, false, false},
-		{"host-inspector", 1400, 900, false, true},
+		{"hosts-dark", 1200, 760, false, false, false}, {"hosts-light", 1200, 760, true, false, false},
+		{"hosts-wide", 1600, 900, false, false, false}, {"hosts-compact", 640, 760, false, false, false},
+		{"host-inspector", 1400, 900, false, true, false},
+		{"hosts-empty-dark", 1200, 760, false, false, true}, {"hosts-empty-light", 1200, 760, true, false, true}, {"hosts-empty-compact", 640, 480, false, false, true},
 	} {
 		t.Run(state.name, func(t *testing.T) {
 			d := &desktop{workspace: "connections", lightTheme: state.light, railExpanded: true}
@@ -39,6 +40,10 @@ func TestWorkspaceVisualReview(t *testing.T) {
 				d.profiles = append(d.profiles, profile{ID: profileID(string(rune('1' + i))), Label: p.name, Group: p.group, Settings: connectionSettings{Host: p.host, Port: "22", User: "devops"}})
 			}
 			d.profileGroups = []string{"Production", "Development"}
+			if state.empty {
+				d.profiles = nil
+				d.profileGroups = nil
+			}
 			if state.inspector {
 				d.selectedProfile = "1"
 				d.loadProfile(d.profiles[0])

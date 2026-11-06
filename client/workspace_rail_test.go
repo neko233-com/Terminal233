@@ -19,7 +19,7 @@ func TestCompactRailNavigationAndPreferences(t *testing.T) {
 	if err := view.Click("展开文字导航"); err != nil {
 		t.Fatal(err)
 	}
-	if !d.railExpanded || d.sidebarWidth(1200) != 235 || !view.HasText("工作区") {
+	if !d.railExpanded || d.sidebarWidth(1200) != 200 || !view.HasText("工作区") {
 		t.Fatal("expanded navigation did not open")
 	}
 	prefs, err := readPreferences(d.preferencesPath)

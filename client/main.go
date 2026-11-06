@@ -22,6 +22,8 @@ type desktop struct {
 	newTabSelected, newTabSelectionQuery                                                    string
 	editConnection                                                                          bool
 	connectionFocusPending                                                                  bool
+	connectionAuthFocusPending                                                              bool
+	newHostEntry, newHostEntryError                                                         string
 	showKeyOptions                                                                          bool
 	showConnectionTools                                                                     bool
 	profileSecretError                                                                      bool
@@ -605,12 +607,11 @@ func (d *desktop) view(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Padding(8, 16).Gap(10).AlignItems(ui.Center).Background(workspaceChrome(c)).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-			ui.Text(c, "NekoSSH").FontSize(20).Bold()
 			sidebarLabel := "收起侧栏"
 			if !d.sidebarVisible() {
 				sidebarLabel = "展开侧栏"
 			}
-			if ui.Button(c.Key("toggle-sidebar"), "☰").Label(sidebarLabel).Tooltip(sidebarLabel).Width(36).Height(36).BorderWidth(0).Background(ui.Transparent).Clicked() {
+			if terminalActionButton(c, "toggle-sidebar", sidebarLabel, menuIcon, false, false).Clicked() {
 				if (d.workspace == "terminal" && d.term != nil) || d.workspace == "new-tab" {
 					d.terminalNavigationOpen = !d.terminalNavigationOpen
 				} else {
@@ -618,6 +619,7 @@ func (d *desktop) view(c *ui.Context) {
 					d.savePreference("sidebar", d.sidebarCollapsed)
 				}
 			}
+			ui.Text(c, "NekoSSH").FontSize(20).Bold()
 			if d.preferencesStatus != "" {
 				ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).Wrap()
 			}
@@ -644,7 +646,7 @@ func (d *desktop) view(c *ui.Context) {
 			if d.lightTheme {
 				themeLabel = "深色"
 			}
-			if ui.Button(c.Key("theme-toggle"), "◐").Label(themeLabel).Tooltip("切换" + themeLabel + "主题").Width(36).Height(36).BorderWidth(0).Background(ui.Transparent).Clicked() {
+			if terminalActionButton(c, "theme-toggle", themeLabel, appearanceIcon, false, false).Tooltip("切换" + themeLabel + "主题").Clicked() {
 				d.lightTheme = !d.lightTheme
 				d.savePreference("light", d.lightTheme)
 			}
@@ -682,13 +684,7 @@ func (d *desktop) view(c *ui.Context) {
 						d.compactWorkspaceNavigation(c)
 						return
 					}
-					ui.Column(c).Padding(16).Gap(8).Children(func() {
-						ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-							ui.Text(c, "工作区").FontSize(12).TextColor(t.TextMuted).Grow(1)
-							if terminalActionButton(c, "workspace-rail-compact", "使用图标导航", railCompactIcon, false, false).Clicked() {
-								d.setRailExpanded(false)
-							}
-						})
+					ui.Column(c).Label("工作区").Padding(12, 16).Gap(8).Children(func() {
 						if navigationButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
 							d.workspace = "connections"
 							if d.editConnection {
@@ -733,9 +729,14 @@ func (d *desktop) view(c *ui.Context) {
 						} else if d.profileFilter != "" {
 							filterLabel = "分组：" + d.profileFilter
 						}
-						if ui.Button(c.Key("connection-navigation-toggle"), filterLabel).Label("连接筛选").FillWidth().Clicked() {
-							d.showConnectionNavigation = !d.showConnectionNavigation
-						}
+						ui.Row(c).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
+							if ui.Button(c.Key("connection-navigation-toggle"), filterLabel).Label("连接筛选").Grow(1).Clicked() {
+								d.showConnectionNavigation = !d.showConnectionNavigation
+							}
+							if terminalActionButton(c, "workspace-rail-compact", "使用图标导航", railCompactIcon, false, false).Clicked() {
+								d.setRailExpanded(false)
+							}
+						})
 						if d.showConnectionNavigation {
 							connectionCount := len(d.profiles) + 1
 							if d.cloud != nil {
@@ -1168,11 +1169,19 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 		} else {
 			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "用户").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
-				ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint).Grow(1)
+				user := ui.TextInput(c.Key("user"), &d.settings.User).Label("用户名").Placeholder("用户名").OnChange(resetFingerprint).Grow(1)
+				if d.connectionAuthFocusPending && d.settings.User == "" {
+					user.Focus()
+					d.connectionAuthFocusPending = false
+				}
 			})
 			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "密码").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
-				ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().OnChange(markDraftChanged).Grow(1)
+				password := ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().OnChange(markDraftChanged).Grow(1)
+				if d.connectionAuthFocusPending {
+					password.Focus()
+					d.connectionAuthFocusPending = false
+				}
 			})
 			keyExpanded := d.showKeyOptions || d.settings.KeyPath != "" || d.settings.Passphrase != ""
 			if !keyExpanded {

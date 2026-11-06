@@ -386,8 +386,8 @@ func TestBuiltinLocalTerminalIsDiscoverableAndFiltered(t *testing.T) {
 	d := &desktop{}
 	view := ui.NewTester(d.view, 1200, 900)
 	openConnectionNavigation(t, view)
-	if !view.HasText("打开本机终端") {
-		t.Fatal("built-in local terminal missing from the connection list")
+	if !view.HasText("本机终端") {
+		t.Fatal("built-in local terminal entry missing from the empty workspace toolbar")
 	}
 	if !view.HasText("全部连接  1") {
 		t.Fatal("built-in terminal is not counted in all connections")

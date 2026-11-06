@@ -17,7 +17,7 @@ func workspaceSidebarWidth(width float32) float32 {
 	if width < 800 {
 		return 170
 	}
-	return 235
+	return 200
 }
 
 func (d *desktop) sidebarWidth(width float32) float32 {
@@ -209,43 +209,13 @@ func (d *desktop) profileView(c *ui.Context) {
 				}
 			})
 		}
-		ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
-			ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("连接列表：搜索连接或快速连接").Placeholder("搜索主机或输入 SSH 地址").Grow(1).OnSubmit(func() {
-				d.submitConnectionSearch()
-			})
-			if looksLikeQuickConnection(d.profileSearch) {
-				if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy || draftBlocked).Clicked() {
-					d.submitConnectionSearch()
-				}
-			}
+		ui.Row(c).FillWidth().Gap(6).Padding(4, 6).AlignItems(ui.Center).Background(c.Theme().SurfacePressed).Radius(10).Children(func() {
+			ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("连接列表：搜索连接或快速连接").Placeholder("搜索主机或输入 SSH 地址").Grow(1).Height(32).BorderWidth(0).Background(ui.Transparent).OnSubmit(d.submitConnectionSearch)
+			ui.Button(c.Key("quick-connect-open"), "连接").Label("填写连接信息").Tooltip("填写认证信息并核对指纹").Height(30).BorderWidth(0).Disabled(d.busy || draftBlocked || !looksLikeQuickConnection(d.profileSearch)).OnClick(d.submitConnectionSearch)
 		})
 		ui.Row(c).FillWidth().Wrap().Gap(8).Padding(0, 0, 10, 0).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).AlignItems(ui.Center).Children(func() {
-			if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Disabled(draftBlocked).Clicked() {
-				if !d.prepareConnectionNavigation() {
-					return
-				}
-				d.settings = connectionSettings{Port: "22"}
-				d.profileIdentityID = ""
-				d.profileTagsCaretPending, d.profileGroupCaretPending = false, false
-				d.profileSecretError = false
-				d.showKeyOptions = false
-				d.showConnectionTools = false
-				d.settingsFromCloud = false
-				d.cloudFormSources = nil
-				d.cloudFormVersions = nil
-				d.profileGroup = d.profileFilter
-				d.profileLabel = ""
-				d.profileTags = ""
-				d.fingerprint = ""
-				d.changedFingerprint = ""
-				d.expectedFingerprint = ""
-				d.selectedProfile = ""
-				d.selectedCloudProfile = ""
-				d.showProfileInspector = false
-				d.profileInspectorAt = time.Time{}
-				d.editConnection = true
-				d.connectionFocusPending = true
-				d.captureConnectionDraft()
+			if ui.Button(c.Key("connection-new"), "+ 新建连接").Height(36).Padding(8, 12).BorderWidth(0).Background(c.Theme().SurfacePressed).Disabled(d.busy || draftBlocked).Clicked() {
+				d.beginNewHost()
 			}
 			local := ui.Button(c.Key("profile-open-local"), "").Label("本机终端").Tooltip("打开本机终端").Gap(8).Disabled(d.busy || d.terminalLimitReached())
 			local.Children(func() {
@@ -282,6 +252,10 @@ func (d *desktop) profileView(c *ui.Context) {
 				d.showCompactProfileTools = !d.showCompactProfileTools
 			}
 		})
+		if d.hostEntryVisible() {
+			d.hostEntryView(c, width)
+			return
+		}
 		ui.Scroll(c.Key("profile-list-scroll")).Label("主机列表").Grow(1).FillWidth().Children(func() {
 			ui.Column(c).FillWidth().Gap(10).Children(func() {
 				d.profileList(c, cardWidth, compact, inspectorCapable, draftBlocked)
@@ -778,21 +752,22 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				}
 				shown++
 				label := account.Label + " · " + account.Username + "@" + account.Host
-				ui.Column(c).Width(cardWidth).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(10).Children(func() {
-					row := ui.Button(c.Key("profile-cloud-"+account.ID), "").Label(label).FillWidth().BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).Disabled(d.busy).Drag(cloudGroupDragID(account.ID))
+				_, isChecked := d.checkedCloud[account.ID]
+				card := ui.Column(c).Width(cardWidth).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(10).BorderWidth(1).BorderColor(ui.Transparent)
+				if d.selectedCloudProfile == account.ID || isChecked {
+					card = card.Background(c.Theme().SurfaceHover).BorderColor(c.Theme().Accent)
+				}
+				card.Children(func() {
+					row := ui.Button(c.Key("profile-cloud-"+account.ID), "").Label(label).FillWidth().BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).Background(ui.Transparent).Disabled(d.busy).Drag(cloudGroupDragID(account.ID))
 					row.Children(func() {
 						ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().SurfacePressed).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-							ui.Icon(c, cloudIcon).Width(19).Height(19).TextColor(c.Theme().AccentText)
+							ui.Icon(c, cloudIcon).Width(19).Height(19).TextColor(c.Theme().Text)
 						})
 						ui.Column(c).Grow(1).Gap(3).Children(func() {
-							ui.Text(c, account.Label).FontSize(14).Bold().Wrap()
-							ui.Text(c, account.Username+"@"+account.Host).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+							ui.Text(c, account.Label).FontSize(14).SingleLine().Tooltip(account.Label)
+							ui.Text(c, account.Username+"@"+account.Host).FontSize(12).TextColor(c.Theme().TextMuted).SingleLine().Tooltip(account.Host)
 						})
 					})
-					_, isChecked := d.checkedCloud[account.ID]
-					if d.selectedCloudProfile == account.ID || isChecked {
-						row = row.Background(c.Theme().SurfacePressed).BorderWidth(1).BorderColor(c.Theme().Accent)
-					}
 					blockedByEditor := draftBlocked
 					row.ContextMenu(func(menu *ui.Menu) {
 						if menu.Item("连接").Disabled(d.busy || blockedByEditor).Chosen() {
