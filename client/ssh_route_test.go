@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,6 +35,55 @@ func TestSSHRoutePinsEveryHop(t *testing.T) {
 	_ = client.Close()
 	if attempts2.Load() == 0 || attempts3.Load() == 0 {
 		t.Fatal("the route did not authenticate every hop")
+	}
+}
+
+func TestSSHJumpRouteCancellationDuringTargetHandshake(t *testing.T) {
+	jump, fingerprint, _ := testSSHServer(t)
+	jump.Fingerprint = fingerprint
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		close(accepted)
+		<-ctx.Done()
+	}()
+	host, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := connectionSettings{Host: host, Port: port, User: "fixture", Password: "fixture", Fingerprint: "SHA256:fixture"}
+	result := make(chan error, 1)
+	go func() {
+		client, err := connectSSHRoute(ctx, []connectionSettings{jump, target})
+		if client != nil {
+			_ = client.Close()
+		}
+		result <- err
+	}()
+	select {
+	case <-accepted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("target handshake was not reached")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancellation returned %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancellation did not interrupt the tunneled handshake")
 	}
 }
 

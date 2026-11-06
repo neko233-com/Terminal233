@@ -31,6 +31,7 @@ type agentHost struct {
 	User        string `json:"user"`
 	Trusted     bool   `json:"trusted"`
 	Credentials bool   `json:"credentials_saved"`
+	JumpHostID  string `json:"jump_host_id,omitempty"`
 }
 
 type agentJumpFlags []string
@@ -127,7 +128,11 @@ func runAgentCLI(args []string, store string, stdout io.Writer) int {
 		hosts := make([]agentHost, 0, len(d.profiles))
 		for _, p := range d.profiles {
 			s := p.Settings
-			hosts = append(hosts, agentHost{agentHostID(p), p.Label, p.Group, s.Host, s.Port, s.User, strings.HasPrefix(s.Fingerprint, "SHA256:"), p.EncryptedCredentials != "" || p.IdentityID != "" || s.KeyPath != ""})
+			jumpHostID := ""
+			if s.JumpID != "" {
+				jumpHostID = "local:" + s.JumpID
+			}
+			hosts = append(hosts, agentHost{ID: agentHostID(p), Name: p.Label, Group: p.Group, Host: s.Host, Port: s.Port, User: s.User, Trusted: strings.HasPrefix(s.Fingerprint, "SHA256:"), Credentials: p.EncryptedCredentials != "" || p.IdentityID != "" || s.KeyPath != "", JumpHostID: jumpHostID})
 		}
 		return write(map[string]any{"ok": true, "operation": operation, "hosts": hosts}, 0)
 	}
@@ -158,12 +163,27 @@ func runAgentCLI(args []string, store string, stdout io.Writer) int {
 		if err != nil {
 			return fail(fmt.Sprintf("第 %d 跳：%s", i+1, err), 2)
 		}
-		address, err := settings.address()
-		if err != nil || seenAddresses[strings.ToLower(address)] {
-			return fail("跳板链包含无效或重复的服务器地址", 2)
+		settings, err = d.resolveSavedRoute(settings)
+		if err != nil {
+			return fail(fmt.Sprintf("第 %d 跳：%s", i+1, err), 2)
 		}
-		seenAddresses[strings.ToLower(address)] = true
-		hops = append(hops, settings)
+		var expanded []connectionSettings
+		if settings.route != nil {
+			expanded = append(expanded, settings.route.hops...)
+		}
+		settings.route = nil
+		expanded = append(expanded, settings)
+		if len(hops)+len(expanded) > maxSSHJumpHosts+1 {
+			return fail("跳板链最多支持 8 跳", 2)
+		}
+		for _, step := range expanded {
+			address, err := step.address()
+			if err != nil || seenAddresses[strings.ToLower(address)] {
+				return fail("跳板链包含无效或重复的服务器地址", 2)
+			}
+			seenAddresses[strings.ToLower(address)] = true
+			hops = append(hops, step)
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()

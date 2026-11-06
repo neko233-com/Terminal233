@@ -78,6 +78,9 @@ func (d *desktop) groupQuickTargets(group string, cloud bool) ([]workspaceRestor
 			}
 			settings, err := d.profileCredential(p)
 			if err == nil {
+				settings, err = d.resolveSavedRoute(settings)
+			}
+			if err == nil {
 				_, err = settings.address()
 			}
 			if err == nil && !strings.HasPrefix(settings.Fingerprint, "SHA256:") {
@@ -90,7 +93,7 @@ func (d *desktop) groupQuickTargets(group string, cloud bool) ([]workspaceRestor
 				failures = append(failures, fmt.Sprintf("%s：%v", p.Label, err))
 				continue
 			}
-			e := workspaceTemplateEntry{Kind: "profile", Label: p.Label, Group: p.Group, Host: settings.Host, Port: settings.Port, User: settings.User, KeyPath: settings.KeyPath, Fingerprint: settings.Fingerprint}
+			e := workspaceTemplateEntry{Kind: "profile", Label: p.Label, Group: p.Group, Host: settings.Host, Port: settings.Port, User: settings.User, KeyPath: settings.KeyPath, Fingerprint: settings.Fingerprint, JumpRoute: settings.savedRouteSignature()}
 			label := p.Label
 			if label == "" {
 				label = settings.User + "@" + settings.Host
@@ -247,7 +250,7 @@ func (d *desktop) quickConnectGroup(group string, cloud bool) {
 			}
 		}
 		results, failure := connectGroupTargets(ctx, valid, func(target workspaceRestoreTarget) (workspaceRestoredSession, error) {
-			shell, term, err := openSSHSessionAt(target.settings, options, "")
+			shell, term, err := openSSHSessionAtThroughContext(ctx, target.settings, options, "", nil)
 			return workspaceRestoredSession{target: target, shell: shell, term: term}, err
 		}, closeSession, func(done, total int) {
 			if !op.closed.Load() {

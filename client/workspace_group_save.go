@@ -27,8 +27,8 @@ func cloneCloudWorkspace(w cloudWorkspace) cloudWorkspace {
 // the group state rather than relying on repaint or mouse-event timing.
 func (d *desktop) workspaceGroupSignature(g *terminalGroup) [32]byte {
 	type member struct {
-		ID                                                                      int
-		Label, TabName, Directory, FileDirectory, Host, Port, User, Fingerprint string
+		ID, JumpSession                                                                    int
+		Label, TabName, Directory, FileDirectory, Host, Port, User, Fingerprint, JumpRoute string
 	}
 	type state struct {
 		Name, SplitLayout string
@@ -44,7 +44,11 @@ func (d *desktop) workspaceGroupSignature(g *terminalGroup) [32]byte {
 		if s.id == d.currentSession {
 			dir = d.fileDir
 		}
-		value.Members = append(value.Members, member{ID: s.id, Label: s.label, TabName: g.tabNames[s.id], Directory: sessionTerminalDirectory(s), FileDirectory: dir, Host: s.active.Host, Port: s.active.Port, User: s.active.User, Fingerprint: s.active.Fingerprint})
+		jumpSession := 0
+		if s.jumpParent != nil {
+			jumpSession = s.jumpParent.id
+		}
+		value.Members = append(value.Members, member{ID: s.id, JumpSession: jumpSession, Label: s.label, TabName: g.tabNames[s.id], Directory: sessionTerminalDirectory(s), FileDirectory: dir, Host: s.active.Host, Port: s.active.Port, User: s.active.User, Fingerprint: s.active.Fingerprint, JumpRoute: s.active.savedRouteSignature()})
 	}
 	// Rendering fills unset split percentages with the following defaults.
 	// Normalize them here so the first paint does not falsely mark a template dirty.

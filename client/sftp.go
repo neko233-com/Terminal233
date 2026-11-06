@@ -126,7 +126,13 @@ func openSFTPTransport(ctx context.Context, settings connectionSettings) (*remot
 }
 
 func openSFTPTransportThrough(ctx context.Context, settings connectionSettings, via *ssh.Client) (*remoteShell, error) {
-	client, err := connectSSHClientThrough(ctx, settings, via)
+	var client *ssh.Client
+	var err error
+	if via == nil {
+		client, err = connectSSHClient(ctx, settings)
+	} else {
+		client, err = connectSSHClientThrough(ctx, settings, via)
+	}
 	if err != nil {
 		return nil, err
 	}

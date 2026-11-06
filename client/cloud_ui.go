@@ -170,6 +170,12 @@ func (d *desktop) formCloudVersion() string {
 }
 
 func (d *desktop) cloudSave() {
+	for _, session := range d.sessions {
+		if session.id == d.currentSession && session.jumpParent != nil {
+			d.cloudStatus, d.status = "临时跳板路径不能同步，请先在本机保存跳板主机。", "临时跳板路径不能同步。"
+			return
+		}
+	}
 	binding := cloudSaveBinding{client: d.cloud, sessionID: d.currentSession, sessionSettings: d.active}
 	if d.cloud != nil {
 		binding.scope = d.cloud.teamID
@@ -180,6 +186,10 @@ func (d *desktop) cloudSave() {
 }
 
 func (d *desktop) cloudSaveForm() {
+	if d.connectionJumpID != 0 {
+		d.cloudStatus, d.status = "临时跳板路径不能同步，请先在本机保存跳板主机。", "临时跳板路径不能同步。"
+		return
+	}
 	// Preserve pending local edits before the form becomes bound to a cloud
 	// record; cloud writes do not persist the local group or local credentials.
 	if !d.settingsFromCloud && !d.prepareConnectionNavigation() {
@@ -201,6 +211,9 @@ func (d *desktop) cloudSaveForm() {
 func prepareCloudAccount(settings connectionSettings, label string, existing []cloudAccount, selectedID string) (cloudAccount, error) {
 	if _, err := settings.address(); err != nil {
 		return cloudAccount{}, err
+	}
+	if settings.JumpID != "" {
+		return cloudAccount{}, errors.New("本机跳板路径暂不能同步到云端；请保留本机连接配置")
 	}
 	if settings.KeyPath != "" || settings.Password == "" || !strings.HasPrefix(settings.Fingerprint, "SHA256:") {
 		return cloudAccount{}, fmt.Errorf("仅支持同步已核对指纹的密码连接")

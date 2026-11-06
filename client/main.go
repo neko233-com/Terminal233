@@ -394,11 +394,18 @@ func (d *desktop) inspect() {
 	if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
 		d.flushProfileAutosave()
 	}
+	settings := d.settings
+	if via == nil {
+		settings, err = d.resolveSavedRoute(settings)
+		if err != nil {
+			d.status = err.Error()
+			return
+		}
+	}
 	d.busy = true
 	d.fingerprint = ""
 	d.changedFingerprint = ""
 	d.status = "正在获取服务器指纹…"
-	settings := d.settings
 	go func() {
 		fp, err := inspectHostThrough(settings, via)
 		d.win.Update(func() {
@@ -418,7 +425,7 @@ func (d *desktop) finishHostInspection(settings connectionSettings, fp string, e
 		d.status = fmt.Sprintf("获取指纹失败：%v", err)
 		return
 	}
-	if d.settings.Host != settings.Host || d.settings.Port != settings.Port || d.settings.User != settings.User {
+	if d.settings.Host != settings.Host || d.settings.Port != settings.Port || d.settings.User != settings.User || d.settings.JumpID != settings.JumpID {
 		d.status = "连接信息已改变，请重新获取指纹。"
 		return
 	}
@@ -456,9 +463,16 @@ func (d *desktop) connect() {
 	if d.profileAutoDirty || !d.profileAutoAt.IsZero() {
 		d.flushProfileAutosave()
 	}
+	settings := d.settings
+	if via == nil {
+		settings, err = d.resolveSavedRoute(settings)
+		if err != nil {
+			d.status = err.Error()
+			return
+		}
+	}
 	d.busy = true
 	d.status = "正在建立安全连接…"
-	settings := d.settings
 	returnToFiles := d.fileReturnAfterConnect && d.workspace == "connections"
 	options := d.terminalOptions()
 	settings.Fingerprint = d.fingerprint
@@ -1172,7 +1186,7 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 		if !d.settingsFromCloud {
 			d.identitySelector(c, markMetadataChanged)
 		}
-		d.connectionJumpPicker(c)
+		d.connectionJumpPicker(c, markMetadataChanged)
 		if d.profileIdentityID != "" && !d.settingsFromCloud {
 			ui.Text(c, "用户名及凭据来自所选身份").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		} else {

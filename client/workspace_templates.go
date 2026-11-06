@@ -30,6 +30,7 @@ type workspaceTemplateEntry struct {
 	User        string `json:"user,omitempty"`
 	KeyPath     string `json:"key_path,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
+	JumpRoute   string `json:"jump_route,omitempty"`
 	FileDir     string `json:"file_dir,omitempty"`
 	LocalDir    string `json:"local_dir,omitempty"`
 	TerminalDir string `json:"terminal_dir,omitempty"`
@@ -94,9 +95,15 @@ func validateSavedWorkspace(w savedWorkspace) error {
 		if e.TabName != strings.TrimSpace(e.TabName) || !validWorkspaceText(e.TabName, 120) {
 			return errors.New("工作区终端名称无效")
 		}
-		for _, s := range []string{e.Label, e.Group, e.Host, e.Port, e.User, e.KeyPath, e.Fingerprint, e.FileDir, e.LocalDir, e.TerminalDir, e.CloudURL, e.CloudUser, e.CloudTeam, e.CloudID} {
+		for _, s := range []string{e.Label, e.Group, e.Host, e.Port, e.User, e.KeyPath, e.Fingerprint, e.JumpRoute, e.FileDir, e.LocalDir, e.TerminalDir, e.CloudURL, e.CloudUser, e.CloudTeam, e.CloudID} {
 			if !validWorkspaceText(s, 4096) {
 				return errors.New("工作区内容无效")
+			}
+		}
+		if e.JumpRoute != "" {
+			decoded, err := hex.DecodeString(e.JumpRoute)
+			if e.Kind != "profile" || err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != e.JumpRoute {
+				return errors.New("工作区跳板路径标识无效")
 			}
 		}
 		switch e.Kind {
@@ -307,6 +314,9 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 		if s.jumpParent != nil {
 			return savedWorkspace{}, fmt.Errorf("会话 %s 使用临时跳板，暂不能保存为工作区模板", s.label)
 		}
+		if err := d.validateSessionSavedRoute(s.active); err != nil {
+			return savedWorkspace{}, fmt.Errorf("会话 %s：%w", s.label, err)
+		}
 		e := workspaceTemplateEntry{FileDir: s.fileDir}
 		if group != nil {
 			e.TabName = group.tabNames[s.id]
@@ -324,12 +334,13 @@ func (d *desktop) workspaceSnapshot(name string) (savedWorkspace, error) {
 		} else {
 			e.Kind = "profile"
 			e.Host, e.Port, e.User, e.KeyPath, e.Fingerprint = s.active.Host, s.active.Port, s.active.User, s.active.KeyPath, s.active.Fingerprint
+			e.JumpRoute = s.active.savedRouteSignature()
 			candidates := []profile{}
 			for _, p := range d.profiles {
 				if s.sourceProfileID != "" && string(p.ID) != s.sourceProfileID {
 					continue
 				}
-				if p.Settings.Host != e.Host || p.Settings.Port != e.Port || p.Settings.User != e.User || p.Settings.KeyPath != e.KeyPath || p.Settings.Fingerprint != e.Fingerprint {
+				if p.Settings.Host != e.Host || p.Settings.Port != e.Port || p.Settings.User != e.User || p.Settings.KeyPath != e.KeyPath || p.Settings.Fingerprint != e.Fingerprint || p.Settings.JumpID != s.active.JumpID {
 					continue
 				}
 				credentials, err := d.profileCredential(p)

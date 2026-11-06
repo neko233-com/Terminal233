@@ -122,7 +122,7 @@ func decodeLocalImportJournal(data []byte) (localImportJournal, error) {
 	var profiles diskProfiles
 	dec = json.NewDecoder(bytes.NewReader(j.NewProfiles))
 	dec.DisallowUnknownFields()
-	if dec.Decode(&profiles) != nil || dec.Decode(&struct{}{}) != io.EOF || profiles.Version < 1 || profiles.Version > 6 {
+	if dec.Decode(&profiles) != nil || dec.Decode(&struct{}{}) != io.EOF || profiles.Version < 1 || profiles.Version > 7 {
 		return localImportJournal{}, errors.New("导入恢复的主机数据无效")
 	}
 	var rules forwardRulesFile

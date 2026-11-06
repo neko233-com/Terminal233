@@ -50,6 +50,7 @@ func (d *desktop) addProfile() error {
 	safe := d.settings
 	safe.Password = ""
 	safe.Passphrase = ""
+	safe.route = nil
 	label := strings.TrimSpace(d.profileLabel)
 	if label == "" {
 		label = safe.User + "@" + safe.Host

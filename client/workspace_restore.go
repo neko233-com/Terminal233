@@ -68,6 +68,13 @@ func (d *desktop) resolveWorkspace(w savedWorkspace) ([]workspaceRestoreTarget, 
 			if err != nil {
 				return nil, fmt.Errorf("第 %d 个主机：%w", i+1, err)
 			}
+			settings, err = d.resolveSavedRoute(settings)
+			if err != nil {
+				return nil, fmt.Errorf("第 %d 个主机：%w", i+1, err)
+			}
+			if settings.savedRouteSignature() != e.JumpRoute {
+				return nil, fmt.Errorf("第 %d 个主机的跳板路径已改变，请重新保存工作区", i+1)
+			}
 			if !settings.canUseStoredAuth() {
 				return nil, fmt.Errorf("第 %d 个主机没有保存可用凭据", i+1)
 			}
@@ -336,7 +343,7 @@ func (d *desktop) startWorkspaceWithCloudSource(w savedWorkspace, saved bool, cl
 					localOptions.Dir = target.entry.LocalDir
 					term, err = newLocalTerminal(localOptions)
 				} else {
-					shell, term, err = openSSHSessionAt(target.settings, options, target.entry.TerminalDir)
+					shell, term, err = openSSHSessionAtThroughContext(ctx, target.settings, options, target.entry.TerminalDir, nil)
 				}
 				return workspaceRestoredSession{target: target, shell: shell, term: term}, err
 			}, closeSession, func(index int) {

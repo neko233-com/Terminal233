@@ -29,12 +29,13 @@ type forwardRulesFile struct {
 	Items   []savedForwardRule
 }
 type savedForwardRun struct {
-	cancel  context.CancelFunc
-	client  *ssh.Client
-	forward *localForward
-	hostID  string
-	binding [32]byte
-	rule    savedForwardRule
+	cancel       context.CancelFunc
+	client       *ssh.Client
+	forward      *localForward
+	hostID       string
+	binding      [32]byte
+	routeBinding string
+	rule         savedForwardRule
 }
 
 func validRandomID(value string) bool {
@@ -260,12 +261,13 @@ func (d *desktop) deleteForwardRule(old savedForwardRule) error {
 }
 
 func forwardHostBinding(p profile) [32]byte {
-	return connectionDraftHash(p.Settings.Host, p.Settings.Port, p.Settings.User, p.Settings.KeyPath, p.Settings.Fingerprint)
+	return connectionDraftHash(p.Settings.Host, p.Settings.Port, p.Settings.User, p.Settings.KeyPath, p.Settings.Fingerprint, p.Settings.JumpID)
 }
 func (d *desktop) stopChangedForwardRules() {
 	for id, run := range d.savedForwardRuns {
 		p, ok := d.forwardRuleHost(run.hostID)
-		if !ok || forwardHostBinding(p) != run.binding {
+		settings, err := d.resolveSavedRoute(p.Settings)
+		if !ok || err != nil || forwardHostBinding(p) != run.binding || settings.savedRouteSignature() != run.routeBinding {
 			d.stopSavedForward(id)
 		}
 	}
@@ -352,6 +354,11 @@ func (d *desktop) startSavedForward(rule savedForwardRule, invalidate func()) {
 		d.forwardRulesStatus = err.Error()
 		return
 	}
+	settings, err = d.resolveSavedRoute(settings)
+	if err != nil {
+		d.forwardRulesStatus = err.Error()
+		return
+	}
 	if !strings.HasPrefix(settings.Fingerprint, "SHA256:") {
 		d.forwardRulesStatus = "请先连接主机并核对主机指纹。"
 		return
@@ -368,7 +375,7 @@ func (d *desktop) startSavedForward(rule savedForwardRule, invalidate func()) {
 	if d.savedForwardRuns == nil {
 		d.savedForwardRuns = make(map[string]*savedForwardRun)
 	}
-	run := &savedForwardRun{cancel: cancel, hostID: rule.HostID, binding: forwardHostBinding(p), rule: rule}
+	run := &savedForwardRun{cancel: cancel, hostID: rule.HostID, binding: forwardHostBinding(p), routeBinding: settings.savedRouteSignature(), rule: rule}
 	d.savedForwardRuns[rule.ID] = run
 	d.forwardRulesStatus = "正在启动：" + rule.Name
 	go func() {

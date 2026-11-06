@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/egoist/mygo/plugins/terminal"
 	"golang.org/x/crypto/ssh"
@@ -15,13 +16,24 @@ func openSSHSessionAt(settings connectionSettings, options terminal.Options, dir
 }
 
 func openSSHSessionAtThrough(settings connectionSettings, options terminal.Options, dir string, via *ssh.Client) (*remoteShell, *terminal.Terminal, error) {
-	shell, err := connectShellAtThrough(settings, dir, via)
+	return openSSHSessionAtThroughContext(context.Background(), settings, options, dir, via)
+}
+
+func openSSHSessionAtThroughContext(ctx context.Context, settings connectionSettings, options terminal.Options, dir string, via *ssh.Client) (*remoteShell, *terminal.Terminal, error) {
+	shell, err := connectShellAtThroughContext(ctx, settings, dir, via)
 	if err != nil {
 		return nil, nil, err
 	}
+	stopCancellation := context.AfterFunc(ctx, func() { _ = shell.Close() })
+	defer stopCancellation()
 	options.Conn = shell
 	term, err := terminal.New(options)
 	if err != nil {
+		_ = shell.Close()
+		return nil, nil, err
+	}
+	if err = ctx.Err(); err != nil {
+		_ = term.Close()
 		_ = shell.Close()
 		return nil, nil, err
 	}

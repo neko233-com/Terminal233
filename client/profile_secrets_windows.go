@@ -16,6 +16,7 @@ import (
 // the profile file cannot cause a password to be used for a different host.
 type protectedProfileCredentials struct {
 	Host, Port, User, KeyPath, Password, Passphrase string
+	JumpID                                          string `json:",omitempty"`
 }
 
 func protectProfileCredentials(s connectionSettings) (string, error) {
@@ -25,7 +26,7 @@ func protectProfileCredentials(s connectionSettings) (string, error) {
 	if len(s.Password)+len(s.Passphrase) > 16384 {
 		return "", errors.New("凭据过长，无法保存")
 	}
-	plain, err := json.Marshal(protectedProfileCredentials{s.Host, s.Port, s.User, s.KeyPath, s.Password, s.Passphrase})
+	plain, err := json.Marshal(protectedProfileCredentials{Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Password: s.Password, Passphrase: s.Passphrase, JumpID: s.JumpID})
 	if err != nil {
 		return "", errors.New("无法保护本机凭据")
 	}
@@ -69,7 +70,7 @@ func unprotectProfileCredentials(encoded string, s connectionSettings) (string, 
 	plain := unsafe.Slice(out.Data, int(out.Size))
 	defer clear(plain)
 	var credentials protectedProfileCredentials
-	if err = json.Unmarshal(plain, &credentials); err != nil || credentials.Host != s.Host || credentials.Port != s.Port || credentials.User != s.User || credentials.KeyPath != s.KeyPath {
+	if err = json.Unmarshal(plain, &credentials); err != nil || credentials.Host != s.Host || credentials.Port != s.Port || credentials.User != s.User || credentials.KeyPath != s.KeyPath || credentials.JumpID != s.JumpID {
 		return "", "", errors.New("无法解锁本机凭据")
 	}
 	return credentials.Password, credentials.Passphrase, nil

@@ -19,6 +19,8 @@ import (
 
 type connectionSettings struct {
 	Host, Port, User, Password, KeyPath, Passphrase, Fingerprint string
+	JumpID                                                       string `json:",omitempty"`
+	route                                                        *savedSSHRoute
 }
 
 func (s connectionSettings) canUseStoredAuth() bool {
@@ -40,6 +42,19 @@ func inspectHost(s connectionSettings) (string, error) {
 }
 
 func inspectHostThrough(s connectionSettings, via *ssh.Client) (string, error) {
+	if via == nil && s.JumpID != "" {
+		if s.route == nil || s.route.jumpID != s.JumpID || len(s.route.hops) == 0 {
+			return "", errors.New("保存的跳板路径不可用，请重新选择")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		parent, err := connectSSHRoute(ctx, s.route.hops)
+		if err != nil {
+			return "", err
+		}
+		defer parent.Close()
+		return inspectHostThrough(s, parent)
+	}
 	addr, err := s.address()
 	if err != nil {
 		return "", err
@@ -160,6 +175,10 @@ func connectShellAt(s connectionSettings, dir string) (*remoteShell, error) {
 }
 
 func connectShellAtThrough(s connectionSettings, dir string, via *ssh.Client) (*remoteShell, error) {
+	return connectShellAtThroughContext(context.Background(), s, dir, via)
+}
+
+func connectShellAtThroughContext(ctx context.Context, s connectionSettings, dir string, via *ssh.Client) (*remoteShell, error) {
 	command := ""
 	if dir != "" {
 		var err error
@@ -168,10 +187,18 @@ func connectShellAtThrough(s connectionSettings, dir string, via *ssh.Client) (*
 			return nil, err
 		}
 	}
-	client, err := connectSSHClientThrough(context.Background(), s, via)
+	var client *ssh.Client
+	var err error
+	if via == nil {
+		client, err = connectSSHClient(ctx, s)
+	} else {
+		client, err = connectSSHClientThrough(ctx, s, via)
+	}
 	if err != nil {
 		return nil, err
 	}
+	stopCancellation := context.AfterFunc(ctx, func() { _ = client.Close() })
+	defer stopCancellation()
 	fail := func(err error) (*remoteShell, error) { _ = client.Close(); return nil, err }
 	session, err := client.NewSession()
 	if err != nil {
@@ -197,6 +224,11 @@ func connectShellAtThrough(s connectionSettings, dir string, via *ssh.Client) (*
 		_ = output.Close()
 		return fail(err)
 	}
+	if err = ctx.Err(); err != nil {
+		_ = out.Close()
+		_ = output.Close()
+		return fail(err)
+	}
 	go func() {
 		_ = output.CloseWithError(session.Wait())
 		_ = client.Close()
@@ -209,6 +241,13 @@ func connectShellAtThrough(s connectionSettings, dir string, via *ssh.Client) (*
 // A forwarding rule needs only an SSH transport, not a shell or PTY. Both
 // paths use the same host-key verification and authentication policy.
 func connectSSHClient(ctx context.Context, s connectionSettings) (*ssh.Client, error) {
+	if s.JumpID != "" {
+		if s.route == nil || s.route.jumpID != s.JumpID || len(s.route.hops) == 0 {
+			return nil, errors.New("保存的跳板路径不可用，请重新选择")
+		}
+		hops := append(append([]connectionSettings(nil), s.route.hops...), s)
+		return connectSSHRoute(ctx, hops)
+	}
 	return connectSSHClientThrough(ctx, s, nil)
 }
 
@@ -222,6 +261,9 @@ func dialSSHAddress(ctx context.Context, address string, via *ssh.Client) (net.C
 // Each hop uses its own pinned fingerprint and credentials. A tunneled
 // connection is still a separate SSH handshake, not an agent-forwarded shell.
 func connectSSHClientThrough(ctx context.Context, s connectionSettings, via *ssh.Client) (*ssh.Client, error) {
+	if via == nil && s.JumpID != "" {
+		return nil, errors.New("跳板路径不可用，已阻止直连")
+	}
 	addr, err := s.address()
 	if err != nil {
 		return nil, err

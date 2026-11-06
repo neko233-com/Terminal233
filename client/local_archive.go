@@ -22,6 +22,7 @@ const maxLocalArchiveFile = 6 << 20
 type localArchiveIdentity struct{ ID, Name, User, KeyPath, Password, Passphrase string }
 type localArchiveProfile struct {
 	StableID, Group, Label, Host, Port, User, KeyPath, Password, Passphrase, IdentityID string
+	JumpID                                                                              string `json:",omitempty"`
 	Tags                                                                                []string
 	Favorite                                                                            bool
 }
@@ -49,7 +50,7 @@ func validLocalArchiveGroup(group string) bool {
 }
 
 func validateLocalArchive(doc localArchiveDocument) error {
-	if doc.Version != 1 || len(doc.Groups) > 10000 || len(doc.Identities) > maxSavedIdentities || len(doc.Profiles) > 10000 || len(doc.Rules) > maxSavedForwardRules {
+	if doc.Version < 1 || doc.Version > 2 || len(doc.Groups) > 10000 || len(doc.Identities) > maxSavedIdentities || len(doc.Profiles) > 10000 || len(doc.Rules) > maxSavedForwardRules {
 		return errors.New("本机备份版本或数量无效")
 	}
 	groups := map[string]bool{}
@@ -86,6 +87,28 @@ func validateLocalArchive(doc localArchiveDocument) error {
 			if !ok || identity.User != p.User || identity.KeyPath != p.KeyPath || p.Password != "" || p.Passphrase != "" {
 				return errors.New("本机备份身份关联无效")
 			}
+		}
+	}
+	byID := make(map[string]localArchiveProfile, len(hostIDs))
+	for _, p := range doc.Profiles {
+		if p.StableID != "" {
+			byID[p.StableID] = p
+		}
+	}
+	for _, p := range doc.Profiles {
+		seen := map[string]bool{}
+		for id, depth := p.JumpID, 0; id != ""; depth++ {
+			if doc.Version < 2 || depth >= maxSSHJumpHosts || !validRandomID(id) || seen[id] || id == p.StableID {
+				return errors.New("本机备份跳板路径无效或存在循环")
+			}
+			jump, exists := byID[id]
+			if !exists {
+				// Preserve a dangling reference so the user can back up and
+				// repair it after import; connecting still fails closed.
+				break
+			}
+			seen[id] = true
+			id = jump.JumpID
 		}
 	}
 	ruleIDs := map[string]bool{}
@@ -154,7 +177,10 @@ func (d *desktop) snapshotLocalArchive() (localArchiveDocument, error) {
 		if err != nil {
 			return localArchiveDocument{}, errors.New("无法解锁主机凭据，备份未生成")
 		}
-		item := localArchiveProfile{StableID: p.StableID, Group: p.Group, Label: p.Label, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, IdentityID: p.IdentityID, Tags: append([]string(nil), p.Tags...), Favorite: p.Favorite}
+		item := localArchiveProfile{StableID: p.StableID, Group: p.Group, Label: p.Label, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, IdentityID: p.IdentityID, JumpID: s.JumpID, Tags: append([]string(nil), p.Tags...), Favorite: p.Favorite}
+		if s.JumpID != "" {
+			doc.Version = 2
+		}
 		if p.IdentityID == "" {
 			item.Password, item.Passphrase = s.Password, s.Passphrase
 		}

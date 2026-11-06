@@ -73,15 +73,28 @@ func (d *desktop) importLocalArchiveWith(doc localArchiveDocument, fault func(st
 	}
 	next := d.nextProfileID
 	for _, src := range doc.Profiles {
-		next++
-		p := profile{ID: profileID(fmt.Sprint(next)), Group: src.Group, Label: src.Label, Tags: append([]string(nil), src.Tags...), Favorite: src.Favorite, Settings: connectionSettings{Host: src.Host, Port: src.Port, User: src.User, KeyPath: src.KeyPath}}
 		if src.StableID != "" {
 			id, err := newUnusedBackupID(usedHost)
 			if err != nil {
 				return err
 			}
-			p.StableID = id
 			hostMap[src.StableID] = id
+		}
+	}
+	for _, src := range doc.Profiles {
+		if src.JumpID != "" && hostMap[src.JumpID] == "" {
+			id, err := newUnusedBackupID(usedHost)
+			if err != nil {
+				return err
+			}
+			hostMap[src.JumpID] = id
+		}
+	}
+	for _, src := range doc.Profiles {
+		next++
+		p := profile{ID: profileID(fmt.Sprint(next)), Group: src.Group, Label: src.Label, Tags: append([]string(nil), src.Tags...), Favorite: src.Favorite, Settings: connectionSettings{Host: src.Host, Port: src.Port, User: src.User, KeyPath: src.KeyPath, JumpID: hostMap[src.JumpID]}}
+		if src.StableID != "" {
+			p.StableID = hostMap[src.StableID]
 		}
 		if src.IdentityID != "" {
 			p.IdentityID = identityMap[src.IdentityID]

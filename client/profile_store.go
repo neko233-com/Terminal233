@@ -22,6 +22,7 @@ type diskProfile struct {
 	Tags                                                 []string `json:",omitempty"`
 	IdentityID, IdentityBinding                          string   `json:",omitempty"`
 	StableID                                             string   `json:",omitempty"`
+	JumpID                                               string   `json:",omitempty"`
 }
 
 type diskProfiles struct {
@@ -73,7 +74,7 @@ func (d *desktop) loadProfiles(path string) error {
 	if err := json.Unmarshal(data, &saved); err != nil {
 		return fmt.Errorf("连接列表格式无效：%w", err)
 	}
-	if saved.Version < 1 || saved.Version > 6 || len(saved.Items) > 10000 || len(saved.Groups) > 10000 || len(saved.Identities) > maxSavedIdentities || (saved.Version < 5 && len(saved.Identities) != 0) {
+	if saved.Version < 1 || saved.Version > 7 || len(saved.Items) > 10000 || len(saved.Groups) > 10000 || len(saved.Identities) > maxSavedIdentities || (saved.Version < 5 && len(saved.Identities) != 0) {
 		return errors.New("连接列表版本或数量无效")
 	}
 	identityByID := make(map[string]savedIdentity, len(saved.Identities))
@@ -94,7 +95,10 @@ func (d *desktop) loadProfiles(path string) error {
 	profiles := make([]profile, 0, len(saved.Items))
 	stableIDs := make(map[string]bool)
 	for i, p := range saved.Items {
-		settings := connectionSettings{Host: p.Host, Port: p.Port, User: p.User, KeyPath: p.KeyPath, Fingerprint: p.Fingerprint}
+		settings := connectionSettings{Host: p.Host, Port: p.Port, User: p.User, KeyPath: p.KeyPath, Fingerprint: p.Fingerprint, JumpID: p.JumpID}
+		if p.JumpID != "" && (saved.Version < 7 || !validRandomID(p.JumpID) || p.JumpID == p.StableID) {
+			return errors.New("跳板主机标识无效")
+		}
 		if _, err := settings.address(); err != nil {
 			return fmt.Errorf("连接列表第 %d 项无效：%w", i+1, err)
 		}
@@ -163,7 +167,13 @@ func (d *desktop) encodeProfiles() ([]byte, int, error) {
 			}
 			version = max(version, 6)
 		}
-		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint, EncryptedCredentials: p.EncryptedCredentials, IdentityID: p.IdentityID, IdentityBinding: p.IdentityBinding, StableID: p.StableID})
+		if s.JumpID != "" {
+			if !validRandomID(s.JumpID) || s.JumpID == p.StableID {
+				return nil, 0, errors.New("跳板主机标识无效")
+			}
+			version = max(version, 7)
+		}
+		saved.Items = append(saved.Items, diskProfile{Group: p.Group, Label: p.Label, Tags: p.Tags, Favorite: p.Favorite, LastConnected: p.LastConnected, Host: s.Host, Port: s.Port, User: s.User, KeyPath: s.KeyPath, Fingerprint: s.Fingerprint, EncryptedCredentials: p.EncryptedCredentials, IdentityID: p.IdentityID, IdentityBinding: p.IdentityBinding, StableID: p.StableID, JumpID: s.JumpID})
 	}
 	saved.Version = version
 	data, err := json.MarshalIndent(saved, "", "  ")
