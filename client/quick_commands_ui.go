@@ -21,6 +21,7 @@ func (d *desktop) reloadQuickCommands() {
 		return
 	}
 	d.quickCommands, d.quickPackages, d.quickEdit, d.quickConfirm = saved.Items, saved.Packages, nil, ""
+	d.quickMulti = nil
 	d.quickPackageConfirm, d.quickPackageName = false, ""
 	d.quickChecked = nil
 	if d.quickPackageFilter != "" && d.quickPackageFilter != "-" && quickPackageIndex(saved.Packages, d.quickPackageFilter) < 0 {
@@ -69,6 +70,7 @@ func (d *desktop) saveQuickCommand() bool {
 	}
 	d.quickCommands, d.quickPackages, d.quickEdit, d.quickConfirm = saved.Items, saved.Packages, nil, ""
 	d.quickName, d.quickText = "", ""
+	d.quickMulti = nil
 	d.quickStatus = "快速命令已保存到本机"
 	d.quickSelected = item.ID
 	return true
@@ -99,6 +101,7 @@ func (d *desktop) deleteQuickCommand(expected quickCommand) {
 	}
 	d.quickCommands, d.quickPackages, d.quickEdit, d.quickConfirm = saved.Items, saved.Packages, nil, ""
 	d.quickName, d.quickText, d.quickStatus = "", "", "快速命令已删除"
+	d.quickMulti = nil
 }
 
 func (d *desktop) sendQuickCommand(item quickCommand, execute bool) {
@@ -106,6 +109,7 @@ func (d *desktop) sendQuickCommand(item quickCommand, execute bool) {
 		d.quickStatus = "请先选择有效的终端会话和命令"
 		return
 	}
+	d.quickMulti = nil
 	target := d.quickCommandTarget()
 	if execute {
 		d.term.Send([]byte(strings.ReplaceAll(strings.TrimSuffix(item.Command, "\n"), "\n", "\r") + "\r"))
@@ -179,6 +183,7 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 		batching := d.workspace == "snippets" && d.quickBatch
 		ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
 			if ui.Button(c.Key("quick-new"), "+ 新建命令").Disabled(d.quickEditorOpen || batching).Clicked() {
+				d.quickMulti = nil
 				d.quickEditorOpen = true
 				d.quickEdit, d.quickName, d.quickText, d.quickConfirm = nil, "", "", ""
 				d.quickPackageManaging, d.quickPackageConfirm = false, false
@@ -200,6 +205,7 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 					label = "完成选择"
 				}
 				if ui.Button(c.Key("quick-batch-toggle"), label).Disabled(d.quickEditorOpen).Clicked() {
+					d.quickMulti = nil
 					d.quickBatch = !d.quickBatch
 					d.quickChecked, d.quickPackageManaging = nil, false
 				}
@@ -286,6 +292,7 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 				})
 				row.ContextMenu(func(menu *ui.Menu) {
 					if menu.Item("编辑").Disabled(d.quickEditorOpen).Chosen() {
+						d.quickMulti = nil
 						d.quickSelected, d.quickEditorOpen = item.ID, true
 						d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
 						d.quickPackageID = item.PackageID
@@ -297,8 +304,12 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 				})
 				if row.DoubleClicked() && !d.quickEditorOpen && d.term != nil && !terminalEnded(d.term) {
 					d.quickSelected, d.quickConfirm = item.ID, ""
+					d.quickMulti = nil
 					d.sendQuickCommand(item, true)
 				} else if row.Clicked() && !d.quickEditorOpen {
+					if d.quickSelected != item.ID {
+						d.quickMulti = nil
+					}
 					d.quickSelected, d.quickConfirm = item.ID, ""
 				}
 				if selected && !d.quickEditorOpen {
@@ -307,10 +318,12 @@ func (d *desktop) quickCommandsSideView(c *ui.Context) {
 						if ui.Button(c.Key("quick-run-"+item.ID), "运行").Disabled(d.term == nil || terminalEnded(d.term)).Clicked() {
 							d.sendQuickCommand(item, true)
 						}
+						d.quickMultiButton(c, "quick-multi-", item)
 						if d.quickConfirm == item.ID && ui.Button(c.Key("quick-delete-"+item.ID), "确认删除").Clicked() {
 							d.deleteQuickCommand(item)
 						}
 					})
+					d.quickMultiPanel(c, item)
 				}
 			})
 		}
@@ -358,10 +371,14 @@ func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
 					})
 				})
 				if button.DoubleClicked() && !d.quickEditorOpen && !d.quickBatch {
+					d.quickMulti = nil
 					d.quickSelected, d.quickEditorOpen = item.ID, true
 					d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
 					d.quickPackageID = item.PackageID
 				} else if button.Clicked() {
+					if d.quickSelected != item.ID {
+						d.quickMulti = nil
+					}
 					d.quickSelected, d.quickConfirm = item.ID, ""
 				}
 				if selected && !d.quickBatch {
@@ -371,7 +388,9 @@ func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
 						if ui.Button(c.Key("snippet-run-"+item.ID), "发送并回车").Disabled(unavailable).Clicked() {
 							d.sendQuickCommand(item, true)
 						}
+						d.quickMultiButton(c, "snippet-multi-", item)
 						if ui.Button(c.Key("snippet-edit-"+item.ID), "编辑").Disabled(d.quickEditorOpen).Clicked() {
+							d.quickMulti = nil
 							d.quickEditorOpen = true
 							d.quickEdit, d.quickName, d.quickText, d.quickConfirm = &item, item.Name, item.Command, ""
 							d.quickPackageID = item.PackageID
@@ -384,6 +403,7 @@ func (d *desktop) quickCommandsGrid(c *ui.Context, commands []quickCommand) {
 							d.deleteQuickCommand(item)
 						}
 					})
+					d.quickMultiPanel(c, item)
 				}
 			})
 		}

@@ -147,6 +147,7 @@ type desktop struct {
 	quickCommands                                                                           []quickCommand
 	quickPackages                                                                           []quickPackage
 	quickEdit                                                                               *quickCommand
+	quickMulti                                                                              *quickMultiDraft
 	expectedFingerprint, changedFingerprint                                                 string
 	win                                                                                     *mygo.Window
 	settings                                                                                connectionSettings
@@ -1078,7 +1079,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.101"
+const version = "0.3.102"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

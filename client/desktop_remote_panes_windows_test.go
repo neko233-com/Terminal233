@@ -27,6 +27,13 @@ func TestDesktopRemotePanes(t *testing.T) {
 	bad := c
 	bad.Fingerprint, bad.Password = cf, "incorrect-test-password"
 	configDir := t.TempDir()
+	multiItem, err := newQuickCommand("多终端验证", "echo NEKO_MULTI_TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = updateQuickCommands(filepath.Join(configDir, "NekoSSH", "quick-commands.json"), func(items []quickCommand) ([]quickCommand, error) { return append(items, multiItem), nil }); err != nil {
+		t.Fatal(err)
+	}
 	var profiles desktop
 	if err := profiles.loadProfiles(filepath.Join(configDir, "NekoSSH", "profiles.json")); err != nil {
 		t.Fatal(err)
@@ -52,7 +59,6 @@ func TestDesktopRemotePanes(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = app.Process.Kill(); _ = app.Wait() })
 	var conn net.Conn
-	var err error
 	until := time.Now().Add(15 * time.Second)
 	for time.Now().Before(until) {
 		conn, err = net.DialTimeout("unix", socket, time.Second)
@@ -747,5 +753,50 @@ func TestDesktopRemotePanes(t *testing.T) {
 		if writeErr := os.WriteFile(capturePath, png, 0600); writeErr != nil {
 			t.Fatal(writeErr)
 		}
+	}
+	// Run a saved snippet on two explicitly selected SSH terminals.
+	press("group-tab-4")
+	press("quick-toggle")
+	press("quick-select-" + multiItem.ID)
+	press("quick-multi-" + multiItem.ID)
+	waitKey("quick-multi-target-" + multiItem.ID + "-16")
+	call("act", map[string]any{"key": "quick-multi-target-" + multiItem.ID + "-16", "action": "scrollIntoView"})
+	press("quick-multi-target-" + multiItem.ID + "-16")
+	call("act", map[string]any{"key": "quick-multi-target-" + multiItem.ID + "-17", "action": "scrollIntoView"})
+	press("quick-multi-target-" + multiItem.ID + "-17")
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "选择目标 · 2") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "选择目标 · 2") {
+		t.Fatal("multi-terminal selection did not settle")
+	}
+	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_MULTI"); capturePath != "" {
+		result := call("capture", nil)["result"].(map[string]any)
+		png, decodeErr := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if writeErr := os.WriteFile(capturePath, png, 0600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	press("quick-multi-send-" + multiItem.ID)
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "已向 2 个终端提交并回车") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "已向 2 个终端提交并回车") {
+		t.Fatal("multi-terminal execution was not reported")
+	}
+	press("quick-toggle")
+	waitGone("quick-filter")
+	for _, session := range []string{"16", "17"} {
+		press("group-focus-" + session)
+		waitSelected("group-focus-" + session)
+		press("terminal-search-toggle")
+		setPath("terminal-search-input", "NEKO_MULTI_TEST")
+		waitKey("terminal-search-next")
+		press("terminal-search-close")
 	}
 }
