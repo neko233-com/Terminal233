@@ -184,6 +184,9 @@ type desktop struct {
 	archiveCancel                                                                           context.CancelFunc
 	accounts                                                                                []cloudAccount
 	forwardLocalPort, forwardHost, forwardPort, forwardStatus                               string
+	forwardMode                                                                             string
+	forwardPending                                                                          bool
+	forwardGeneration                                                                       uint64
 	updateStatus, updatePath                                                                string
 	updateAvailable                                                                         *updateCandidate
 	updateChecking, updateDownloading                                                       bool
@@ -1121,7 +1124,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.111"
+const version = "0.3.112"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

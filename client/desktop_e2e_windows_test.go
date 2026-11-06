@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -622,6 +623,69 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if conn, dialErr := net.DialTimeout("tcp", address, time.Second); dialErr == nil {
 		conn.Close()
 		t.Fatal("stopped forward still listening")
+	}
+	call("act", map[string]any{"key": "forward-mode-dynamic", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "本机 SOCKS5 代理") && !strings.Contains(tree, "key:forward-host ") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "本机 SOCKS5 代理") || strings.Contains(tree, "key:forward-host ") {
+		t.Fatalf("dynamic forward form: %s", tree)
+	}
+	call("act", map[string]any{"key": "forward-start", "action": "press"})
+	address = ""
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if match := forwardPattern.FindStringSubmatch(tree); len(match) == 2 {
+			address = match[1]
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if address == "" {
+		t.Fatalf("dynamic forward did not start: %s", tree)
+	}
+	proxyConn, err := net.DialTimeout("tcp", address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = proxyConn.SetDeadline(time.Now().Add(3 * time.Second))
+	_, _ = proxyConn.Write([]byte{5, 1, 0})
+	method := make([]byte, 2)
+	if _, err = io.ReadFull(proxyConn, method); err != nil || method[1] != 0 {
+		t.Fatalf("SOCKS handshake: %v %v", method, err)
+	}
+	portNumber, err := strconv.Atoi(targetPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = proxyConn.Write([]byte{5, 1, 0, 1, 127, 0, 0, 1, byte(portNumber >> 8), byte(portNumber)})
+	proxyReply := make([]byte, 10)
+	if _, err = io.ReadFull(proxyConn, proxyReply); err != nil || proxyReply[1] != 0 {
+		t.Fatalf("SOCKS connect: %v %v", proxyReply, err)
+	}
+	_, _ = proxyConn.Write([]byte("test"))
+	if _, err = io.ReadFull(proxyConn, forwardReply); err != nil || string(forwardReply) != "test" {
+		t.Fatalf("SOCKS relay: %q %v", forwardReply, err)
+	}
+	_ = proxyConn.Close()
+	call("act", map[string]any{"key": "forward-stop-0", "action": "press"})
+	call("act", map[string]any{"key": "forward-mode-remote", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "远程监听端口") && strings.Contains(tree, "本机可访问的目标主机") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "远程监听端口") || !strings.Contains(tree, "本机可访问的目标主机") {
+		t.Fatalf("remote forward form: %s", tree)
 	}
 	// Simulate a dropped SSH shell and reconnect the same tab.
 	navigate("nav-terminal")
