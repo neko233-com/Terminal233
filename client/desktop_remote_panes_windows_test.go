@@ -798,6 +798,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 		setPath("terminal-search-input", "NEKO_MULTI_TEST")
 		waitKey("terminal-search-next")
 		press("terminal-search-close")
+		waitGone("terminal-search-input")
 	}
 	// Real-time input in focus mode is sent to the other workspace terminals.
 	press("toggle-broadcast")
@@ -829,6 +830,7 @@ func TestDesktopRemotePanes(t *testing.T) {
 		setPath("terminal-search-input", "NEKO_BROADCAST_TEST")
 		waitKey("terminal-search-next")
 		press("terminal-search-close")
+		waitGone("terminal-search-input")
 	}
 	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_BROADCAST"); capturePath != "" {
 		result := call("capture", nil)["result"].(map[string]any)
