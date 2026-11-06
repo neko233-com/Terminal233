@@ -24,6 +24,7 @@ var (
 	plusIcon        = workspaceIcon(`<path d="M12 4v16M4 12h16"/>`)
 	closeIcon       = workspaceIcon(`<path d="m6 6 12 12M18 6 6 18"/>`)
 	settingsIcon    = workspaceIcon(`<path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M19 5l-1.4 1.4M6.4 17.6 5 19"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="7"/>`)
+	moreIcon        = workspaceIcon(`<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>`)
 	navigationIcons = map[string]*ui.SVG{
 		"nav-connections": serverIcon,
 		"nav-terminal":    terminalIcon,

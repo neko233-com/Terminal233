@@ -760,6 +760,21 @@ func (d *desktop) view(c *ui.Context) {
 					}
 					return
 				}
+				if (d.workspace == "" || d.workspace == "connections") && (!d.editConnection || d.connectionInspectorDocked(width)) {
+					ui.Row(c).Grow(1).FillWidth().Padding(24).Gap(16).Children(func() {
+						ui.Column(c).Grow(1).FillHeight().Children(func() { d.profileView(c) })
+						if d.editConnection {
+							ui.Column(c.Key("connection-inspector")).Label("主机详情面板").Width(connectionInspectorWidth).FillHeight().Shrink(0).Background(t.Surface).Radius(10).Children(func() {
+								ui.Column(c).FillWidth().Padding(12, 16).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() { d.connectionHeader(c, true) })
+								ui.Scroll(c.Key("connection-form-scroll")).Label("主机详情内容").Grow(1).FillWidth().Children(func() {
+									ui.Column(c).FillWidth().Padding(16).Gap(10).Children(func() { d.connectionView(c, true) })
+								})
+								ui.Column(c).FillWidth().Padding(10, 16).Gap(6).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() { d.connectionActions(c) })
+							})
+						}
+					})
+					return
+				}
 				ui.Scroll(c).Grow(1).FillWidth().Children(func() {
 					ui.Column(c).Padding(24).Gap(10).Children(func() {
 						switch d.workspace {
@@ -774,22 +789,7 @@ func (d *desktop) view(c *ui.Context) {
 							ui.Text(c, "云端工作区").FontSize(22).Bold()
 							d.cloudView(c)
 						default:
-							if d.connectionInspectorDocked(width) && d.editConnection {
-								ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Start).Children(func() {
-									ui.Column(c).Grow(1).Gap(10).Children(func() { d.profileView(c) })
-									panelHeight := height - 120
-									if panelHeight < 300 {
-										panelHeight = 300
-									}
-									ui.Column(c.Key("connection-inspector")).Label("主机详情面板").Width(connectionInspectorWidth).Height(panelHeight).Shrink(0).Background(t.Surface).Radius(10).Children(func() {
-										ui.Column(c).FillWidth().Padding(12, 16).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() { d.connectionHeader(c, true) })
-										ui.Scroll(c.Key("connection-form-scroll")).Label("主机详情内容").Grow(1).FillWidth().Children(func() {
-											ui.Column(c).FillWidth().Padding(16).Gap(10).Children(func() { d.connectionView(c, true) })
-										})
-										ui.Column(c).FillWidth().Padding(10, 16).Gap(6).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() { d.connectionActions(c) })
-									})
-								})
-							} else if d.editConnection {
+							if d.editConnection {
 								d.connectionView(c, false)
 							} else {
 								d.profileView(c)
@@ -967,7 +967,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.83"
+const version = "0.3.84"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {
@@ -977,7 +977,7 @@ func main() {
 		fmt.Println("Terminal233 " + version)
 		return
 	}
-	d := &desktop{settings: connectionSettings{Port: "22"}, status: "请填写连接信息", cloudURL: defaultCloudURL, forwardLocalPort: "0", forwardHost: "127.0.0.1", teamInviteHours: "24", teamInviteUses: "1"}
+	d := &desktop{settings: connectionSettings{Port: "22"}, cloudURL: defaultCloudURL, forwardLocalPort: "0", forwardHost: "127.0.0.1", teamInviteHours: "24", teamInviteUses: "1"}
 	d.terminalLightTheme, d.terminalDarkTheme, _ = terminalThemePair("")
 	if dir, err := os.UserConfigDir(); err != nil {
 		d.profileStoreBlocked = true

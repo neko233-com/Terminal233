@@ -113,7 +113,7 @@ func (d *desktop) profileGroupCards(c *ui.Context, cardWidth float32, draftBlock
 			card.Children(func() {
 				ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() { ui.Icon(c, fileIcon).Width(19).Height(19).TextColor(c.Theme().AccentText) })
 				ui.Column(c).Grow(1).Gap(3).Children(func() {
-					ui.Text(c, groupLeaf(group)).FontSize(14).Bold().Wrap()
+					ui.Text(c, groupLeaf(group)).FontSize(14).Bold().SingleLine()
 					ui.Text(c, fmt.Sprintf("%d 个连接", counts[group])).FontSize(12).TextColor(c.Theme().TextMuted)
 				})
 			})

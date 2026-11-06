@@ -155,75 +155,96 @@ func (d *desktop) profileView(c *ui.Context) {
 	columns := 1
 	if width >= 950 {
 		columns = 3
-	} else if width >= 610 {
+	} else if width >= 500 {
 		columns = 2
 	}
 	cardWidth := (width - 48 - float32(columns-1)*10) / float32(columns)
-	if d.cloudBatchCancel != nil {
-		ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
-			ui.Text(c, "云端批量操作进行中；取消会等待当前请求结束。").Wrap()
-			if ui.Button(c.Key("cloud-batch-cancel"), "取消云端批量操作").Clicked() {
-				d.cloudBatchCancel()
-				d.status = "正在取消；请等待当前请求和列表刷新结束。"
-			}
-		})
-	}
-	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
-		ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("连接列表：搜索连接或快速连接").Placeholder("搜索连接，或输入 ssh 用户@主机 -p 端口").Grow(1).OnSubmit(func() {
-			if d.hasUnsavedConnection() {
-				d.status = "请先保存或关闭当前主机详情。"
-				return
-			}
-			d.submitConnectionSearch()
-		})
-		if looksLikeQuickConnection(d.profileSearch) {
-			if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy || draftBlocked).Clicked() {
+	ui.Column(c).Fill().Gap(10).Children(func() {
+		if d.cloudBatchCancel != nil {
+			ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
+				ui.Text(c, "云端批量操作进行中；取消会等待当前请求结束。").Wrap()
+				if ui.Button(c.Key("cloud-batch-cancel"), "取消云端批量操作").Clicked() {
+					d.cloudBatchCancel()
+					d.status = "正在取消；请等待当前请求和列表刷新结束。"
+				}
+			})
+		}
+		ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.End).Children(func() {
+			ui.TextInput(c.Key("profile-search"), &d.profileSearch).Label("连接列表：搜索连接或快速连接").Placeholder("搜索主机或输入 SSH 地址").Grow(1).OnSubmit(func() {
+				if d.hasUnsavedConnection() {
+					d.status = "请先保存或关闭当前主机详情。"
+					return
+				}
 				d.submitConnectionSearch()
+			})
+			if looksLikeQuickConnection(d.profileSearch) {
+				if ui.Button(c.Key("quick-connect-open"), "填写连接信息").Disabled(d.busy || draftBlocked).Clicked() {
+					d.submitConnectionSearch()
+				}
 			}
-		}
+		})
+		ui.Row(c).FillWidth().Wrap().Gap(8).Padding(0, 0, 10, 0).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).AlignItems(ui.Center).Children(func() {
+			if ui.Button(c.Key("connection-new"), "+ 新建连接").Disabled(draftBlocked).Clicked() {
+				d.settings = connectionSettings{Port: "22"}
+				d.showKeyOptions = false
+				d.settingsFromCloud = false
+				d.cloudFormSources = nil
+				d.cloudFormVersions = nil
+				d.profileGroup = d.profileFilter
+				d.profileLabel = ""
+				d.fingerprint = ""
+				d.changedFingerprint = ""
+				d.expectedFingerprint = ""
+				d.selectedProfile = ""
+				d.selectedCloudProfile = ""
+				d.showProfileInspector = false
+				d.profileInspectorAt = time.Time{}
+				d.editConnection = true
+				d.captureConnectionDraft()
+			}
+			local := ui.Button(c.Key("profile-open-local"), "").Label("本机终端").Tooltip("打开本机终端").Gap(8).Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions)
+			local.Children(func() {
+				ui.Icon(c, terminalIcon).Width(16).Height(16).TextColor(c.Theme().TextMuted)
+				ui.Text(c, "本机终端")
+			})
+			if local.Clicked() {
+				d.openLocalTerminal()
+			}
+			label := "分组管理"
+			if d.showGroupControls {
+				label = "收起分组管理"
+			}
+			if terminalActionButton(c, "group-controls-toggle", label, fileIcon, d.showGroupControls, false).Clicked() {
+				d.showGroupControls = !d.showGroupControls
+				d.confirmGroupDelete = false
+			}
+			label, accessible := "更多操作", "更多连接操作"
+			if d.showCompactProfileTools {
+				label, accessible = "收起操作", "收起连接操作"
+			} else if d.profileSource == "local" {
+				label = "本地 · 更多"
+			} else if d.profileSource == "cloud" {
+				label = "云端 · 更多"
+			}
+			var more ui.Element
+			if !d.showCompactProfileTools && d.profileSource != "" {
+				more = ui.Button(c.Key("profile-tools-toggle"), label).Label(accessible).Tooltip(label)
+			} else {
+				more = terminalActionButton(c, "profile-tools-toggle", accessible, moreIcon, d.showCompactProfileTools, false).Tooltip(label)
+			}
+			if more.Clicked() {
+				d.showCompactProfileTools = !d.showCompactProfileTools
+			}
+		})
+		ui.Scroll(c.Key("profile-list-scroll")).Label("主机列表").Grow(1).FillWidth().Children(func() {
+			ui.Column(c).FillWidth().Gap(10).Children(func() {
+				d.profileList(c, cardWidth, compact, inspectorCapable, draftBlocked)
+			})
+		})
 	})
-	ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
-		if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Disabled(draftBlocked).Clicked() {
-			d.settings = connectionSettings{Port: "22"}
-			d.showKeyOptions = false
-			d.settingsFromCloud = false
-			d.cloudFormSources = nil
-			d.cloudFormVersions = nil
-			d.profileGroup = d.profileFilter
-			d.profileLabel = ""
-			d.fingerprint = ""
-			d.changedFingerprint = ""
-			d.expectedFingerprint = ""
-			d.selectedProfile = ""
-			d.selectedCloudProfile = ""
-			d.showProfileInspector = false
-			d.profileInspectorAt = time.Time{}
-			d.editConnection = true
-			d.captureConnectionDraft()
-		}
-		if ui.Button(c.Key("profile-open-local"), "本机终端").Disabled(d.busy || len(d.sessions) >= maxWorkspaceSessions).Clicked() {
-			d.openLocalTerminal()
-		}
-		label := "分组管理"
-		if d.showGroupControls {
-			label = "收起分组管理"
-		}
-		if ui.Button(c.Key("group-controls-toggle"), label).Clicked() {
-			d.showGroupControls = !d.showGroupControls
-			d.confirmGroupDelete = false
-		}
-		label, accessible := "更多操作", "更多连接操作"
-		if d.showCompactProfileTools {
-			label, accessible = "收起操作", "收起连接操作"
-		} else if d.profileSource == "local" {
-			label = "本地 · 更多"
-		} else if d.profileSource == "cloud" {
-			label = "云端 · 更多"
-		}
-		if ui.Button(c.Key("profile-tools-toggle"), label).Label(accessible).Clicked() {
-			d.showCompactProfileTools = !d.showCompactProfileTools
-		}
-	})
+}
+
+func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspectorCapable, draftBlocked bool) {
 	if d.profileRecent {
 		ui.Text(c, "最近连接").FontSize(13).TextColor(c.Theme().TextMuted)
 	} else if d.profileFavorites {

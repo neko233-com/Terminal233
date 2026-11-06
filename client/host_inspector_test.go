@@ -1,12 +1,39 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 )
+
+func TestHostListKeepsToolbarFixedAndUsesTwoColumnsWithInspector(t *testing.T) {
+	d := &desktop{workspace: "connections", profileGroups: []string{"开发", "生产"}}
+	for i := 0; i < 40; i++ {
+		d.profiles = append(d.profiles, profile{ID: profileID(fmt.Sprint(i + 1)), Label: fmt.Sprintf("host-%02d", i), Settings: connectionSettings{Host: fmt.Sprintf("host-%02d.test", i), Port: "22", User: "alice"}})
+	}
+	d.loadProfile(d.profiles[0])
+	view := ui.NewTester(d.view, 1200, 800)
+	search, searchOK := view.Find("连接列表：搜索连接或快速连接")
+	create, createOK := view.Find("+ 新建连接")
+	list, listOK := view.Find("主机列表")
+	first, firstOK := view.Find("打开分组：开发")
+	second, secondOK := view.Find("打开分组：生产")
+	if !searchOK || !createOK || !listOK || !firstOK || !secondOK || second.X < first.X+first.W-1 || second.Y != first.Y {
+		t.Fatalf("docked host layout is not usable: search=%+v create=%+v list=%+v groups=%+v %+v", search, create, list, first, second)
+	}
+	view.Scroll(list.X+list.W/2, list.Y+list.H/2, 0, 1800)
+	searchAfter, okSearch := view.Find("连接列表：搜索连接或快速连接")
+	createAfter, okCreate := view.Find("+ 新建连接")
+	if !okSearch || !okCreate || searchAfter.Y != search.Y || createAfter.Y != create.Y {
+		t.Fatal("host toolbar moved while the list scrolled")
+	}
+	if end, ok := view.Find("host-39"); !ok || end.Y+end.H/2 < list.Y || end.Y+end.H/2 > list.Y+list.H {
+		t.Fatalf("scrolling did not reach the end of the host list: %+v", end)
+	}
+}
 
 func TestHostInspectorKeepsListVisibleAndEditsInPlace(t *testing.T) {
 	d := &desktop{workspace: "connections", profiles: []profile{{ID: "1", Label: "生产机", Group: "工作", Settings: connectionSettings{Host: "one.test", Port: "22", User: "alice"}}}}
