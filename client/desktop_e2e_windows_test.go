@@ -1195,6 +1195,22 @@ func TestDesktopNativeWindow(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	tree = fmt.Sprint(call("tree"))
+	if !strings.Contains(tree, "显示点文件") || strings.Contains(tree, "file-.hidden") {
+		t.Fatalf("dotfiles should initially be hidden: %s", tree)
+	}
+	call("act", map[string]any{"key": "file-toggle-dotfiles", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tree = fmt.Sprint(call("tree"))
+		if strings.Contains(tree, "隐藏点文件") && strings.Contains(tree, "file-.hidden") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(tree, "隐藏点文件") || !strings.Contains(tree, "file-.hidden") {
+		t.Fatalf("dotfile show failed: %s", tree)
+	}
 	call("act", map[string]any{"key": "file-toggle-dotfiles", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
