@@ -54,7 +54,7 @@ func (d *desktop) reconnectCurrentSession() {
 				s.terminalSearchOpen, s.terminalSearchText = false, ""
 				s.term, s.shell, s.files, s.refreshPending = term, shell, nil, false
 				if group := d.terminalGroupFor(s.id); group != nil {
-					group.broadcast = false
+					group.broadcast, group.broadcastMembers = false, nil
 				}
 				d.bindTerminalBroadcast(s)
 				s.selectedFile, s.fileStatus = "", ""

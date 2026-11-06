@@ -16,6 +16,7 @@ type terminalGroup struct {
 	focused                   int
 	grid                      bool
 	broadcast                 bool
+	broadcastMembers          map[int]bool
 	showAdd                   bool
 	renameOpen                bool
 	renameDraft, renameStatus string
@@ -191,7 +192,7 @@ func (d *desktop) detachGroupSession(id int) int {
 	if g == nil {
 		return 0
 	}
-	g.broadcast = false
+	g.broadcast, g.broadcastMembers = false, nil
 	index := 0
 	for i, member := range g.members {
 		if member == id {
@@ -264,7 +265,7 @@ func (d *desktop) addTerminalGroupMember(group *terminalGroup, id int) error {
 	if !found {
 		return errors.New("会话已结束或不存在")
 	}
-	group.broadcast = false
+	group.broadcast, group.broadcastMembers = false, nil
 	group.members = append(group.members, id)
 	group.focused = id
 	d.selectSession(id)
@@ -402,6 +403,7 @@ func (d *desktop) terminalGroupView(c *ui.Context, g *terminalGroup, width float
 					if dir := sessionTerminalDirectory(s); dir != "" {
 						ui.Text(c, dir).FontSize(11).TextColor(c.Theme().TextMuted).MaxWidth(160).SingleLine().Tooltip(dir)
 					}
+					d.broadcastMemberButton(c, g, s)
 					if ui.Button(c.Key(fmt.Sprintf("group-close-member-%d", s.id)), "×").Label("关闭终端：" + s.label).BorderWidth(0).Background(c.Theme().Surface).Width(30).Disabled(d.busy).Clicked() {
 						closeID = s.id
 					}
@@ -455,6 +457,7 @@ func (d *desktop) terminalGroupView(c *ui.Context, g *terminalGroup, width float
 							explicitFocusID = s.id
 							d.selectSession(s.id)
 						}
+						d.broadcastMemberButton(c, g, s)
 						if ui.Button(c.Key(fmt.Sprintf("group-close-member-%d", s.id)), "×").Label("关闭终端：" + s.label).BorderWidth(0).Background(c.Theme().Background).Radius(5).Width(30).Disabled(d.busy).Clicked() {
 							closeID = s.id
 						}

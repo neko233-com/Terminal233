@@ -774,7 +774,11 @@ func (d *desktop) view(c *ui.Context) {
 								d.toggleGroupBroadcast(group)
 							}
 							if group.broadcast {
-								ui.Text(c, fmt.Sprintf("广播 · %d", len(group.members))).FontSize(12).TextColor(t.Accent)
+								status := "广播"
+								if !group.broadcastMembers[d.currentSession] || len(group.broadcastMembers) < 2 {
+									status = "广播暂停"
+								}
+								ui.Text(c, fmt.Sprintf("%s · %d/%d", status, len(group.broadcastMembers), len(group.members))).FontSize(12).TextColor(t.Accent)
 							}
 							d.groupAddButton(c, group)
 						}
@@ -1089,7 +1093,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.103"
+const version = "0.3.104"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

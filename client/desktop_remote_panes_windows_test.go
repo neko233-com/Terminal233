@@ -809,6 +809,14 @@ func TestDesktopRemotePanes(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(waitKey("toggle-broadcast")["description"]), "关闭广播输入") {
 		t.Fatal("broadcast did not enable")
 	}
+	press("group-broadcast-member-15")
+	until = time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(waitKey("group-broadcast-member-15")["label"]), "加入广播") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(waitKey("group-broadcast-member-15")["label"]), "加入广播") {
+		t.Fatal("local terminal was not excluded from broadcast")
+	}
 	result := call("tree", nil)["result"].(map[string]any)
 	var terminalID string
 	for _, entry := range result["nodes"].([]any) {
@@ -842,5 +850,18 @@ func TestDesktopRemotePanes(t *testing.T) {
 			t.Fatal(writeErr)
 		}
 	}
+	press("group-focus-15")
+	waitSelected("group-focus-15")
+	press("terminal-search-toggle")
+	setPath("terminal-search-input", "NEKO_BROADCAST_TEST")
+	until = time.Now().Add(10 * time.Second)
+	for time.Now().Before(until) && !strings.Contains(fmt.Sprint(call("tree", nil)), "没有匹配结果") {
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(call("tree", nil)), "没有匹配结果") {
+		t.Fatal("excluded local terminal received the broadcast")
+	}
+	press("terminal-search-close")
+	waitGone("terminal-search-input")
 	press("toggle-broadcast")
 }
