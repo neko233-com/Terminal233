@@ -437,6 +437,7 @@ func (d *desktop) terminalGroupView(c *ui.Context, g *terminalGroup, width float
 				})
 			}
 			view := terminal.View(c, s.term).Label("终端：" + groupSessionName(g, s)).Grow(1).FillWidth()
+			d.terminalCompletionView(c, s, view)
 			if d.pendingTerminalFocus == s.id {
 				view.Focus()
 				d.pendingTerminalFocus = 0

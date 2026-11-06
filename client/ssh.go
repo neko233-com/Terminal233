@@ -57,14 +57,16 @@ func inspectHost(s connectionSettings) (string, error) {
 }
 
 type remoteShell struct {
-	client      *ssh.Client
-	done        <-chan struct{}
-	session     *ssh.Session
-	in          io.WriteCloser
-	out         io.Reader
-	monitorOnce sync.Once
-	monitorGate chan struct{}
-	integration shellIntegration
+	client           *ssh.Client
+	done             <-chan struct{}
+	session          *ssh.Session
+	in               io.WriteCloser
+	out              io.Reader
+	monitorOnce      sync.Once
+	monitorGate      chan struct{}
+	integration      shellIntegration
+	readPending      []byte
+	readPendingError error
 }
 
 func (s *remoteShell) takeMonitorSlot() bool {
@@ -78,14 +80,38 @@ func (s *remoteShell) takeMonitorSlot() bool {
 }
 
 func (s *remoteShell) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if len(s.readPending) > 0 {
+		n := min(len(p), len(s.readPending))
+		n = s.integration.feedUntilPrompt(s.readPending[:n])
+		copy(p, s.readPending[:n])
+		clear(s.readPending[:n])
+		s.readPending = s.readPending[n:]
+		if len(s.readPending) == 0 && s.readPendingError != nil {
+			err := s.readPendingError
+			s.readPendingError = nil
+			return n, err
+		}
+		return n, nil
+	}
 	n, err := s.out.Read(p)
 	if n > 0 {
-		s.integration.feed(p[:n])
+		used := s.integration.feedUntilPrompt(p[:n])
+		if used < n {
+			s.readPending = append(s.readPending[:0], p[used:n]...)
+			clear(p[used:n])
+			s.readPendingError = err
+			return used, nil
+		}
 	}
 	return n, err
 }
-func (s *remoteShell) Write(p []byte) (int, error) { return s.in.Write(p) }
-func (s *remoteShell) Resize(cols, rows int) error { return s.session.WindowChange(rows, cols) }
+
+func (s *remoteShell) NekoPromptState() (uint64, bool) { return s.integration.promptState() }
+func (s *remoteShell) Write(p []byte) (int, error)     { return s.in.Write(p) }
+func (s *remoteShell) Resize(cols, rows int) error     { return s.session.WindowChange(rows, cols) }
 func (s *remoteShell) Close() error {
 	if s.in != nil {
 		_ = s.in.Close()

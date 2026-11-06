@@ -182,7 +182,24 @@ func patchTerminal(s string) (string, error) {
 	nekoText func(string)
 	nekoPaste func(transfer.Data)
 	nekoEncoder *vt.KeyEncoder
+	nekoPromptSerial uint64
+	nekoCompletionInstalled bool
+	nekoOriginalKey func(ui.Modifiers, ui.Key) bool
+	nekoPromptX, nekoPromptY, nekoPromptCols, nekoPromptRows int
 	opts Options`)
+	if err != nil {
+		return "", err
+	}
+	s, err = replaceOnce(s, "\t\tt.term.Write(p)\n\t\tev, t.events = t.events, events{}", `		t.term.Write(p)
+		if source, ok := t.src.(interface { NekoPromptState() (uint64, bool) }); ok {
+			serial, active := source.NekoPromptState()
+			if active && serial != 0 && serial != t.nekoPromptSerial {
+				t.nekoPromptSerial = serial
+				t.nekoPromptX, t.nekoPromptY = t.term.Cursor()
+				t.nekoPromptCols, t.nekoPromptRows = t.term.Size()
+			}
+		}
+		ev, t.events = t.events, events{}`)
 	if err != nil {
 		return "", err
 	}
@@ -193,7 +210,50 @@ func patchTerminal(s string) (string, error) {
 	return replaceOnce(s, "\tt.endSearch()\n\tt.term.Free()", "\tt.endSearch()\n\tif t.nekoEncoder != nil { t.nekoEncoder.Free(); t.nekoEncoder = nil }\n\tt.nekoKey, t.nekoText, t.nekoPaste = nil, nil, nil\n\tt.term.Free()")
 }
 
-const terminalHooks = `// NekoSetInputHooks registers user input hooks. Program replies are excluded.
+const terminalHooks = `// NekoSetCompletionKey installs a UI-thread key handler before terminal bindings.
+func (t *Terminal) NekoSetCompletionKey(handler func(ui.Modifiers, ui.Key) bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed { return }
+	if !t.nekoCompletionInstalled { t.nekoOriginalKey, t.nekoCompletionInstalled = t.opts.OnKey, true }
+	original := t.nekoOriginalKey
+	t.opts.OnKey = func(mods ui.Modifiers, key ui.Key) bool {
+		if handler != nil && handler(mods, key) { return true }
+		return original != nil && original(mods, key)
+	}
+}
+
+// NekoPromptLine reads only a shell-reported single-line prompt at the cursor.
+func (t *Terminal) NekoPromptLine() (string, int, int, int, int, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed || t.term == nil || t.nekoPromptSerial == 0 || t.term.AltScreen() || !t.term.AtBottom() { return "", 0, 0, 0, 0, false }
+	source, ok := t.src.(interface { NekoPromptState() (uint64, bool) })
+	if !ok { return "", 0, 0, 0, 0, false }
+	serial, active := source.NekoPromptState()
+	cols, rows := t.term.Size()
+	x, y := t.term.Cursor()
+	if !active || serial != t.nekoPromptSerial || cols != t.nekoPromptCols || rows != t.nekoPromptRows || y != t.nekoPromptY || x < t.nekoPromptX || x >= cols-1 { return "", 0, 0, 0, 0, false }
+	text, positions := t.term.RowText(y)
+	var out strings.Builder
+	for i, r := range text {
+		if positions[i] >= t.nekoPromptX && positions[i] < x { out.WriteRune(r) }
+		if positions[i] >= x && r != ' ' { return "", 0, 0, 0, 0, false }
+	}
+	return out.String(), x, y, cols, rows, true
+}
+
+// NekoCaretOffset gives the current cursor position in DIPs inside its view.
+func (t *Terminal) NekoCaretOffset() (float32, float32, float32, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	v := t.v
+	if t.term == nil || v == nil || v.scale <= 0 || v.cellW <= 0 || v.cellH <= 0 { return 0, 0, 0, false }
+	x, y := t.term.Cursor()
+	return float32(v.ox + x*v.cellW)/v.scale, float32(v.oy + (y+1)*v.cellH)/v.scale, float32(v.cellH)/v.scale, true
+}
+
+// NekoSetInputHooks registers user input hooks. Program replies are excluded.
 func (t *Terminal) NekoSetInputHooks(key func(int, int, int, int, int, string, bool), text func(string), paste func(transfer.Data)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

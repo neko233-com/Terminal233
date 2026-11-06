@@ -57,6 +57,11 @@ func (d *desktop) settingsView(c *ui.Context, height float32) {
 			if ui.Select(c.Key("terminal-theme"), &selectedTheme, terminalThemeLabels()).Label("选择终端配色").FillWidth().Changed() {
 				d.changeTerminalTheme(terminalThemeID(selectedTheme))
 			}
+			autocomplete := !d.autocompleteDisabled
+			if ui.Checkbox(c.Key("terminal-autocomplete"), &autocomplete, "自动补全").Label("终端自动补全").Changed() {
+				d.autocompleteDisabled = !autocomplete
+				d.savePreference("autocomplete-disabled", d.autocompleteDisabled)
+			}
 			ui.Text(c, "终端分屏布局").FontSize(12).TextColor(c.Theme().TextMuted)
 			layout := splitLayoutLabel(d.splitLayout)
 			if ui.Select(c.Key("split-layout"), &layout, []string{"自动布局", "左右分屏", "上下分屏"}).Label("选择分屏布局").FillWidth().Changed() {

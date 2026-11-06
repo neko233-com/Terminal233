@@ -30,12 +30,16 @@ func (d *desktop) bindTerminalBroadcast(s *workspaceSession) {
 		return
 	}
 	source := s.term
+	d.bindTerminalCompletion(s)
 	hooks, ok := any(source).(broadcastTerminal)
 	if !ok {
 		return
 	}
 	hooks.NekoSetInputHooks(
 		func(action, key, mods, consumed, unshifted int, text string, composing bool) {
+			if action != 0 && text != "" {
+				d.noteCompletionText(s, text, false)
+			}
 			targets, group := d.broadcastTargets(s.id, source)
 			for _, target := range targets {
 				if !any(target.term).(broadcastTerminal).NekoReplayKey(action, key, mods, consumed, unshifted, text, composing) {
@@ -46,6 +50,7 @@ func (d *desktop) bindTerminalBroadcast(s *workspaceSession) {
 			}
 		},
 		func(text string) {
+			d.noteCompletionText(s, text, true)
 			targets, group := d.broadcastTargets(s.id, source)
 			for _, target := range targets {
 				if !any(target.term).(broadcastTerminal).NekoReplayText(text) {
@@ -56,6 +61,9 @@ func (d *desktop) bindTerminalBroadcast(s *workspaceSession) {
 			}
 		},
 		func(data transfer.Data) {
+			if _, _, ok := d.completionCurrent(s); ok {
+				s.completion.invalidate()
+			}
 			targets, _ := d.broadcastTargets(s.id, source)
 			for _, target := range targets {
 				target.term.PasteData(data)

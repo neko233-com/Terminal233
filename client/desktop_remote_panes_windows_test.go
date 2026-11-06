@@ -884,6 +884,25 @@ func TestDesktopRemotePanes(t *testing.T) {
 	if strings.Contains(fmt.Sprint(call("tree", nil)), "运行中的命令：tail -f app.log") {
 		t.Fatal("finished shell command stayed visible")
 	}
+	// The same SSH fixture reports a prompt, so the native UI can complete a prefix.
+	call("input", map[string]any{"events": []any{map[string]any{"type": "text", "text": "\r\n$ \x1b]633;B\x07git"}}})
+	waitKey("terminal-completion-17-0")
+	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_COMPLETION"); capturePath != "" {
+		result := call("capture", nil)["result"].(map[string]any)
+		png, decodeErr := base64.StdEncoding.DecodeString(fmt.Sprint(result["png"]))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if writeErr := os.WriteFile(capturePath, png, 0600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	call("input", map[string]any{"events": []any{map[string]any{"type": "key", "key": "Tab"}}})
+	press("terminal-search-toggle")
+	setPath("terminal-search-input", "git status")
+	waitKey("terminal-search-next")
+	press("terminal-search-close")
+	waitGone("terminal-search-input")
 	// Real-time input in focus mode is sent to the other workspace terminals.
 	press("toggle-broadcast")
 	until = time.Now().Add(5 * time.Second)

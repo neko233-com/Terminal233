@@ -116,6 +116,7 @@ type workspaceSession struct {
 	id                                                              int
 	label                                                           string
 	fileOnly                                                        bool
+	completion                                                      terminalCompletion
 	term                                                            *terminal.Terminal
 	shell                                                           *remoteShell
 	active                                                          connectionSettings
@@ -388,6 +389,12 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 	if second == nil {
 		d.splitFocusedSession = 0
 		view := terminal.View(c, d.term).Fill()
+		for _, session := range d.sessions {
+			if session.id == d.currentSession {
+				d.terminalCompletionView(c, session, view)
+				break
+			}
+		}
 		if d.pendingTerminalFocus == d.currentSession && d.currentSession != 0 {
 			view.Focus()
 			d.pendingTerminalFocus = 0
@@ -417,6 +424,7 @@ func (d *desktop) terminalWorkspace(c *ui.Context, width float32) {
 				d.selectSession(s.id)
 			}
 			view := terminal.View(c, s.term).Label("终端：" + s.label).Grow(1).FillWidth()
+			d.terminalCompletionView(c, s, view)
 			if d.pendingTerminalFocus == s.id {
 				view.Focus()
 				d.pendingTerminalFocus = 0

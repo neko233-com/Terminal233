@@ -27,6 +27,7 @@ type desktop struct {
 	lightTheme                                                                              bool
 	terminalFontSize                                                                        int
 	terminalTheme                                                                           string
+	autocompleteDisabled                                                                    bool
 	splitLayout                                                                             string
 	splitHorizontalPercent, splitVerticalPercent                                            float32
 	terminalFilePercent                                                                     float32
@@ -519,6 +520,17 @@ func (d *desktop) connect() {
 func (d *desktop) view(c *ui.Context) {
 	d.serviceProfileAutosave(c)
 	d.workspaceShortcuts(c)
+	if d.workspace != "terminal" {
+		for _, s := range d.sessions {
+			if s.completion.pending {
+				s.completion.invalidate()
+			}
+			s.completion.visible = false
+			s.completion.prefix = ""
+			s.completion.dismissed = ""
+			s.completion.items = nil
+		}
+	}
 	if d.workspace != "local-archive" {
 		d.localArchivePassword = ""
 		d.localArchivePending = nil
@@ -1257,7 +1269,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.127"
+const version = "0.3.128"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

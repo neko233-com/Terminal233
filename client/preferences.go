@@ -19,6 +19,7 @@ type workspacePreferences struct {
 	ShowFiles              bool    `json:"show_files"`
 	TerminalFontSize       int     `json:"terminal_font_size"`
 	TerminalTheme          string  `json:"terminal_theme,omitempty"`
+	AutocompleteDisabled   bool    `json:"autocomplete_disabled,omitempty"`
 	ExternalEditor         string  `json:"external_editor,omitempty"`
 	SplitLayout            string  `json:"split_layout,omitempty"`
 	TerminalFilePercent    float32 `json:"terminal_file_percent,omitempty"`
@@ -74,6 +75,7 @@ func (d *desktop) loadPreferences(path string) error {
 	d.railExpanded = p.SidebarExpanded
 	d.externalEditorPath = p.ExternalEditor
 	d.terminalFontSize = p.TerminalFontSize
+	d.autocompleteDisabled = p.AutocompleteDisabled
 	d.splitLayout = p.SplitLayout
 	d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent
 	light, dark, err := terminalThemePair(p.TerminalTheme)
@@ -131,6 +133,8 @@ func writePreference(path, field string, value bool) error {
 			p.SidebarExpanded = value
 		case "files":
 			p.ShowFiles = value
+		case "autocomplete-disabled":
+			p.AutocompleteDisabled = value
 		default:
 			return errors.New("未知设置")
 		}
