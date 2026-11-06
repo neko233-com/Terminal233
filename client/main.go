@@ -37,6 +37,9 @@ type desktop struct {
 	splitHorizontalPercent, splitVerticalPercent                                            float32
 	terminalFilePercent                                                                     float32
 	fileWorkspacePercent                                                                    float32
+	terminalFileStackPercent                                                                float32
+	navigationWidth, inspectorWidth                                                         float32
+	quickPanelWidth                                                                         float32
 	monitorCancel                                                                           context.CancelFunc
 	monitorGeneration, monitorSession                                                       int
 	monitorStatus                                                                           string
@@ -617,210 +620,207 @@ func (d *desktop) view(c *ui.Context) {
 			ui.Text(c, d.preferencesStatus).FontSize(12).TextColor(t.TextMuted).FillWidth().Padding(4, 12).Wrap()
 		}
 		showSidebar := d.sidebarVisible()
-		workspaceWidth := width
-		if showSidebar {
-			workspaceWidth -= d.sidebarWidth(width)
-		}
+		workspaceWidth := d.workspaceContentWidth(width)
 		compactAuxiliaryPanels := height < 650 || (workspaceWidth < 940 && height < 1000)
-		ui.Row(c).Grow(1).FillWidth().Children(func() {
-			if showSidebar {
-				ui.Scroll(c).Width(d.sidebarWidth(width)).FillHeight().Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
-					if !d.railExpanded {
-						d.compactWorkspaceNavigation(c)
-						return
+		if d.workspace != "terminal" && d.monitorCancel != nil {
+			d.stopMonitor()
+		}
+		navigation := func() {
+			ui.Scroll(c).Fill().Background(t.Surface).Children(func() {
+				if !d.railExpanded {
+					d.compactWorkspaceNavigation(c)
+					return
+				}
+				ui.Column(c).Label("工作区").Padding(12, 16).Gap(8).Children(func() {
+					if navigationButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
+						d.workspace = "connections"
+						if d.editConnection {
+							d.closeConnectionEditor()
+						}
 					}
-					ui.Column(c).Label("工作区").Padding(12, 16).Gap(8).Children(func() {
-						if navigationButton(c, "nav-connections", "SSH 连接", d.workspace == "" || d.workspace == "connections").Clicked() {
+					if navigationButton(c, "nav-terminal", "终端", d.workspace == "terminal").Clicked() {
+						d.workspace = "terminal"
+					}
+					if navigationButton(c, "nav-files", "远程文件", d.workspace == "files").Clicked() {
+						d.workspace = "files"
+						if d.term != nil && d.shell == nil && d.files == nil && !d.busy {
+							d.refreshFiles()
+						}
+					}
+					if navigationButton(c, "nav-forward", "端口转发", d.workspace == "forward").Clicked() {
+						d.workspace = "forward"
+					}
+					if navigationButton(c, "nav-snippets", "命令片段", d.workspace == "snippets").Clicked() {
+						d.workspace = "snippets"
+					}
+					if navigationButton(c, "nav-identities", "身份", d.workspace == "identities").Clicked() {
+						if d.closeConnectionForNavigation() {
+							d.workspace = "identities"
+						}
+					}
+					if navigationButton(c, "nav-known-hosts", "已知主机", d.workspace == "known-hosts").Clicked() {
+						if d.closeConnectionForNavigation() {
+							d.workspace = "known-hosts"
+						}
+					}
+					if navigationButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
+						d.workspace = "cloud"
+					}
+					filterLabel := "连接筛选"
+					if d.showConnectionNavigation {
+						filterLabel = "收起连接筛选"
+					} else if d.profileFavorites {
+						filterLabel = "筛选：收藏"
+					} else if d.profileRecent {
+						filterLabel = "筛选：最近"
+					} else if d.profileFilter != "" {
+						filterLabel = "分组：" + d.profileFilter
+					}
+					ui.Row(c).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
+						if ui.Button(c.Key("connection-navigation-toggle"), filterLabel).Label("连接筛选").Grow(1).Clicked() {
+							d.showConnectionNavigation = !d.showConnectionNavigation
+						}
+						if terminalActionButton(c, "workspace-rail-compact", "使用图标导航", railCompactIcon, false, false).Clicked() {
+							d.setRailExpanded(false)
+						}
+					})
+					if d.showConnectionNavigation {
+						connectionCount := len(d.profiles) + 1
+						if d.cloud != nil {
+							connectionCount += len(d.accounts)
+						}
+						if navigationButton(c, "group-all", fmt.Sprintf("全部连接  %d", connectionCount), d.profileFilter == "" && !d.profileFavorites && !d.profileRecent).Disabled(draftBlocked).Clicked() {
+							if !d.closeConnectionForNavigation() {
+								return
+							}
 							d.workspace = "connections"
-							if d.editConnection {
-								d.closeConnectionEditor()
+							d.profileFilter = ""
+							d.profileFavorites = false
+							d.profileRecent = false
+						}
+						isCloudGroups := d.profileSource == "cloud"
+						groups, counts := d.groupTree()
+						folded := d.foldedGroups
+						if isCloudGroups {
+							groups, counts = d.cloudGroupTree()
+							folded = d.cloudFoldedGroups
+						}
+						favorites := 0
+						recent := 0
+						for _, p := range d.profiles {
+							if p.Favorite {
+								favorites++
+							}
+							if p.LastConnected > 0 {
+								recent++
 							}
 						}
-						if navigationButton(c, "nav-terminal", "终端", d.workspace == "terminal").Clicked() {
-							d.workspace = "terminal"
-						}
-						if navigationButton(c, "nav-files", "远程文件", d.workspace == "files").Clicked() {
-							d.workspace = "files"
-							if d.term != nil && d.shell == nil && d.files == nil && !d.busy {
-								d.refreshFiles()
+						if navigationButton(c, "group-favorites", fmt.Sprintf("收藏的连接  %d", favorites), d.profileFavorites).Disabled(draftBlocked).Clicked() {
+							if !d.closeConnectionForNavigation() {
+								return
+							}
+							d.workspace = "connections"
+							d.profileFilter = ""
+							d.profileFavorites = true
+							d.profileRecent = false
+							if d.profileSource == "cloud" {
+								d.profileSource = "local"
 							}
 						}
-						if navigationButton(c, "nav-forward", "端口转发", d.workspace == "forward").Clicked() {
-							d.workspace = "forward"
-						}
-						if navigationButton(c, "nav-snippets", "命令片段", d.workspace == "snippets").Clicked() {
-							d.workspace = "snippets"
-						}
-						if navigationButton(c, "nav-identities", "身份", d.workspace == "identities").Clicked() {
-							if d.closeConnectionForNavigation() {
-								d.workspace = "identities"
+						if navigationButton(c, "group-recent", fmt.Sprintf("最近连接  %d", recent), d.profileRecent).Disabled(draftBlocked).Clicked() {
+							if !d.closeConnectionForNavigation() {
+								return
+							}
+							d.workspace = "connections"
+							d.profileFilter = ""
+							d.profileFavorites = false
+							d.profileRecent = true
+							if d.profileSource == "cloud" {
+								d.profileSource = "local"
 							}
 						}
-						if navigationButton(c, "nav-known-hosts", "已知主机", d.workspace == "known-hosts").Clicked() {
-							if d.closeConnectionForNavigation() {
-								d.workspace = "known-hosts"
+						parents := groupsWithChildren(groups)
+						for _, group := range groups {
+							name := group
+							if groupHidden(name, folded) {
+								continue
 							}
-						}
-						if navigationButton(c, "nav-cloud", "云同步与团队", d.workspace == "cloud").Clicked() {
-							d.workspace = "cloud"
-						}
-						filterLabel := "连接筛选"
-						if d.showConnectionNavigation {
-							filterLabel = "收起连接筛选"
-						} else if d.profileFavorites {
-							filterLabel = "筛选：收藏"
-						} else if d.profileRecent {
-							filterLabel = "筛选：最近"
-						} else if d.profileFilter != "" {
-							filterLabel = "分组：" + d.profileFilter
-						}
-						ui.Row(c).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
-							if ui.Button(c.Key("connection-navigation-toggle"), filterLabel).Label("连接筛选").Grow(1).Clicked() {
-								d.showConnectionNavigation = !d.showConnectionNavigation
-							}
-							if terminalActionButton(c, "workspace-rail-compact", "使用图标导航", railCompactIcon, false, false).Clicked() {
-								d.setRailExpanded(false)
-							}
-						})
-						if d.showConnectionNavigation {
-							connectionCount := len(d.profiles) + 1
-							if d.cloud != nil {
-								connectionCount += len(d.accounts)
-							}
-							if navigationButton(c, "group-all", fmt.Sprintf("全部连接  %d", connectionCount), d.profileFilter == "" && !d.profileFavorites && !d.profileRecent).Disabled(draftBlocked).Clicked() {
-								if !d.closeConnectionForNavigation() {
-									return
+							ui.Row(c).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
+								if depth := groupDepth(name); depth > 0 {
+									ui.Box(c).Width(float32(depth * 10)).Shrink(0)
 								}
-								d.workspace = "connections"
-								d.profileFilter = ""
-								d.profileFavorites = false
-								d.profileRecent = false
-							}
-							isCloudGroups := d.profileSource == "cloud"
-							groups, counts := d.groupTree()
-							folded := d.foldedGroups
-							if isCloudGroups {
-								groups, counts = d.cloudGroupTree()
-								folded = d.cloudFoldedGroups
-							}
-							favorites := 0
-							recent := 0
-							for _, p := range d.profiles {
-								if p.Favorite {
-									favorites++
-								}
-								if p.LastConnected > 0 {
-									recent++
-								}
-							}
-							if navigationButton(c, "group-favorites", fmt.Sprintf("收藏的连接  %d", favorites), d.profileFavorites).Disabled(draftBlocked).Clicked() {
-								if !d.closeConnectionForNavigation() {
-									return
-								}
-								d.workspace = "connections"
-								d.profileFilter = ""
-								d.profileFavorites = true
-								d.profileRecent = false
-								if d.profileSource == "cloud" {
-									d.profileSource = "local"
-								}
-							}
-							if navigationButton(c, "group-recent", fmt.Sprintf("最近连接  %d", recent), d.profileRecent).Disabled(draftBlocked).Clicked() {
-								if !d.closeConnectionForNavigation() {
-									return
-								}
-								d.workspace = "connections"
-								d.profileFilter = ""
-								d.profileFavorites = false
-								d.profileRecent = true
-								if d.profileSource == "cloud" {
-									d.profileSource = "local"
-								}
-							}
-							parents := groupsWithChildren(groups)
-							for _, group := range groups {
-								name := group
-								if groupHidden(name, folded) {
-									continue
-								}
-								ui.Row(c).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
-									if depth := groupDepth(name); depth > 0 {
-										ui.Box(c).Width(float32(depth * 10)).Shrink(0)
+								if parents[name] {
+									label, title := "▾", "折叠分组："+name
+									if folded[name] {
+										label, title = "▸", "展开分组："+name
 									}
-									if parents[name] {
-										label, title := "▾", "折叠分组："+name
-										if folded[name] {
-											label, title = "▸", "展开分组："+name
-										}
-										if ui.Button(c.Key("group-fold-"+name), label).Label(title).Width(32).Clicked() {
-											if isCloudGroups {
-												if d.cloudFoldedGroups == nil {
-													d.cloudFoldedGroups = make(map[string]bool)
-												}
-												d.cloudFoldedGroups[name] = !d.cloudFoldedGroups[name]
-											} else {
-												if d.foldedGroups == nil {
-													d.foldedGroups = make(map[string]bool)
-												}
-												d.foldedGroups[name] = !d.foldedGroups[name]
+									if ui.Button(c.Key("group-fold-"+name), label).Label(title).Width(32).Clicked() {
+										if isCloudGroups {
+											if d.cloudFoldedGroups == nil {
+												d.cloudFoldedGroups = make(map[string]bool)
 											}
+											d.cloudFoldedGroups[name] = !d.cloudFoldedGroups[name]
+										} else {
+											if d.foldedGroups == nil {
+												d.foldedGroups = make(map[string]bool)
+											}
+											d.foldedGroups[name] = !d.foldedGroups[name]
 										}
 									}
-									groupLabel := "分组：" + name
-									if isCloudGroups {
-										groupLabel = "云端分组：" + name
+								}
+								groupLabel := "分组：" + name
+								if isCloudGroups {
+									groupLabel = "云端分组：" + name
+								}
+								button := navigationButton(c, "group-entry-"+name, fmt.Sprintf("%s  %d", groupLeaf(name), counts[name]), d.profileFilter == name).Label(groupLabel).Disabled(d.busy || draftBlocked).Grow(1)
+								button.ContextMenu(func(menu *ui.Menu) {
+									if menu.Item("快速连接").Disabled(d.busy || draftBlocked || counts[name] == 0).Chosen() {
+										d.quickConnectGroup(name, isCloudGroups)
 									}
-									button := navigationButton(c, "group-entry-"+name, fmt.Sprintf("%s  %d", groupLeaf(name), counts[name]), d.profileFilter == name).Label(groupLabel).Disabled(d.busy || draftBlocked).Grow(1)
-									button.ContextMenu(func(menu *ui.Menu) {
-										if menu.Item("快速连接").Disabled(d.busy || draftBlocked || counts[name] == 0).Chosen() {
-											d.quickConnectGroup(name, isCloudGroups)
-										}
-										if menu.Item("管理分组").Disabled(draftBlocked).Chosen() {
-											if !d.closeConnectionForNavigation() {
-												return
-											}
-											d.workspace = "connections"
-											if isCloudGroups {
-												d.profileSource = "cloud"
-											} else {
-												d.profileSource = "local"
-											}
-											d.profileFilter, d.showGroupControls, d.confirmGroupDelete = name, true, false
-											d.profileFavorites, d.profileRecent = false, false
-										}
-									})
-									if button.Clicked() {
+									if menu.Item("管理分组").Disabled(draftBlocked).Chosen() {
 										if !d.closeConnectionForNavigation() {
 											return
 										}
 										d.workspace = "connections"
-										d.profileFilter = name
-										d.confirmGroupDelete = false
-										d.profileFavorites = false
-										d.profileRecent = false
-										if !isCloudGroups && d.profileSource == "cloud" {
+										if isCloudGroups {
+											d.profileSource = "cloud"
+										} else {
 											d.profileSource = "local"
 										}
-									}
-									if isCloudGroups {
-										if dragged, ok := ui.Drop[cloudGroupDragID](button); ok && !d.busy && d.prepareConnectionNavigation() {
-											d.moveDraggedCloudProfilesToGroup(string(dragged), name)
-										}
-									} else {
-										if dragged, ok := ui.Drop[profileID](button); ok && !d.busy && d.prepareConnectionNavigation() {
-											d.moveDraggedProfilesToGroup(dragged, name)
-										}
+										d.profileFilter, d.showGroupControls, d.confirmGroupDelete = name, true, false
+										d.profileFavorites, d.profileRecent = false, false
 									}
 								})
-							}
+								if button.Clicked() {
+									if !d.closeConnectionForNavigation() {
+										return
+									}
+									d.workspace = "connections"
+									d.profileFilter = name
+									d.confirmGroupDelete = false
+									d.profileFavorites = false
+									d.profileRecent = false
+									if !isCloudGroups && d.profileSource == "cloud" {
+										d.profileSource = "local"
+									}
+								}
+								if isCloudGroups {
+									if dragged, ok := ui.Drop[cloudGroupDragID](button); ok && !d.busy && d.prepareConnectionNavigation() {
+										d.moveDraggedCloudProfilesToGroup(string(dragged), name)
+									}
+								} else {
+									if dragged, ok := ui.Drop[profileID](button); ok && !d.busy && d.prepareConnectionNavigation() {
+										d.moveDraggedProfilesToGroup(dragged, name)
+									}
+								}
+							})
 						}
-					})
+					}
 				})
-			}
-			if d.workspace != "terminal" && d.monitorCancel != nil {
-				d.stopMonitor()
-			}
-			ui.Column(c).Grow(1).FillHeight().Children(func() {
+			})
+		}
+		content := func() {
+			ui.Column(c).Fill().Children(func() {
 				if d.workspace == "terminal" || d.workspace == "new-tab" {
 					if d.workspace == "new-tab" {
 						ui.Scroll(c).Grow(1).FillWidth().Children(func() { d.newTabView(c) })
@@ -968,10 +968,20 @@ func (d *desktop) view(c *ui.Context) {
 							})
 						}
 						if sideQuick {
-							ui.Row(c).Grow(1).FillWidth().Children(func() {
-								ui.Column(c).Grow(1).FillHeight().Children(func() { d.terminalMainView(c, workspaceWidth-340, compactAuxiliaryPanels) })
-								ui.Scroll(c.Key("quick-side-scroll")).Label("快速命令面板").Width(340).FillHeight().Shrink(0).Background(t.Surface).BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() { d.quickCommandsSideView(c) })
-							})
+							primary := workspaceWidth - d.quickCommandsPanelWidth(workspaceWidth) - 1
+							split := ui.Split(c.Key("quick-panel-split"), &primary,
+								func() {
+									ui.Column(c).Fill().Children(func() { d.terminalMainView(c, primary, compactAuxiliaryPanels) })
+								},
+								func() {
+									ui.Scroll(c.Key("quick-side-scroll")).Label("快速命令面板").Fill().Background(t.Surface).Children(func() { d.quickCommandsSideView(c) })
+								},
+							).Label("快速命令面板宽度").Grow(1).FillWidth()
+							if split.Changed() {
+								d.quickPanelWidth = workspaceWidth - primary - 1
+								d.quickPanelWidth = d.quickCommandsPanelWidth(workspaceWidth)
+								c.Invalidate()
+							}
 						} else {
 							d.terminalMainView(c, workspaceWidth, compactAuxiliaryPanels)
 						}
@@ -979,14 +989,15 @@ func (d *desktop) view(c *ui.Context) {
 					return
 				}
 				if (d.workspace == "" || d.workspace == "connections") && (!d.editConnection || d.connectionInspectorDocked(width)) {
-					ui.Row(c).Grow(1).FillWidth().Children(func() {
-						ui.Column(c).Grow(1).FillHeight().Padding(24).Children(func() { d.profileView(c) })
-						if d.editConnection {
+					hosts := func() { ui.Column(c).Fill().Padding(24).Children(func() { d.profileView(c) }) }
+					if d.editConnection {
+						primary := workspaceWidth - d.inspectorPanelWidth(width) - 1
+						details := func() {
 							inspectorBackground := ui.Hex("#171c30")
 							if d.lightTheme {
 								inspectorBackground = t.Background
 							}
-							ui.Column(c.Key("connection-inspector")).Label("主机详情面板").Width(connectionInspectorWidth).FillHeight().Shrink(0).Background(inspectorBackground).BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
+							ui.Column(c.Key("connection-inspector")).Label("主机详情面板").Fill().Background(inspectorBackground).Children(func() {
 								ui.Column(c).FillWidth().Padding(12, 16).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() { d.connectionHeader(c, true) })
 								ui.Scroll(c.Key("connection-form-scroll")).Label("主机详情内容").Grow(1).FillWidth().Children(func() {
 									ui.Column(c).FillWidth().Padding(16).Gap(10).Children(func() { d.connectionView(c, true) })
@@ -994,7 +1005,15 @@ func (d *desktop) view(c *ui.Context) {
 								ui.Column(c).FillWidth().Padding(10, 16).Gap(6).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() { d.connectionActions(c) })
 							})
 						}
-					})
+						split := ui.Split(c.Key("host-inspector-split"), &primary, hosts, details).Label("主机详情宽度").Grow(1).FillWidth()
+						if split.Changed() {
+							d.inspectorWidth = workspaceWidth - primary - 1
+							d.inspectorWidth = d.inspectorPanelWidth(width)
+							c.Invalidate()
+						}
+					} else {
+						ui.Column(c).Grow(1).FillWidth().Children(hosts)
+					}
 					return
 				}
 				if d.workspace == "files" {
@@ -1027,7 +1046,22 @@ func (d *desktop) view(c *ui.Context) {
 					})
 				})
 			})
-		})
+		}
+		if showSidebar && d.railExpanded {
+			d.navigationWidth = d.sidebarWidth(width)
+			split := ui.Split(c.Key("navigation-split"), &d.navigationWidth, navigation, content).Label("导航侧栏宽度").Grow(1).FillWidth()
+			if split.Changed() {
+				d.navigationWidth = d.sidebarWidth(width)
+				c.Invalidate()
+			}
+		} else {
+			ui.Row(c).Grow(1).FillWidth().Children(func() {
+				if showSidebar {
+					ui.Column(c).Width(64).FillHeight().Shrink(0).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(navigation)
+				}
+				ui.Column(c).Grow(1).FillHeight().Children(content)
+			})
+		}
 	})
 }
 

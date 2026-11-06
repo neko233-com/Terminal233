@@ -116,10 +116,7 @@ func (d *desktop) closeConnectionEditor() bool {
 // Keep enough space for both the host grid and the inspector. A narrow
 // window uses the existing full-width editor instead.
 func (d *desktop) connectionInspectorDocked(windowWidth float32) bool {
-	if !d.sidebarCollapsed {
-		windowWidth -= d.sidebarWidth(windowWidth)
-	}
-	return windowWidth >= 820
+	return d.workspaceContentWidth(windowWidth) >= 820
 }
 
 // Delay opening the inspector for the double-click interval. Otherwise its

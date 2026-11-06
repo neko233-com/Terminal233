@@ -12,21 +12,25 @@ import (
 
 // Preferences contain only presentation choices, never connection credentials.
 type workspacePreferences struct {
-	Version                int     `json:"version"`
-	Light                  bool    `json:"light"`
-	SidebarCollapsed       bool    `json:"sidebar_collapsed"`
-	SidebarExpanded        bool    `json:"sidebar_expanded,omitempty"`
-	HostListView           bool    `json:"host_list_view,omitempty"`
-	ShowFiles              bool    `json:"show_files"`
-	TerminalFontSize       int     `json:"terminal_font_size"`
-	TerminalTheme          string  `json:"terminal_theme,omitempty"`
-	AutocompleteDisabled   bool    `json:"autocomplete_disabled,omitempty"`
-	ExternalEditor         string  `json:"external_editor,omitempty"`
-	SplitLayout            string  `json:"split_layout,omitempty"`
-	TerminalFilePercent    float32 `json:"terminal_file_percent,omitempty"`
-	FileWorkspacePercent   float32 `json:"file_workspace_percent,omitempty"`
-	SplitHorizontalPercent float32 `json:"split_horizontal_percent,omitempty"`
-	SplitVerticalPercent   float32 `json:"split_vertical_percent,omitempty"`
+	Version                  int     `json:"version"`
+	Light                    bool    `json:"light"`
+	SidebarCollapsed         bool    `json:"sidebar_collapsed"`
+	SidebarExpanded          bool    `json:"sidebar_expanded,omitempty"`
+	HostListView             bool    `json:"host_list_view,omitempty"`
+	ShowFiles                bool    `json:"show_files"`
+	TerminalFontSize         int     `json:"terminal_font_size"`
+	TerminalTheme            string  `json:"terminal_theme,omitempty"`
+	AutocompleteDisabled     bool    `json:"autocomplete_disabled,omitempty"`
+	ExternalEditor           string  `json:"external_editor,omitempty"`
+	SplitLayout              string  `json:"split_layout,omitempty"`
+	TerminalFilePercent      float32 `json:"terminal_file_percent,omitempty"`
+	FileWorkspacePercent     float32 `json:"file_workspace_percent,omitempty"`
+	TerminalFileStackPercent float32 `json:"terminal_file_stack_percent,omitempty"`
+	NavigationWidth          float32 `json:"navigation_width,omitempty"`
+	InspectorWidth           float32 `json:"inspector_width,omitempty"`
+	QuickPanelWidth          float32 `json:"quick_panel_width,omitempty"`
+	SplitHorizontalPercent   float32 `json:"split_horizontal_percent,omitempty"`
+	SplitVerticalPercent     float32 `json:"split_vertical_percent,omitempty"`
 }
 
 func readPreferences(path string) (workspacePreferences, error) {
@@ -60,10 +64,13 @@ func readPreferences(path string) (workspacePreferences, error) {
 	if p.SplitLayout != "" && p.SplitLayout != "side" && p.SplitLayout != "stacked" {
 		return p, errors.New("分屏布局无效")
 	}
-	for _, value := range []float32{p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent, p.FileWorkspacePercent} {
+	for _, value := range []float32{p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent, p.FileWorkspacePercent, p.TerminalFileStackPercent} {
 		if value < 0 || value > 100 {
 			return p, errors.New("面板尺寸无效")
 		}
+	}
+	if !validPaneWidths(p.NavigationWidth, p.InspectorWidth, p.QuickPanelWidth) {
+		return p, errors.New("面板尺寸无效")
 	}
 	return p, nil
 }
@@ -83,6 +90,9 @@ func (d *desktop) loadPreferences(path string) error {
 	d.splitLayout = p.SplitLayout
 	d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent
 	d.fileWorkspacePercent = p.FileWorkspacePercent
+	d.terminalFileStackPercent = p.TerminalFileStackPercent
+	d.navigationWidth, d.inspectorWidth = p.NavigationWidth, p.InspectorWidth
+	d.quickPanelWidth = p.QuickPanelWidth
 	light, dark, err := terminalThemePair(p.TerminalTheme)
 	if err != nil {
 		return err
@@ -99,13 +109,19 @@ func (d *desktop) savePanelSizes() {
 		return
 	}
 	err := updatePreferences(d.preferencesPath, func(p *workspacePreferences) error {
-		for _, value := range []float32{d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent, d.fileWorkspacePercent} {
+		for _, value := range []float32{d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent, d.fileWorkspacePercent, d.terminalFileStackPercent} {
 			if value < 0 || value > 100 {
 				return errors.New("面板尺寸无效")
 			}
 		}
+		if !validPaneWidths(d.navigationWidth, d.inspectorWidth, d.quickPanelWidth) {
+			return errors.New("面板尺寸无效")
+		}
 		p.TerminalFilePercent, p.SplitHorizontalPercent, p.SplitVerticalPercent = d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent
 		p.FileWorkspacePercent = d.fileWorkspacePercent
+		p.TerminalFileStackPercent = d.terminalFileStackPercent
+		p.NavigationWidth, p.InspectorWidth = d.navigationWidth, d.inspectorWidth
+		p.QuickPanelWidth = d.quickPanelWidth
 		return nil
 	})
 	if err != nil {

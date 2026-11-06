@@ -82,6 +82,8 @@ func (d *desktop) settingsView(c *ui.Context, height float32) {
 				if ui.Button(c.Key("reset-panel-sizes"), "恢复默认面板尺寸").Clicked() {
 					d.terminalFilePercent, d.splitHorizontalPercent, d.splitVerticalPercent = 0, 0, 0
 					d.fileWorkspacePercent = 0
+					d.terminalFileStackPercent, d.navigationWidth, d.inspectorWidth = 0, 0, 0
+					d.quickPanelWidth = 0
 					d.savePanelSizes()
 				}
 			})

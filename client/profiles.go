@@ -22,7 +22,7 @@ func workspaceSidebarWidth(width float32) float32 {
 
 func (d *desktop) sidebarWidth(width float32) float32 {
 	if d.railExpanded {
-		return workspaceSidebarWidth(width)
+		return d.navigationPanelWidth(width)
 	}
 	return 64
 }
@@ -185,11 +185,10 @@ func (d *desktop) profileView(c *ui.Context) {
 	inspectorCapable := d.connectionInspectorDocked(width)
 	draftBlocked := d.connectionNavigationBlocked()
 	docked := d.connectionInspectorDocked(width) && d.editConnection
-	if !d.sidebarCollapsed {
-		width -= d.sidebarWidth(width)
-	}
+	width = d.workspaceContentWidth(width)
 	if docked {
-		width -= connectionInspectorWidth
+		windowWidth, _ := c.Size()
+		width -= d.inspectorPanelWidth(windowWidth) + 1
 	}
 	compact := width < 600
 	columns := 1

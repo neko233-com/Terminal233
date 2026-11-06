@@ -12,9 +12,7 @@ func (d *desktop) clampFileWorkspaceSplit(width float32) {
 
 func (d *desktop) filePaneWidth(c *ui.Context, left bool) float32 {
 	width, _ := c.Size()
-	if d.sidebarVisible() {
-		width -= d.sidebarWidth(width)
-	}
+	width = d.workspaceContentWidth(width)
 	if width >= 860 {
 		percent := d.fileWorkspacePercent
 		if percent == 0 {
@@ -43,9 +41,7 @@ func (d *desktop) filePickerLabelWidth(c *ui.Context, left bool) float32 {
 func (d *desktop) fileToolsHeight(c *ui.Context) float32 {
 	width, height := c.Size()
 	height -= max(float32(52), c.TitleBar().Height)
-	if d.sidebarVisible() {
-		width -= d.sidebarWidth(width)
-	}
+	width = d.workspaceContentWidth(width)
 	if width < 860 {
 		height -= 44
 	}
