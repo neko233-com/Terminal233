@@ -573,6 +573,13 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 				break
 			}
 		}
+		picker := ui.Button(c.Key("file-session-picker-toggle"), "切换会话").Label("选择文件会话").Disabled(!d.canSwitchSession())
+		if picker.Clicked() {
+			d.showFileSessionPicker = !d.showFileSessionPicker
+		}
+		ui.PopoverBase(c, picker, &d.showFileSessionPicker, func(panel ui.Element) {
+			panel.AttachTo(picker, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(4, 0, 0, 0).Children(func() { d.fileSessionPicker(c) })
+		})
 		ui.Box(c).Grow(1)
 		filterLabel := "筛选"
 		if d.fileFilter != "" {
@@ -598,7 +605,8 @@ func (d *desktop) fileView(c *ui.Context, compact bool) {
 					d.openLocalTerminal()
 				}
 				if ui.Button(c.Key("files-open-connections"), "选择 SSH 连接").Clicked() {
-					d.workspace, d.editConnection = "connections", false
+					d.fileReturnAfterConnect = true
+					d.workspace = "connections"
 				}
 			})
 		})

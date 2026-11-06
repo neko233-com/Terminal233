@@ -31,6 +31,8 @@ type desktop struct {
 	showFilePanel                                                                           bool
 	showFileTools                                                                           bool
 	showFileFilter, showFileOptions                                                         bool
+	showFileSessionPicker, fileReturnAfterConnect                                           bool
+	fileSessionSearch                                                                       string
 	sidebarCollapsed                                                                        bool
 	sessions                                                                                []*workspaceSession
 	currentSession, nextSession, splitSession, splitFirstSession, splitFocusedSession       int
@@ -261,6 +263,7 @@ func (d *desktop) connect() {
 	d.busy = true
 	d.status = "正在建立安全连接…"
 	settings := d.settings
+	returnToFiles := d.fileReturnAfterConnect && d.workspace == "connections"
 	options := d.terminalOptions()
 	settings.Fingerprint = d.fingerprint
 	profileID := d.selectedProfile
@@ -279,6 +282,8 @@ func (d *desktop) connect() {
 				d.status = fmt.Sprintf("连接失败：%v", err)
 				return
 			}
+			showFiles := returnToFiles && d.fileReturnAfterConnect && d.workspace == "connections"
+			d.fileReturnAfterConnect = false
 			d.addSession(term, shell, settings, settings.User+"@"+settings.Host)
 			d.editConnection = false
 			d.connectionDraft, d.connectionDraftSet, d.confirmDiscardConnection = connectionDraft{}, false, false
@@ -302,12 +307,18 @@ func (d *desktop) connect() {
 				}
 			}
 			d.workspace = "terminal"
+			if showFiles {
+				d.workspace, d.narrowFilePane = "files", "session"
+			}
 		})
 	}()
 }
 
 func (d *desktop) view(c *ui.Context) {
 	d.workspaceShortcuts(c)
+	if d.workspace != "connections" && d.workspace != "" {
+		d.fileReturnAfterConnect = false
+	}
 	if !d.profileInspectorAt.IsZero() && !d.editConnection && (d.workspace == "" || d.workspace == "connections") {
 		if delay := time.Until(d.profileInspectorAt); delay > 0 {
 			c.After(delay)
@@ -923,7 +934,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.71"
+const version = "0.3.72"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

@@ -208,7 +208,15 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "team-register") || !strings.Contains(tree, "team-invite-input") {
 		t.Fatal("invitation registration form did not open")
 	}
-	call("act", map[string]any{"key": "nav-connections", "action": "press"})
+	call("act", map[string]any{"key": "nav-files", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "files-open-connections") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	call("act", map[string]any{"key": "files-open-connections", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
@@ -274,16 +282,24 @@ func TestDesktopNativeWindow(t *testing.T) {
 	deadline = time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "已连接") {
+		if strings.Contains(tree, "所属会话：alice@") && strings.Contains(tree, "remote-dir") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "已连接") {
-		t.Fatalf("desktop failed to connect: %s", tree)
+	if !strings.Contains(tree, "所属会话：alice@") || !strings.Contains(tree, "remote-dir") {
+		t.Fatalf("file workspace did not open after connecting: %s", tree)
 	}
 	if attempts.Load() != 1 {
 		t.Fatalf("authentication attempts: %d", attempts.Load())
+	}
+	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(fmt.Sprint(call("tree")), "toggle-split") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	// Let the initial SFTP directory read finish before opening another tab.
 	deadline = time.Now().Add(5 * time.Second)
@@ -1318,28 +1334,27 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if !strings.Contains(tree, "cancel-transfer") {
 		t.Fatalf("slow transfer did not start: %s", tree)
 	}
-	call("act", map[string]any{"key": "nav-terminal", "action": "press"})
+	call("act", map[string]any{"key": "file-session-picker-toggle", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "toggle-split") {
+		if strings.Contains(tree, "file-picker-session-2") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	call("act", map[string]any{"key": "session-2", "action": "press"})
+	call("act", map[string]any{"key": "file-picker-session-2", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "当前会话：本机终端 2") {
+		if strings.Contains(tree, "所属会话：本机终端 2") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.Contains(tree, "当前会话：本机终端 2") {
+	if !strings.Contains(tree, "所属会话：本机终端 2") {
 		t.Fatalf("could not switch during transfer: %s", tree)
 	}
-	call("act", map[string]any{"key": "nav-files", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))
