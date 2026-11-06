@@ -9,9 +9,35 @@ import (
 
 const profileAutosaveDelay = 800 * time.Millisecond
 
+// A cloud logout or scope revocation clears its decrypted form. If that form
+// also points at a local host, do not treat the cleared secret as a request to
+// erase that host's independently stored credentials.
+func (d *desktop) clearCloudFormCredentials() {
+	for _, p := range d.profiles {
+		if string(p.ID) == d.selectedProfile && p.EncryptedCredentials != "" {
+			d.profileSecretError = true
+			break
+		}
+	}
+	d.settings.Password, d.settings.Passphrase = "", ""
+	d.settingsFromCloud = false
+	d.profileAutoDirty, d.profileAutoAt = false, time.Time{}
+}
+
 // saveCurrentProfile rolls back only the temporary list changes if writing
 // fails. The form and its credentials remain available for the user to fix.
 func (d *desktop) saveCurrentProfile() error {
+	if d.profileSecretError {
+		return errors.New("无法解锁原凭据，请重新输入密码或口令后保存")
+	}
+	var protected string
+	var err error
+	if d.profilePath != "" {
+		protected, err = protectProfileCredentials(d.settings)
+		if err != nil {
+			return err
+		}
+	}
 	if d.selectedProfile != "" {
 		found := false
 		for _, p := range d.profiles {
@@ -29,6 +55,14 @@ func (d *desktop) saveCurrentProfile() error {
 	if err := d.addProfile(); err != nil {
 		return err
 	}
+	if d.profilePath != "" {
+		for i := range d.profiles {
+			if string(d.profiles[i].ID) == d.selectedProfile {
+				d.profiles[i].EncryptedCredentials = protected
+				break
+			}
+		}
+	}
 	if err := d.saveProfiles(); err != nil {
 		d.profiles, d.selectedProfile, d.nextProfileID = before, selected, nextID
 		return err
@@ -36,15 +70,15 @@ func (d *desktop) saveCurrentProfile() error {
 	return nil
 }
 
-// Only local non-secret metadata is eligible. Cloud writes still use their
-// explicit permission, fingerprint and concurrency checks.
+// Cloud writes still use their explicit permission, fingerprint and
+// concurrency checks. Local credentials use OS-backed protection.
 func (d *desktop) flushProfileAutosave() {
 	d.profileAutoDirty, d.profileAutoAt = false, time.Time{}
 	if !d.editConnection || d.settingsFromCloud || !d.connectionDraftSet || d.profilePath == "" || d.profileStoreConflict || d.busy {
 		return
 	}
 	current := d.currentConnectionDraft()
-	if current.metadata == d.connectionDraft.metadata && d.selectedProfile != "" {
+	if current == d.connectionDraft && d.selectedProfile != "" {
 		return
 	}
 	if _, err := d.settings.address(); err != nil {
@@ -54,9 +88,7 @@ func (d *desktop) flushProfileAutosave() {
 		d.status = "自动保存失败，表单内容仍保留：" + err.Error()
 		return
 	}
-	// Passwords and private-key passphrases are never persisted locally, so
-	// keep their prior baseline and continue protecting unsaved secret edits.
-	d.connectionDraft.metadata = current.metadata
+	d.connectionDraft = current
 	d.confirmDiscardConnection = false
 	d.status = "已自动保存"
 }

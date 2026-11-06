@@ -21,11 +21,12 @@ func workspaceSidebarWidth(width float32) float32 {
 }
 
 type profile struct {
-	ID            profileID
-	Group, Label  string
-	Favorite      bool
-	LastConnected int64
-	Settings      connectionSettings
+	ID                   profileID
+	Group, Label         string
+	Favorite             bool
+	LastConnected        int64
+	Settings             connectionSettings
+	EncryptedCredentials string
 }
 
 func (d *desktop) addProfile() error {
@@ -52,7 +53,7 @@ func (d *desktop) addProfile() error {
 		if safe.Fingerprint == "" && old.Settings.Host == safe.Host && old.Settings.Port == safe.Port && old.Settings.User == safe.User {
 			safe.Fingerprint = old.Settings.Fingerprint
 		}
-		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: label, Favorite: old.Favorite, LastConnected: old.LastConnected, Settings: safe}
+		d.profiles[i] = profile{ID: old.ID, Group: strings.TrimSpace(d.profileGroup), Label: label, Favorite: old.Favorite, LastConnected: old.LastConnected, Settings: safe, EncryptedCredentials: old.EncryptedCredentials}
 		return nil
 	}
 	d.nextProfileID++
@@ -94,13 +95,25 @@ func (d *desktop) loadProfile(p profile) {
 	d.cloudFormSources = nil
 	d.cloudFormVersions = nil
 	d.settings = p.Settings
+	d.profileSecretError = false
+	if p.EncryptedCredentials != "" {
+		password, passphrase, err := unprotectProfileCredentials(p.EncryptedCredentials, p.Settings)
+		if err != nil {
+			d.profileSecretError = true
+		} else {
+			d.settings.Password, d.settings.Passphrase = password, passphrase
+		}
+	}
 	d.profileGroup = p.Group
 	d.profileLabel = p.Label
 	d.expectedFingerprint = p.Settings.Fingerprint
 	d.fingerprint = ""
 	d.changedFingerprint = ""
 	d.selectedProfile = string(p.ID)
-	d.status = "已载入连接，请输入密码并核对指纹。"
+	d.status = "已载入连接。"
+	if d.profileSecretError {
+		d.status = "无法解锁本机凭据；原数据已保留，请重新输入凭据。"
+	}
 	d.captureConnectionDraft()
 }
 
@@ -132,7 +145,7 @@ func (d *desktop) openProfileConnection(p profile) {
 		return
 	}
 	d.loadProfile(p)
-	if p.Settings.KeyPath != "" && d.trustedProfileFingerprint() != "" {
+	if !d.profileSecretError && (p.Settings.KeyPath != "" || d.settings.Password != "") && d.trustedProfileFingerprint() != "" {
 		d.connectTrustedProfile()
 		return
 	}
@@ -187,6 +200,7 @@ func (d *desktop) profileView(c *ui.Context) {
 		ui.Row(c).FillWidth().Wrap().Gap(8).Padding(0, 0, 10, 0).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).AlignItems(ui.Center).Children(func() {
 			if ui.Button(c.Key("connection-new"), "+ 新建连接").Disabled(draftBlocked).Clicked() {
 				d.settings = connectionSettings{Port: "22"}
+				d.profileSecretError = false
 				d.showKeyOptions = false
 				d.settingsFromCloud = false
 				d.cloudFormSources = nil
@@ -790,6 +804,7 @@ func (d *desktop) copyCheckedProfiles() {
 		p.Label += "（副本）"
 		p.Favorite, p.LastConnected = false, 0
 		p.Settings.Password, p.Settings.Passphrase = "", ""
+		p.EncryptedCredentials = ""
 		items = append(items, p)
 	}
 	d.profiles = items

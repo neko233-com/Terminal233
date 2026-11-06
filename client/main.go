@@ -22,6 +22,7 @@ type desktop struct {
 	editConnection                                                                          bool
 	connectionFocusPending                                                                  bool
 	showKeyOptions                                                                          bool
+	profileSecretError                                                                      bool
 	lightTheme                                                                              bool
 	terminalFontSize                                                                        int
 	terminalTheme                                                                           string
@@ -329,6 +330,7 @@ func (d *desktop) connect() {
 		d.win.Update(func() {
 			d.busy = false
 			if err != nil {
+				d.settings.Password, d.settings.Passphrase = settings.Password, settings.Passphrase
 				d.status = fmt.Sprintf("连接失败：%v", err)
 				return
 			}
@@ -847,8 +849,8 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 	if docked {
 		sectionColor, sectionPadding, sectionGap = c.Theme().SurfaceHover, 12, 6
 	}
-	markDraftChanged := func() { d.confirmDiscardConnection = false }
-	markMetadataChanged := func() { markDraftChanged(); d.profileAutoDirty = true }
+	markMetadataChanged := func() { d.confirmDiscardConnection = false; d.profileAutoDirty = true }
+	markDraftChanged := func() { d.confirmDiscardConnection = false; d.profileSecretError = false; d.profileAutoDirty = true }
 	resetFingerprint := func() { d.fingerprint, d.expectedFingerprint, d.changedFingerprint = "", "", ""; markMetadataChanged() }
 	ui.Column(c).FillWidth().Padding(sectionPadding).Gap(sectionGap).Background(sectionColor).Radius(10).Children(func() {
 		ui.Text(c, "地址").FontSize(15).Bold()
@@ -883,7 +885,7 @@ func (d *desktop) connectionView(c *ui.Context, stickyActions bool) {
 			ui.Text(c, "密码").FontSize(12).TextColor(c.Theme().TextMuted).Width(32)
 			ui.TextInput(c.Key("password"), &d.settings.Password).Label("SSH 密码").Placeholder("SSH 密码").Password().OnChange(markDraftChanged).Grow(1)
 		})
-		ui.Text(c, "本机连接列表不保存密码。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+		ui.Text(c, "凭据由 Windows 当前用户加密保存。").FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
 		keyExpanded := d.showKeyOptions || d.settings.KeyPath != "" || d.settings.Passphrase != ""
 		if !keyExpanded {
 			if ui.Button(c.Key("key-options-toggle"), "使用私钥…").Clicked() {
@@ -960,8 +962,12 @@ func (d *desktop) connectionActions(c *ui.Context) {
 			if err := d.saveCurrentProfile(); err != nil {
 				d.status = "保存失败，表单内容仍保留：" + err.Error()
 			} else {
-				d.status = "连接已保存（不保存密码）"
-				d.connectionDraft.metadata = d.currentConnectionDraft().metadata
+				d.status = "连接已保存"
+				current := d.currentConnectionDraft()
+				d.connectionDraft.metadata = current.metadata
+				if !d.settingsFromCloud {
+					d.connectionDraft.secrets = current.secrets
+				}
 				d.profileAutoDirty, d.profileAutoAt = false, time.Time{}
 			}
 		}
@@ -990,7 +996,7 @@ func (d *desktop) connectionActions(c *ui.Context) {
 	}
 }
 
-const version = "0.3.86"
+const version = "0.3.87"
 const defaultCloudURL = "https://nekossh.neko233.com"
 
 func main() {

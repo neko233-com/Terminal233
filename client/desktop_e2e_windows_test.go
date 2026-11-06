@@ -423,6 +423,14 @@ func TestDesktopNativeWindow(t *testing.T) {
 	if err != nil || !strings.Contains(string(saved), settings.Host) || !strings.Contains(string(saved), settings.User) || strings.Contains(string(saved), settings.Password) {
 		t.Fatal("native editor did not autosave metadata safely")
 	}
+	var savedProfiles diskProfiles
+	if json.Unmarshal(saved, &savedProfiles) != nil || savedProfiles.Version != 3 || len(savedProfiles.Items) != 1 {
+		t.Fatal("native editor did not protect its saved credential")
+	}
+	password, _, secretErr := unprotectProfileCredentials(savedProfiles.Items[0].EncryptedCredentials, settings)
+	if secretErr != nil || password != settings.Password {
+		t.Fatal("native editor credential cannot be restored")
+	}
 	call("act", map[string]any{"key": "profile-add", "action": "press"})
 	// The primary action inspects an unknown host before it can authenticate.
 	call("act", map[string]any{"key": "connect", "action": "press"})
@@ -1827,19 +1835,8 @@ func TestDesktopNativeWindow(t *testing.T) {
 		t.Fatal("saved connection bounds missing")
 	}
 	call("input", map[string]any{"events": []any{map[string]any{"type": "click", "clicks": 2, "x": profileBounds["x"].(float64) + profileBounds["width"].(float64)/2, "y": profileBounds["y"].(float64) + profileBounds["height"].(float64)/2}}})
-	deadline = time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		tree = fmt.Sprint(call("tree"))
-		if strings.Contains(tree, "使用已信任指纹连接") {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if !strings.Contains(tree, "使用已信任指纹连接") {
-		t.Fatalf("trusted reconnect action missing: %s", tree)
-	}
-	call("act", map[string]any{"key": "password", "action": "setValue", "text": settings.Password})
-	call("act", map[string]any{"key": "connect", "action": "press"})
+	// A double-click uses the protected password and the previously verified
+	// host key without asking for the password again.
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		tree = fmt.Sprint(call("tree"))

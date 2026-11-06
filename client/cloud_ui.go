@@ -348,6 +348,7 @@ func (d *desktop) finishCloudSave(accounts []cloudAccount, mutationErr, refreshE
 }
 
 func (d *desktop) loadCloudAccount(account cloudAccount) {
+	d.profileSecretError = false
 	d.workspace = "connections"
 	d.editConnection = true
 	d.connectionFocusPending = false
@@ -634,8 +635,7 @@ func (d *desktop) clearCloudState() {
 	}
 	d.cloudFoldedGroups = nil
 	if d.settingsFromCloud {
-		d.settings.Password, d.settings.Passphrase = "", ""
-		d.settingsFromCloud = false
+		d.clearCloudFormCredentials()
 	}
 	d.cloudPassword, d.cloudRegistration = "", ""
 	d.archivePassword, d.archiveStatus, d.archiveConfirm = "", "", false

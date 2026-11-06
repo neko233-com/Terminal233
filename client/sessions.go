@@ -68,8 +68,8 @@ func sessionDisplayLabel(s *workspaceSession) string {
 	return s.label
 }
 
-// Each tab owns its terminal and remote file selection. Credentials stay in
-// memory and are never part of the persisted connection list.
+// Each tab owns its terminal and remote file selection. Session credentials
+// stay in memory; saved host credentials are protected separately.
 type workspaceSession struct {
 	id                                                       int
 	label                                                    string

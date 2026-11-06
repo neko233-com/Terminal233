@@ -117,6 +117,8 @@ Desktop.ini
 /build/
 .nekossh-update-*.part
 .preferences-*.tmp
+.profiles-*.tmp
+profiles.json
 /client/preferences.json
 terminal233-setup-*.exe
 client/.mygo/

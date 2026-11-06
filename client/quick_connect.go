@@ -87,6 +87,7 @@ func (d *desktop) openQuickConnection() {
 		return
 	}
 	d.settings = settings
+	d.profileSecretError = false
 	d.connectionFocusPending = false
 	d.showKeyOptions = false
 	d.settingsFromCloud = false

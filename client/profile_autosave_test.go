@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,10 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func TestProfileAutosaveThroughEditorKeepsSecretsTransient(t *testing.T) {
+func TestProfileAutosaveThroughEditorProtectsSecrets(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("DPAPI requires Windows")
+	}
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	d := &desktop{workspace: "connections", editConnection: true, settings: connectionSettings{Port: "22"}}
 	if err := d.loadProfiles(path); err != nil {
@@ -39,8 +43,8 @@ func TestProfileAutosaveThroughEditorKeepsSecretsTransient(t *testing.T) {
 	if len(d.profiles) != 1 || d.selectedProfile == "" || !strings.Contains(string(data), "auto.example") || strings.Contains(string(data), "sensitive-") {
 		t.Fatal("metadata was not saved correctly or a secret reached disk")
 	}
-	if !d.hasUnsavedConnection() || d.closeConnectionEditor() || !d.confirmDiscardConnection {
-		t.Fatal("transient credentials must still be protected on close")
+	if d.hasUnsavedConnection() {
+		t.Fatal("protected credentials should no longer block navigation")
 	}
 	if err := view.Click("连接名称"); err != nil {
 		t.Fatal(err)
@@ -49,6 +53,17 @@ func TestProfileAutosaveThroughEditorKeepsSecretsTransient(t *testing.T) {
 	view.Advance(profileAutosaveDelay + time.Second)
 	if len(d.profiles) != 1 || d.profiles[0].Label != "生产" {
 		t.Fatal("editing an autosaved host created a duplicate or failed")
+	}
+	if !d.closeConnectionEditor() {
+		t.Fatal("saved editor did not close")
+	}
+	var reopened desktop
+	if err := reopened.loadProfiles(path); err != nil {
+		t.Fatal(err)
+	}
+	reopened.loadProfile(reopened.profiles[0])
+	if reopened.profileSecretError || reopened.settings.Password != "sensitive-password" || reopened.settings.Passphrase != "sensitive-passphrase" {
+		t.Fatal("protected credentials were not restored for the same host")
 	}
 }
 
