@@ -23,6 +23,7 @@ type localFilePane struct {
 	files                              []remoteFile
 	history                            fileHistory
 	initialized, loading               bool
+	pathMenuOpen                       bool
 	loadingDirectory                   string
 	statusAfterLoad                    string
 	generation                         uint64
@@ -247,10 +248,16 @@ func (d *desktop) localFilePaneView(c *ui.Context, listHeight float32) {
 		if ui.Button(c.Key("local-pane-forward"), "›").Label("本机目录前进").Tooltip("前进").Width(36).Disabled(!forward).Clicked() {
 			d.navigateLocalPane(1)
 		}
-		if ui.Button(c.Key("local-pane-parent"), "↑").Label("本机上一级目录").Tooltip("上一级").Width(36).Disabled(d.localPane.directory == "").Clicked() {
+		if ui.Button(c.Key("local-pane-parent"), "↑").Label("本机上一级目录").Tooltip("上一级").Width(36).Disabled(d.busy || d.localPane.loading || d.localPane.directory == "").Clicked() {
 			d.requestLocalPane(filepath.Dir(d.localPane.directory), -1)
 		}
 		ui.TextInput(c.Key("local-pane-path"), &d.localPane.input).Label("本机目录").Placeholder("本机绝对目录路径").OnChange(d.localPaneInputChanged).OnSubmit(func() { d.requestLocalPane(d.localPane.input, -1) }).Grow(1)
+		dir, generation := d.localPane.directory, d.localPane.generation
+		fileParentMenu(c, "local-path-parent-menu", dir, true, d.busy || d.localPane.loading || !paneHistoryAt(d.localPane.history, dir), &d.localPane.pathMenuOpen, func(target string) {
+			if d.secondaryPane.sessionID == 0 && !d.busy && !d.localPane.loading && d.localPane.generation == generation && sameLocalDirectory(d.localPane.directory, dir) {
+				d.requestLocalPane(target, -1)
+			}
+		})
 		if ui.Button(c.Key("local-pane-open"), "↻").Label("打开本机目录").Tooltip("打开或刷新目录").Width(36).Clicked() {
 			d.requestLocalPane(d.localPane.input, -1)
 		}

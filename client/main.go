@@ -149,6 +149,7 @@ type desktop struct {
 	lastTerminalDir                                                                         string
 	files                                                                                   []remoteFile
 	fileHistory                                                                             fileHistory
+	filePathMenuOpen                                                                        bool
 	filePaneSelection                                                                       paneSelection
 	localPane                                                                               localFilePane
 	leftPaneAction                                                                          leftPaneAction

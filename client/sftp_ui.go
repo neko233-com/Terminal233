@@ -680,6 +680,16 @@ func (d *desktop) filePaneView(c *ui.Context, compact, fill bool) {
 			d.fileRename = ""
 			d.files = nil
 		}).OnSubmit(func() { d.refreshFiles() }).Grow(1)
+		dir, sessionID, shell := d.fileDir, d.currentSession, d.shell
+		fileParentMenu(c, "session-path-parent-menu", dir, local, d.busy || d.fileSessionUnavailable() || !paneHistoryAt(d.fileHistory, dir), &d.filePathMenuOpen, func(target string) {
+			if d.busy || d.fileSessionUnavailable() || d.currentSession != sessionID || d.shell != shell || d.fileDir != dir || !paneHistoryAt(d.fileHistory, dir) {
+				return
+			}
+			d.fileDir, d.files = target, nil
+			d.selectedFile, d.confirmDelete, d.fileRename, d.fileNewDirectory = "", "", "", ""
+			d.filePaneSelection = paneSelection{}
+			d.refreshFiles()
+		})
 		if ui.Button(c.Key("file-refresh"), "↻").Label("打开目录").Tooltip("打开目录").Width(36).Disabled(d.busy || d.fileSessionUnavailable()).Clicked() {
 			d.selectedFile, d.confirmDelete, d.fileRename = "", "", ""
 			d.refreshFiles()

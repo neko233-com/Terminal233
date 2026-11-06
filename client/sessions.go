@@ -178,6 +178,7 @@ func (d *desktop) activateSessionWithRefresh(id int, refresh bool) {
 		}
 		if d.currentSession != id {
 			d.stopMonitor()
+			d.filePathMenuOpen = false
 		}
 		d.saveSessionState()
 		oldGroup, nextGroup := d.terminalGroupFor(d.currentSession), d.terminalGroupFor(id)

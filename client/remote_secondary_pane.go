@@ -24,6 +24,7 @@ type secondaryRemotePane struct {
 	files                              []remoteFile
 	history                            fileHistory
 	loading                            bool
+	pathMenuOpen                       bool
 	loadingDirectory                   string
 	statusAfterLoad                    string
 	generation                         uint64
@@ -91,6 +92,8 @@ func (d *desktop) selectSecondarySession(id int) {
 	}
 	d.showSecondaryFilePicker = false
 	d.showLeftPaneOptions = false
+	d.localPane.pathMenuOpen = false
+	d.secondaryPane.pathMenuOpen = false
 	if id == 0 {
 		d.secondaryPane = secondaryRemotePane{generation: d.secondaryPane.generation + 1}
 		return
@@ -288,6 +291,12 @@ func (d *desktop) secondaryFilePaneView(c *ui.Context, listHeight float32) {
 			d.requestSecondaryPane(path.Dir(p.directory), -1)
 		}
 		ui.TextInput(c.Key("secondary-path"), &p.input).Label("左侧远程目录").Placeholder("远程目录路径").OnChange(d.secondaryPaneInputChanged).OnSubmit(func() { d.requestSecondaryPane(p.input, -1) }).Grow(1)
+		dir, generation, id, shell := p.directory, p.generation, p.sessionID, p.shell
+		fileParentMenu(c, "secondary-path-parent-menu", dir, false, d.busy || p.loading || !paneHistoryAt(p.history, dir), &p.pathMenuOpen, func(target string) {
+			if !d.busy && !p.loading && p.sessionID == id && p.shell == shell && p.generation == generation && p.directory == dir && d.secondarySession() != nil {
+				d.requestSecondaryPane(target, -1)
+			}
+		})
 		if ui.Button(c.Key("secondary-refresh"), "↻").Label("打开左侧目录").Tooltip("打开或刷新目录").Width(36).Disabled(d.busy).Clicked() {
 			d.requestSecondaryPane(p.input, -1)
 		}
