@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -456,6 +457,16 @@ func TestDesktopNativeWindow(t *testing.T) {
 	password, _, secretErr := unprotectProfileCredentials(savedProfiles.Items[0].EncryptedCredentials, settings)
 	if secretErr != nil || password != settings.Password {
 		t.Fatal("native editor credential cannot be restored")
+	}
+	if capturePath := os.Getenv("NEKOSSH_E2E_CAPTURE_WORKSPACE"); capturePath != "" {
+		capture := call("capture")["result"].(map[string]any)
+		pixels, err := base64.StdEncoding.DecodeString(fmt.Sprint(capture["png"]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(capturePath, pixels, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	call("act", map[string]any{"key": "profile-tags", "action": "setValue", "text": "production, database"})
 	deadline = time.Now().Add(5 * time.Second)

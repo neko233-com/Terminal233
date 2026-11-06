@@ -220,7 +220,7 @@ func (d *desktop) profileView(c *ui.Context) {
 			}
 		})
 		ui.Row(c).FillWidth().Wrap().Gap(8).Padding(0, 0, 10, 0).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).AlignItems(ui.Center).Children(func() {
-			if ui.Button(c.Key("connection-new"), "+ 新建连接").Disabled(draftBlocked).Clicked() {
+			if ui.PrimaryButton(c.Key("connection-new"), "+ 新建连接").Disabled(draftBlocked).Clicked() {
 				if !d.prepareConnectionNavigation() {
 					return
 				}
@@ -485,7 +485,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 		if showLocal {
 			button := ui.Button(c.Key("profile-local-terminal"), "").Label("打开本机终端").Tooltip("打开本机终端").Width(cardWidth).Height(66).Padding(14).Gap(12).Justify(ui.Start).Background(c.Theme().Surface).BorderWidth(0).Radius(10).Disabled(d.busy || d.terminalLimitReached())
 			button.Children(func() {
-				ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() { ui.Icon(c, terminalIcon).Width(19).Height(19).TextColor(c.Theme().AccentText) })
+				ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().SurfacePressed).AlignItems(ui.Center).Justify(ui.Center).Children(func() { ui.Icon(c, terminalIcon).Width(19).Height(19).TextColor(c.Theme().Text) })
 				ui.Column(c).Grow(1).Gap(3).Children(func() {
 					ui.Text(c, "本机终端").FontSize(14).Bold()
 					ui.Text(c, "PowerShell · 此电脑").FontSize(12).TextColor(c.Theme().TextMuted)
@@ -541,20 +541,21 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 			if compact {
 				label += " · " + p.Settings.Host + ":" + p.Settings.Port
 			}
-			ui.Column(c).Width(cardWidth).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(10).Children(func() {
-				row := ui.Button(c.Key("profile-"+string(p.ID)), "").Label(label).BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).FillWidth()
+			card := ui.Column(c).Width(cardWidth).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(10).BorderWidth(1).BorderColor(ui.Transparent)
+			if d.selectedProfile == string(p.ID) || d.checkedProfiles[p.ID] {
+				card = card.Background(c.Theme().SurfaceHover).BorderColor(c.Theme().Accent)
+			}
+			card.Children(func() {
+				row := ui.Button(c.Key("profile-"+string(p.ID)), "").Label(label).BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).FillWidth().Background(ui.Transparent)
 				row.Children(func() {
-					ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-						ui.Icon(c, serverIcon).Width(19).Height(19).TextColor(c.Theme().AccentText)
+					ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().SurfacePressed).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+						ui.Icon(c, serverIcon).Width(19).Height(19).TextColor(c.Theme().Text)
 					})
 					ui.Column(c).Grow(1).Gap(3).Children(func() {
-						ui.Text(c, p.Label).FontSize(14).Bold().Wrap()
-						ui.Text(c, p.Settings.User+"@"+p.Settings.Host+":"+p.Settings.Port).FontSize(12).TextColor(c.Theme().TextMuted).Wrap()
+						ui.Text(c, p.Label).FontSize(14).SingleLine().Tooltip(p.Label)
+						ui.Text(c, p.Settings.User+"@"+p.Settings.Host+":"+p.Settings.Port).FontSize(12).TextColor(c.Theme().TextMuted).SingleLine().Tooltip(p.Settings.Host + ":" + p.Settings.Port)
 					})
 				})
-				if d.selectedProfile == string(p.ID) || d.checkedProfiles[p.ID] {
-					row = row.Background(c.Theme().SurfacePressed).BorderWidth(1).BorderColor(c.Theme().Accent)
-				}
 				if !d.busy {
 					row = row.Drag(p.ID)
 				}
@@ -780,7 +781,7 @@ func (d *desktop) profileList(c *ui.Context, cardWidth float32, compact, inspect
 				ui.Column(c).Width(cardWidth).Padding(10).Gap(6).Background(c.Theme().Surface).Radius(10).Children(func() {
 					row := ui.Button(c.Key("profile-cloud-"+account.ID), "").Label(label).FillWidth().BorderWidth(0).Padding(4).Gap(10).Justify(ui.Start).Disabled(d.busy).Drag(cloudGroupDragID(account.ID))
 					row.Children(func() {
-						ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().Accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+						ui.Box(c).Width(38).Height(38).Radius(9).Background(c.Theme().SurfacePressed).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 							ui.Icon(c, cloudIcon).Width(19).Height(19).TextColor(c.Theme().AccentText)
 						})
 						ui.Column(c).Grow(1).Gap(3).Children(func() {

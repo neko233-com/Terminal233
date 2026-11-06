@@ -211,56 +211,83 @@ type desktop struct {
 	updateCancel                                                                            context.CancelFunc
 }
 
+// Visual roles follow the desktop workspace hierarchy: lowest chrome, base
+// canvas, raised controls, then restrained hover/selection surfaces.
 var workspaceTheme = func() *ui.Theme {
 	t := ui.DarkTheme()
-	t.Background = ui.Hex("#101325")
-	t.Surface = ui.Hex("#20243a")
-	t.SurfaceHover = ui.Hex("#2a304a")
-	t.SurfacePressed = ui.Hex("#343b59")
-	t.Border = ui.Hex("#353c55")
-	t.Accent = ui.Hex("#087bb9")
-	t.AccentHover = ui.Hex("#1592d1")
-	t.AccentPressed = ui.Hex("#075f90")
-	t.Focus = ui.Hex("#5bc5ff")
+	t.Background = ui.Hex("#1d2033")
+	t.Surface = ui.Hex("#282b3d")
+	t.SurfaceHover = ui.Hex("#32364a")
+	t.SurfacePressed = ui.Hex("#3e4257")
+	t.Border = ui.RGBA(141, 145, 165, .20)
+	t.Text = ui.Hex("#f7f9fa")
+	t.TextMuted = ui.Hex("#a5a9bc")
+	t.Accent = ui.Hex("#2091f6")
+	t.AccentHover = ui.Hex("#58adf8")
+	t.AccentPressed = ui.Hex("#186cb5")
+	t.Focus = ui.Hex("#58adf8")
+	t.Selection = ui.RGBA(32, 145, 246, .25)
+	t.Font, t.FontSize, t.Radius = "system-ui", 13, 8
 	return t
 }()
 
 var workspaceLightTheme = func() *ui.Theme {
 	t := ui.LightTheme()
-	t.Accent = ui.Hex("#0874aa")
-	t.AccentHover = ui.Hex("#0988c6")
-	t.AccentPressed = ui.Hex("#075b87")
-	t.Focus = ui.Hex("#0874aa")
+	t.Background = ui.Hex("#edf1f2")
+	t.Surface = ui.Hex("#f7f9fa")
+	t.SurfaceHover = ui.Hex("#e6ebed")
+	t.SurfacePressed = ui.Hex("#d5dde0")
+	t.Border = ui.RGBA(121, 140, 148, .25)
+	t.Text = ui.Hex("#141729")
+	t.TextMuted = ui.Hex("#5a6c75")
+	t.Accent = ui.Hex("#1876c8")
+	t.AccentHover = ui.Hex("#2091f6")
+	t.AccentPressed = ui.Hex("#186cb5")
+	t.Focus = ui.Hex("#2091f6")
+	t.Selection = ui.RGBA(32, 145, 246, .20)
+	t.Font, t.FontSize, t.Radius = "system-ui", 13, 8
 	return t
 }()
 
-func workspaceButton(c *ui.Context, key, label string, active bool) ui.Element {
-	if active {
-		return ui.PrimaryButton(c.Key(key), label)
+func workspaceChrome(c *ui.Context) ui.Color {
+	if c.Theme().Dark {
+		return ui.Hex("#141729")
 	}
-	return ui.Button(c.Key(key), label)
+	return ui.Hex("#e6ebed")
+}
+
+func workspaceButton(c *ui.Context, key, label string, active bool) ui.Element {
+	b := ui.Button(c.Key(key), label).BorderWidth(0).Selected(active)
+	if active {
+		b = b.Background(c.Theme().SurfacePressed).TextColor(c.Theme().Text)
+	}
+	return b
 }
 
 func navigationButton(c *ui.Context, key, label string, active bool) ui.Element {
-	button := ui.Button(c.Key(key), "").Label(label).BorderWidth(0).Justify(ui.Start).Padding(8, 12).Gap(10).Radius(7)
+	button := ui.Button(c.Key(key), "").Label(label).BorderWidth(0).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).Selected(active).Background(ui.Transparent)
 	if active {
 		button = button.Background(c.Theme().SurfacePressed)
+	} else if button.Hovered() {
+		button = button.Background(c.Theme().SurfaceHover)
 	}
 	button.Children(func() {
 		if icon := navigationIcons[key]; icon != nil {
-			ui.Icon(c, icon).Width(16).Height(16)
+			ui.Icon(c, icon).Width(16).Height(16).TextColor(c.Theme().Text)
 		}
-		ui.Text(c, label).FontSize(13)
+		ui.Text(c, label).FontSize(13).TextColor(c.Theme().Text)
 	})
 	return button
 }
 
 func terminalActionButton(c *ui.Context, key, label string, icon *ui.SVG, active, disabled bool) ui.Element {
-	button := ui.Button(c.Key(key), "").Label(label).Tooltip(label).Width(36).Height(36).Padding(8).BorderWidth(0).Radius(7).Disabled(disabled)
+	button := ui.Button(c.Key(key), "").Label(label).Tooltip(label).Width(36).Height(36).Padding(8).BorderWidth(0).Radius(8).Disabled(disabled).Background(ui.Transparent)
 	color := c.Theme().TextMuted
 	if active {
 		button = button.Background(c.Theme().SurfacePressed)
 		color = c.Theme().AccentHover
+	} else if button.Hovered() {
+		button = button.Background(c.Theme().SurfaceHover)
 	}
 	button.Children(func() { ui.Icon(c, icon).Width(18).Height(18).TextColor(color) })
 	return button
@@ -576,13 +603,13 @@ func (d *desktop) view(c *ui.Context) {
 	}
 	t := c.Theme()
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Padding(10, 16).Gap(12).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+		ui.Row(c).FillWidth().Padding(8, 16).Gap(10).AlignItems(ui.Center).Background(workspaceChrome(c)).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 			ui.Text(c, "NekoSSH").FontSize(20).Bold()
 			sidebarLabel := "收起侧栏"
 			if !d.sidebarVisible() {
 				sidebarLabel = "展开侧栏"
 			}
-			if ui.Button(c.Key("toggle-sidebar"), "☰").Label(sidebarLabel).Tooltip(sidebarLabel).Width(38).Clicked() {
+			if ui.Button(c.Key("toggle-sidebar"), "☰").Label(sidebarLabel).Tooltip(sidebarLabel).Width(36).Height(36).BorderWidth(0).Background(ui.Transparent).Clicked() {
 				if (d.workspace == "terminal" && d.term != nil) || d.workspace == "new-tab" {
 					d.terminalNavigationOpen = !d.terminalNavigationOpen
 				} else {
@@ -616,7 +643,7 @@ func (d *desktop) view(c *ui.Context) {
 			if d.lightTheme {
 				themeLabel = "深色"
 			}
-			if ui.Button(c.Key("theme-toggle"), "◐").Label(themeLabel).Tooltip("切换" + themeLabel + "主题").Width(38).Clicked() {
+			if ui.Button(c.Key("theme-toggle"), "◐").Label(themeLabel).Tooltip("切换" + themeLabel + "主题").Width(36).Height(36).BorderWidth(0).Background(ui.Transparent).Clicked() {
 				d.lightTheme = !d.lightTheme
 				d.savePreference("light", d.lightTheme)
 			}
@@ -649,7 +676,7 @@ func (d *desktop) view(c *ui.Context) {
 		compactAuxiliaryPanels := height < 650 || (workspaceWidth < 940 && height < 1000)
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
 			if showSidebar {
-				ui.Scroll(c).Width(d.sidebarWidth(width)).FillHeight().Background(t.Background).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
+				ui.Scroll(c).Width(d.sidebarWidth(width)).FillHeight().Background(workspaceChrome(c)).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
 					if !d.railExpanded {
 						d.compactWorkspaceNavigation(c)
 						return
