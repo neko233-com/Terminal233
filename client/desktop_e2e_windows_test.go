@@ -1389,10 +1389,15 @@ func TestDesktopNativeWindow(t *testing.T) {
 				break
 			}
 		}
-		if found {
+		// The control value can update before its OnChange callback. Wait for
+		// the callback too, otherwise it can cancel the just-started read.
+		if found && strings.Contains(fmt.Sprint(result), "打开输入的目录后才能传输") {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if !time.Now().Before(deadline) {
+		t.Fatal("local transfer path change was not applied")
 	}
 	call("act", map[string]any{"key": "local-pane-open", "action": "press"})
 	deadline = time.Now().Add(5 * time.Second)
